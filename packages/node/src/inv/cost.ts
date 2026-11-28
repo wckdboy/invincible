@@ -1,4 +1,4 @@
-import { type ActionView, boundWord, costOf, moneyPrices, plainLine, type ProjectView, type TeamSnapshot, type TeamTask, type UsageLine, type UsageView, moneyLabel } from "@invincible/core";
+import { type ActionView, AT_MOST_NOTE, boundWord, costOf, moneyPrices, plainLine, type ProjectView, spendLineLabel, type TeamSnapshot, type TeamTask, type UsageLine, type UsageView, moneyLabel } from "@invincible/core";
 import { projectsOfAgents } from "../../../../apps/web/src/lib/work.ts";
 import { CliError, EXIT, usageError } from "./exit.ts";
 import { type Command, resolveTask } from "./io.ts";
@@ -9,7 +9,9 @@ import { rowOf } from "./work.ts";
  * inv cost (docs/CLI.md): what the work cost at your prices, against its budgets. This node's model calls, as it counts
  * them by its UTC day (a coding plan's calls cost nothing: they're paid for already), and each task's spend as its runner
  * recorded it when it ended, beside its budget. A model with no price of yours makes a sum a lower bound, and says so; a
- * handed task's call counted at its most (its provider silent in time) makes it an upper bound, and says so.
+ * handed task's call counted at its most (its provider silent in time) makes it an upper bound, and says so. With
+ * --task, the task's lines as its record kept them, a line each role and model beneath its row; the JSON's rows carry
+ * them as kept (`spent`, null where a task has no record yet).
  */
 
 const DAY_MS = 86_400_000;
@@ -68,6 +70,7 @@ export const costCommand: Command = async (conn, args, flags, io) => {
         complete: cost ? cost.complete && !cost.unpriced.length : false,
         atMost: cost?.atMost ?? false,
         budgetUsd: task.budgetUsd ?? null,
+        spent: task.record ? (task.record.spent as readonly UsageLine[]) : null,
         word: rowOf(task, snapshot, actions, projects, now).row.word,
         at: task.record?.endedAt ?? task.updatedAt,
       };
@@ -88,9 +91,10 @@ export const costCommand: Command = async (conn, args, flags, io) => {
   for (const row of rows) {
     const spent = row.usd === null ? (row.budgetUsd !== null ? `budget ${moneyLabel(row.budgetUsd)}` : "not ended") : `${money({ usd: row.usd, complete: row.complete, atMost: row.atMost })}${row.budgetUsd !== null ? ` of ${moneyLabel(row.budgetUsd)}` : ""}`;
     lines.push(`  ${spent.padEnd(18)}  ${paint(style, "neutral", row.word.padEnd(16))}  ${row.agent}  ${row.title}  ${faint(style, row.id)}`);
+    if (flags.task) for (const line of row.spent ?? []) lines.push(`    ${spendLineLabel(line, prices)}`);
   }
   if (!calls.complete || !total.complete) lines.push(faint(style, "At least: a model that answered has no price of yours, or a call said nothing of its tokens (invincible price set gives one)."));
-  if (calls.atMost || total.atMost) lines.push(faint(style, "At most: a handed task's call was counted at its most, its provider silent in time: every byte a token, or the most it allowed itself."));
+  if (calls.atMost || total.atMost) lines.push(faint(style, AT_MOST_NOTE));
   io.out(`${lines.filter((line, i) => line || i < lines.length - 1).join("\n")}\n`);
   return EXIT.ok;
 };

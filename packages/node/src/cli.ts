@@ -112,6 +112,9 @@ of its own; "agents" and "team" are the same command)
                                     the gates, the review; --follow keeps reading until the task has ended; --json:
                                     each line as kept, one JSON object a line, a command's with outputChars (the
                                     length of all the run showed the model of it)
+  agents spent <task-id> [--json]   what a task's model calls came to, as its record kept them: a line each role and
+                                    model (tokens, calls, those counted at their most) and its money at your prices;
+                                    --json: each line as kept, one JSON object a line
   agents provision <id> [--on node] [--cpus 1 --mem 2 --disk 20] [--network online|gateway] [--no-desktop|--hardware]
                                     its VM: online (the default) it can reach the internet, gateway only the models;
                                     with a desktop (a display, a browser, a terminal and an editor, at least 4 GB; in

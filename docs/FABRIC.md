@@ -136,13 +136,14 @@ transport keys carries all of it:
      its answer is generated, before its usage comes, is read on for it for a few seconds, never in the middle of an
      answer, whose provider would go on generating what no one reads. A call still counted at its most is marked so on
      its record's line (`atMost`, how many such calls), and every surface says its tokens and money as an upper bound:
-     "at most $0.30", or "about" beside a call that reported nothing. What its budget can't count is taken out of a
-     call where the call means the same without it (R5-4): the providers' own tools, billed per use or run by another
-     model, a fallback to another model, and a dearer speed or tier. Codex, which declares OpenAI's web search in every
-     call, goes on without it. A background response, chat's web search, a tool_choice for a tool taken out and US-only
-     inference are refused. Every held call is sent as it was read. Nor is this: a command can start a coding tool
-     itself on that tool's own sign-in in the VM, if it has one, which no lease reaches (a task's own VM starts with an
-     empty HOME, so it has none).
+     "at most $0.30", or "about" beside a call that reported nothing. Its lines, as its record kept them, are read with
+     `invincible agents spent <task>` (`--json`: each as kept) and `inv cost --task <id>`. What its budget can't count
+     is taken out of a call where the call means the same without it (R5-4): the providers' own tools, billed per use or
+     run by another model, a fallback to another model, and a dearer speed or tier. Codex, which declares OpenAI's web
+     search in every call, goes on without it. A background response, chat's web search, a tool_choice for a tool taken
+     out and US-only inference are refused. Every held call is sent as it was read. Nor is this: a command can start a
+     coding tool itself on that tool's own sign-in in the VM, if it has one, which no lease reaches (a task's own VM
+     starts with an empty HOME, so it has none).
    - **Beyond it, or with no grant,** the task waits on the runner as a proposal, for your approval there: it says
      `{kind: "proposed", task, agent, why}`, and is taken once you approve it. Its own agent never approves it.
    - **Either way** the task is the giving node's (`givenBy: node:<id>`), never yours, and at most 8 tasks from one node

@@ -1,4 +1,4 @@
-import { beginsByKind, KIND_WORDS, moneyPrices, routingReport, type RoutingReport, type RoutingTally, capLabel, TEAM_LIMITS, interventionWords, agentFromFile, agentToFile, plainLine, plainText, type Prices, type TeamChangesView, type TeamFilesView, type TeamFileView, type RouteName, taskRecordFacts, type TeamModelChoice, type TeamSnapshot, type TeamTrailEntry, type TeamRoomView, type TeamRoom, type TeamTask, type Agent, type TeamCheckpoint, mergeRepository } from "@invincible/core";
+import { AT_MOST_NOTE, beginsByKind, KIND_WORDS, moneyLabel, moneyPrices, routingReport, spendLabel, spendLineLabel, type RoutingReport, type RoutingTally, capLabel, TEAM_LIMITS, interventionWords, agentFromFile, agentToFile, plainLine, plainText, type Prices, type TeamChangesView, type TeamFilesView, type TeamFileView, type RouteName, taskRecordFacts, type TeamModelChoice, type TeamSnapshot, type TeamTrailEntry, type TeamRoomView, type TeamRoom, type TeamTask, type Agent, type TeamCheckpoint, mergeRepository } from "@invincible/core";
 import { MARK_PALETTE } from "@invincible/core/agent-mark";
 import { GLASS_RAMPS, GLASS_SHAPES, glassOf, readGlassProfile } from "@invincible/core/glass";
 
@@ -59,7 +59,7 @@ export const taskChangesLine = (task: Pick<TeamTask, "changes">): string => (tas
  */
 const yourMoney = (api: Api): Promise<Prices> => api.call<{ prices: Prices; plans?: string[] }>("prices").then((answer) => moneyPrices(answer.prices, answer.plans ?? []), (): Prices => ({}));
 
-const usage = "invincible agents [add <id> | avatar <id> | models <id> [provider/model…] | sensitive <id> [on|off] [provider/model…] | dm <id> [message] | room <name> <member…> | chat <room> [message] | task <room> <assignee> <goal> [--sensitive] [--models provider/model,…] | steps <task-id> | again <task-id> [--from <step>] [goal] | keys <id> [add <secret> [--write] | rm <secret>] | export <id> [--out file.md] | import <file.md> [--id <new id>] [-y] | give <goal> | trail <task-id> [--follow] [--json] | routing [<id>] [--since <day or time>] [--json] | provision <id> | memory <id> [text] | engram [on|off] | ci [on|off] | daily [<usd>] | merge <owner/repo> [on|off] | pause|resume|stop <room|agent|task> <id> | approve|decline <task-id> | remove <id> [--destroy-workspace] [--yes]]";
+const usage = "invincible agents [add <id> | avatar <id> | models <id> [provider/model…] | sensitive <id> [on|off] [provider/model…] | dm <id> [message] | room <name> <member…> | chat <room> [message] | task <room> <assignee> <goal> [--sensitive] [--models provider/model,…] | steps <task-id> | again <task-id> [--from <step>] [goal] | keys <id> [add <secret> [--write] | rm <secret>] | export <id> [--out file.md] | import <file.md> [--id <new id>] [-y] | give <goal> | trail <task-id> [--follow] [--json] | spent <task-id> [--json] | routing [<id>] [--since <day or time>] [--json] | provision <id> | memory <id> [text] | engram [on|off] | ci [on|off] | daily [<usd>] | merge <owner/repo> [on|off] | pause|resume|stop <room|agent|task> <id> | approve|decline <task-id> | remove <id> [--destroy-workspace] [--yes]]";
 
 /** Where a group of tasks' work began, in words (core's routingReport keys); one this CLI doesn't know, as it is. */
 const BEGAN_WORDS: Readonly<Record<string, string>> = {
@@ -382,6 +382,25 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
       if (!flags.follow) { if (!flags.json) print(`(still ${page.task.status}: invincible agents trail ${page.task.id} --follow)`); return; }
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
+  }
+  if (sub === "spent") {
+    // What a task's model calls came to, as its record kept them when it ended: a line each role and model, then in
+    // all, at your prices as the node's own money is (moneyPrices). `--json`: each line as it was kept (core's
+    // UsageLine), one JSON object a line, and nothing else, for a script; money is your prices', not the record's.
+    if (!args[0]) throw new Error("usage: invincible agents spent <task-id> [--json]");
+    const task = (await api.call<TeamSnapshot>("team")).tasks.find((t) => t.id === args[0]);
+    if (!task) throw new Error(`no task ${args[0]}`);
+    // (None yet is said, and fails: a script can't take it for a task that called no model.)
+    if (!task.record) throw new Error(`${task.id} has no record of its model calls (${task.status}): one is kept when a task that ran ends`);
+    const lines = task.record.spent;
+    if (flags.json) { for (const line of lines) print(JSON.stringify(line)); return; }
+    if (!lines.length) { print(`${task.id} called no model.`); return; }
+    const prices = await yourMoney(api);
+    print(`${task.id}'s model calls, as its record kept them, at your prices (a coding plan's calls are paid for already):`);
+    for (const line of lines) print(`  ${spendLineLabel(line, prices)}`);
+    if (lines.length > 1) print(`  In all · ${spendLabel(lines, prices, moneyLabel)}`);
+    if (lines.some((line) => (line.atMost ?? 0) > 0)) print(AT_MOST_NOTE);
+    return;
   }
   if (sub === "routing") {
     // No agent: the team's routing, from the node's own finished tasks (core's routingReport), read-only: the team and

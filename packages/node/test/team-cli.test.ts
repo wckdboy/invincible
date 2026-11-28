@@ -519,6 +519,37 @@ test("`agents trail <task> --json`: each line as kept, one JSON object a line, a
   expect([said.length, said.join("\n").includes("8000")]).toEqual([2, false]);
 });
 
+test("`agents spent <task>`: its spend as its record kept it, a line each role and model at your prices, then in all; --json: each line as kept, one JSON object a line", async () => {
+  // Ultra's first hand-off (28 November 2026), its coding tool's two calls counted at their most.
+  const spent = [
+    { role: "planner", model: "deepseek/deepseek-v4-pro", calls: 1, unknown: 0, input: 1323, output: 979, cached: 0, reasoning: 612 },
+    { role: "tool", model: "deepseek/deepseek-v4-pro", calls: 2, unknown: 0, input: 44_300, output: 57_300, cached: 0, reasoning: 0, atMost: 2 },
+    { role: "reviewer", model: "deepseek/deepseek-v4-pro", calls: 1, unknown: 0, input: 1586, output: 1701, cached: 0, reasoning: 1203 },
+  ];
+  const task = (id: string, over: object) => ({ id, room: "forge", assignee: "ada", title: "Write hello.txt", goal: "g", dependsOn: [], gates: [], status: "done", verified: true, progress: "", output: "", error: null, chainId: "c", createdAt: 1, updatedAt: 2, ...over });
+  const state = { agents: [member("ada")], rooms: [], deliveries: [], tasks: [
+    task("task-handed000001", { record: { startedAt: 0, endedAt: 49_000, ended: "done", commands: 1, revisions: 0, spent } }),
+    task("task-running0001", { status: "running", verified: false }),
+  ] };
+  const api = { async call<T>(name: RouteName): Promise<T> { return (name === "prices" ? { prices: { "deepseek/deepseek-v4-pro": { input: 1.32, output: 3.96, cached: 0.044 } } } : state) as T; } };
+  expect(await printed(api, "spent", ["task-handed000001"])).toEqual([
+    "task-handed000001's model calls, as its record kept them, at your prices (a coding plan's calls are paid for already):",
+    "  planner · deepseek/deepseek-v4-pro · 1,323 tokens in, 979 out (612 reasoning) · 1 call · $0.0056",
+    "  tool · deepseek/deepseek-v4-pro · at most 44.3k tokens in, 57.3k out · 2 calls, 2 counted at their most · at most $0.29",
+    "  reviewer · deepseek/deepseek-v4-pro · 1,586 tokens in, 1,701 out (1,203 reasoning) · 1 call · $0.0088",
+    "  In all · at most 47.2k tokens in, 60.0k out (1,815 reasoning) · 4 calls, 2 counted at their most · at most $0.30",
+    "At most: a handed task's call was counted at its most, its provider silent in time: every byte a token, or the most it allowed itself.",
+  ]);
+  // --json: nothing but the lines as they were kept, for a script (no money: that's your prices', not the record's).
+  const json: string[] = [];
+  await teamCommand(api, "spent", ["task-handed000001"], { json: true }, (line) => json.push(line));
+  expect(json.map((line) => JSON.parse(line))).toEqual(spent);
+  // One with no record yet says so, and fails: a script can't take it for a task that called no model.
+  await expect(printed(api, "spent", ["task-running0001"])).rejects.toThrow("task-running0001 has no record of its model calls (running): one is kept when a task that ran ends");
+  await expect(printed(api, "spent", ["task-nowhere"])).rejects.toThrow("no task task-nowhere");
+  await expect(printed(api, "spent", [])).rejects.toThrow("usage: invincible agents spent <task-id> [--json]");
+});
+
 test("agents give puts a task to the agents: it says who takes it and why, then how the others stood", async () => {
   const lines: string[] = [];
   const asked: { name: RouteName; input: unknown }[] = [];

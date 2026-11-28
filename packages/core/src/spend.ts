@@ -243,3 +243,14 @@ export function spendLabel(lines: readonly UsageLine[], prices?: Prices, money: 
   }
   return parts.join(" · ");
 }
+
+/**
+ * One line of a record's spend, as `invincible agents spent` and `inv cost --task` say it: its role and model, then
+ * spendLabel's tokens, calls and money (moneyLabel's, as it is shown).
+ */
+export function spendLineLabel(line: UsageLine, prices: Prices): string {
+  return `${line.role} · ${line.model} · ${spendLabel([line], prices, moneyLabel)}`;
+}
+
+/** Why a figure is at most, in a sentence beneath it (`inv cost`, `invincible agents spent`). */
+export const AT_MOST_NOTE = "At most: a handed task's call was counted at its most, its provider silent in time: every byte a token, or the most it allowed itself.";

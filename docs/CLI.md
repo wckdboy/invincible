@@ -63,7 +63,7 @@ Every command that prints a list or a result takes `--json`.
 | `inv asks` | What waits for your approval: each operation exactly, in mono, with any character you can't see made visible. |
 | `inv allow <id> [--for-task]` | Allows one. `--for-task` also answers that agent's same call, exactly, without asking again, for a day (below). A task that an agent proposed is allowed to start. |
 | `inv deny <id> ["why"]` | Denies one, with your reason. A task an agent proposed is declined. |
-| `inv cost` | What the work cost, at your prices, against its budgets: today's and this node's model calls, and the tasks. `--task <id>`, `--agent <id>` or `--project <p>` narrows it. `--week` takes the last seven days. |
+| `inv cost` | What the work cost, at your prices, against its budgets: today's and this node's model calls, and the tasks. `--task <id>`, `--agent <id>` or `--project <p>` narrows it. `--week` takes the last seven days. With `--task`, beneath its row, its calls as its record kept them: a line each role and model, with its tokens, its calls (those counted at their most among them) and its money. |
 | `inv pair [<invite>] [--name <name>] [--forget]` | Pairs with a node, says what it is paired with, or forgets the pairing. |
 | `inv seats` | Your seats: the accounts you hold with Claude, ChatGPT, Google and others, where each stands, and whom it serves (after its id: "Serves ada", "Shared by ada and bo: one trust domain", "Serves no agent yet", or "Serves no agent now" once the one it served was removed). Under a seat, its meter: each window still open ("Five hours: 42% used, resets 14:00 UTC") and its use lately ("3 tasks this week · 1.20M tokens · 1 running now"); under a ChatGPT plan, where ChatGPT counts its use (Settings → Usage). After them, a seat of a kind this version doesn't know, a later release's: its name, "A kind this version doesn't know (update this node to see how it stands)", and its id. |
 | `inv seat add <claude\|chatgpt\|gemini> ["label"] [--email <address>] [--agent <agent>]` | Adds one, named as you say or after those you have ("Claude 2"), and signs it in on its vendor's own page. ChatGPT's: its page to open and the code to enter there. Claude's: its page to open, then the code that page shows, pasted here (in a terminal; never with `--no-ask`), which goes to its sign-in once. A Gemini plan's (Google AI Pro or Ultra, through Antigravity): first the risk Google's terms put on your account, then Google's page to open, and the code the page after it shows, pasted here the same way. `--email` is the account Claude's sign-in starts on, sealed in the vault. `--agent` is the agent of its node's it serves; without one, it serves none until you choose. It waits until the sign-in has ended. |
@@ -151,9 +151,11 @@ Errors go to stderr as `inv: <what went wrong>`. With `--json` or `--stream`, st
   seat add`, `inv seat sign-in`:** `{"card"}` (the sign-in's card), then `{"seat", "state"}` once it has ended. **`inv
   seat serve`, `inv seat share`:** `{"seat"}`. **`inv seat remove`:** `{"removed"}`.
 - **`inv cost`:** `{"since", "today": {"usd", "complete", "atMost"}, "calls": {"usd", "complete", "atMost"}, "tasks":
-  [{"id", "title", "agent", "project", "usd", "complete", "atMost", "budgetUsd"}], "total": {"usd", "complete", "atMost"}}`.
-  `atMost`: some call was counted at its most (a handed task's, its provider silent in time), so `usd` is an upper
-  bound for it; `complete` false, a lower bound; both, neither.
+  [{"id", "title", "agent", "project", "usd", "complete", "atMost", "budgetUsd", "spent"}], "total": {"usd", "complete",
+  "atMost"}}`. `atMost`: some call was counted at its most (a handed task's, its provider silent in time), so `usd` is
+  an upper bound for it; `complete` false, a lower bound; both, neither. `spent`: the task's lines as its record kept
+  them (`[{"role", "model", "calls", "unknown", "input", "output", "cached", "reasoning", "atMost"?}]`, `atMost` how
+  many of `calls` were counted at their most, absent where none), or null where it has no record yet.
 - **`inv "…"`:** `{"chat", "turn", "model", "text", "stopped"}`.
 - **`inv pair`:** `{"node", "fleet", "device", "name", "paired"}`.
 
