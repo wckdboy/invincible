@@ -46,6 +46,8 @@ struct HomeList: View {
     @State private var query = ""
     @State private var history = ChatHistory()
     @State private var creating = false
+    /// Its search field open (an iPhone's: opened from the head's search, as Grok Bot's).
+    @State private var searchOpen = false
 
     /// A face's size in its row.
     static let face: CGFloat = 44
@@ -55,9 +57,9 @@ struct HomeList: View {
         let rows = Home.filter(rows, query: query)
         let chats = searching ? Chats.filter(history.chats ?? [], query: query) : []
         container {
-            if ownHead {
-                // Its search, at the top of the list, scrolling away with it.
-                HomeSearchField(text: $query)
+            if ownHead && (searchOpen || !query.isEmpty) {
+                // Its search, opened from the head, at the top of the list; Cancel puts it away.
+                HomeSearchField(text: $query) { query = ""; searchOpen = false }
                     .padding(EdgeInsets(top: Space.s1, leading: Metrics.margin, bottom: Space.s2, trailing: Metrics.margin))
             }
             ForEach(rows) { row in
@@ -80,7 +82,7 @@ struct HomeList: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) { if saysLink { link } }
         .navigationTitle("Invincible")
-        .modifier(HomeBar(own: ownHead, query: $query, settings: settings) { newMenu })
+        .modifier(HomeBar(own: ownHead, query: $query, settings: settings, search: { searchOpen = true }) { newMenu })
         // Your chats are read only once you search them: nothing more is asked at rest.
         .task(id: searching) { if searching && history.chats == nil { await history.load(session) } }
         .sheet(isPresented: $creating) { AgentEditor(session: session) { open(.agent($0.id)) } }
@@ -193,13 +195,14 @@ private struct HomeBar<New: View>: ViewModifier {
     let own: Bool
     @Binding var query: String
     let settings: () -> Void
+    let search: () -> Void
     @ViewBuilder let new: New
 
     func body(content: Content) -> some View {
         if own {
             content
                 .toolbar(.hidden, for: .navigationBar)
-                .safeAreaBar(edge: .top) { HomeHead(settings: settings) { new } }
+                .safeAreaBar(edge: .top) { HomeHead(settings: settings, search: search) { new } }
         } else {
             content
                 .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search")
@@ -225,6 +228,8 @@ private struct HomeBar<New: View>: ViewModifier {
 /// main thread's time); Work's own head was measured the same way (1.7 ms a second where the system's bar cost 10 to 14).
 struct HomeHead<New: View>: View {
     let settings: () -> Void
+    /// Opens the search field over the list (Grok Bot's: search is a button until it is wanted).
+    let search: () -> Void
     @ViewBuilder let new: New
 
     var body: some View {
@@ -239,11 +244,17 @@ struct HomeHead<New: View>: View {
                     .accessibilityLabel("Settings")
                     .accessibilityIdentifier("home.settings")
                 Spacer(minLength: Space.s2)
-                Menu { new } label: { glyph("plus") }
-                    .menuIndicator(.hidden)
-                    .glassEffect(.regular.interactive(), in: .circle)
-                    .accessibilityLabel("New")
-                    .accessibilityIdentifier("home.new")
+                // Search and +, a pair on one glass, as the system bar pairs its items.
+                HStack(spacing: 0) {
+                    Button(action: search) { glyph("magnifyingglass") }
+                        .accessibilityLabel("Search")
+                        .accessibilityIdentifier("home.search.open")
+                    Menu { new } label: { glyph("plus") }
+                        .menuIndicator(.hidden)
+                        .accessibilityLabel("New")
+                        .accessibilityIdentifier("home.new")
+                }
+                .glassEffect(.regular.interactive(), in: .capsule)
             }
         }
         .buttonStyle(.plain)
@@ -262,28 +273,38 @@ struct HomeHead<New: View>: View {
     }
 }
 
-/// Home's search, a field at the top of its list (an iPhone's, whose own head has no search drawer): it finds your agents,
-/// your rooms and your chats by their words.
+/// Home's search, a field at the top of its list once the head's search opens it (an iPhone's, whose own head has no search
+/// drawer), with the keyboard up: it finds your agents, your rooms and your chats by their words. Cancel empties it and
+/// puts it away.
 private struct HomeSearchField: View {
     @Binding var text: String
+    let close: () -> Void
+    @FocusState private var typing: Bool
 
     var body: some View {
-        HStack(spacing: Space.s2) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Search", text: $text)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.search)
-                .accessibilityIdentifier("home.search")
-            if !text.isEmpty {
-                Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Clear")
+        HStack(spacing: Space.s3) {
+            HStack(spacing: Space.s2) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search", text: $text)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                    .focused($typing)
+                    .accessibilityIdentifier("home.search")
+                if !text.isEmpty {
+                    Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear")
+                }
             }
+            .padding(.horizontal, Space.s3)
+            .frame(minHeight: 36)
+            .background(.fill.tertiary, in: .capsule)
+            Button("Cancel", action: close)
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("home.search.cancel")
         }
-        .padding(.horizontal, Space.s3)
-        .frame(minHeight: 36)
-        .background(.fill.tertiary, in: .capsule)
+        .onAppear { typing = true }
     }
 }
 

@@ -59,8 +59,10 @@ final class ShotsTests: XCTestCase {
             try home(app, look, node)
             settle(3)
             shot("01-home", look)
-            // Its search (an iPhone's a field at the top of the list, an iPad's pulled down): the agents and your chats that
-            // say its words.
+            // Its search (an iPhone's opened from its head's search, a field at the top of the list; an iPad's pulled down):
+            // the agents and your chats that say its words.
+            let opener = app.buttons["home.search.open"]
+            if opener.exists { opener.tap() }
             let field = app.textFields["home.search"]
             let search = field.exists ? field : app.searchFields.firstMatch
             if !(search.exists && search.isHittable) { app.homeRow("home.primary").swipeDown() }
