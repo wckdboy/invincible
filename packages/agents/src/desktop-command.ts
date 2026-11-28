@@ -8,7 +8,7 @@
 
 /** The verbs a held session runs: every one that needs neither the shell's environment nor its directory. */
 const DIRECT = new Set([
-  "start", "status", "open", "text", "app", "click", "move", "drag", "scroll", "type", "key", "settle", "windows", "focus", "dialog", "tree", "find",
+  "start", "status", "open", "text", "app", "click", "move", "drag", "scroll", "type", "key", "settle", "windows", "focus", "dialog", "tree", "find", "fill",
   "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "mouse_move",
   "left_mouse_down", "left_mouse_up", "cursor_position", "hold_key", "wait", "screenshot", "shot", "zoom",
 ]);
@@ -16,12 +16,12 @@ const DIRECT = new Set([
 const WRITES = new Set(["shot", "screenshot", "zoom"]);
 
 /**
- * Whether a command acts on the desktop: runs a `desktop` verb that changes what is on it (opens, clicks, types, keys,
- * scrolls, moves, drags, starts an app, answers a dialog), anywhere a command may begin in it. Looking (text, tree,
- * find, a screenshot, a look) isn't acting. Work that acted on the desktop is proven by a gate (C1 step 8).
+ * Whether a command acts on the desktop: runs a `desktop` verb that changes what is on it (opens, clicks, types, fills,
+ * keys, scrolls, moves, drags, starts an app, answers a dialog), anywhere a command may begin in it. Looking (text,
+ * tree, find, a screenshot, a look) isn't acting. Work that acted on the desktop is proven by a gate (C1 step 8).
  */
 export function actsOnDesktop(command: string): boolean {
-  return /(^|[;&|(\n]\s*|\$\(\s*|`\s*)desktop\s+(open|click|type|key|scroll|move|drag|app|dialog|left_click|right_click|middle_click|double_click|triple_click|left_click_drag|mouse_move|left_mouse_down|left_mouse_up|hold_key)\b/.test(command);
+  return /(^|[;&|(\n]\s*|\$\(\s*|`\s*)desktop\s+(open|click|type|fill|key|scroll|move|drag|app|dialog|left_click|right_click|middle_click|double_click|triple_click|left_click_drag|mouse_move|left_mouse_down|left_mouse_up|hold_key)\b/.test(command);
 }
 
 /** How an agent with eyes is told it may ask them, after the tree (desktopBriefing's `looking`). */

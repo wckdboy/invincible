@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { desktopArgv, desktopBriefing, plainWords } from "../src/desktop-command.ts";
+import { actsOnDesktop, desktopArgv, desktopBriefing, plainWords } from "../src/desktop-command.ts";
 
 /*
  * Which of an agent's commands its VM's held desktop session runs (no login shell, a few milliseconds) and which stay
@@ -22,6 +22,14 @@ test("a plain desktop command is its words, quoted as a shell quotes them", () =
   expect(desktopArgv("desktop find 'check box' 'I accept the terms'")).toEqual(["find", "check box", "I accept the terms"]);
   expect(desktopArgv("desktop tree")).toEqual(["tree"]);
   expect(desktopArgv("desktop click ref=12")).toEqual(["click", "ref=12"]);
+  // A form in one command (C1, fewer model calls an action).
+  expect(desktopArgv(`desktop fill "Full name" 'Søren Ærø' ref=13 soren@example.test Plan Team`)).toEqual(["fill", "Full name", "Søren Ærø", "ref=13", "soren@example.test", "Plan", "Team"]);
+});
+
+test("filling a form acts on the desktop, as typing into it does: its batch is pictured before and after, and a gate proves it", () => {
+  expect(actsOnDesktop("desktop fill ref=12 'Søren Ærø'")).toBe(true);
+  expect(actsOnDesktop("desktop tree && desktop fill Email soren@example.test")).toBe(true);
+  expect(actsOnDesktop("desktop tree")).toBe(false);
 });
 
 test("whatever a shell would read differently stays a shell command", () => {

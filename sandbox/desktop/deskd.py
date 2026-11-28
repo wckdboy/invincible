@@ -878,6 +878,15 @@ NUMBERS_KEPT = 4000
 HOLDS_TEXT = {"entry", "text", "spin button"}
 HOLDS_CHOICE = {"combo box"}
 HELD_SAID = 80
+# The fields `desktop fill` fills, by role: text typed in place of what it held, an option chosen, a box ticked or
+# not, a radio button chosen. What says on and off.
+FILL_TEXT = {"entry", "password text", "spin button", "text"}
+FILL_CHECK = {"check box", "check menu item", "switch", "toggle button"}
+FILL_RADIO = {"radio button", "radio menu item"}
+FILLED = FILL_TEXT | HOLDS_CHOICE | FILL_CHECK | FILL_RADIO
+SAYS_ON, SAYS_OFF = {"on", "yes", "true", "checked", "1"}, {"off", "no", "false", "unchecked", "0"}
+FILL_OPTIONS = 500  # a combo box's options looked through, at most
+FILL_BOUND = 1.0  # how long what a field holds is waited for, read again every 50 ms, once its action has answered
 ACTABLE = {"check box", "check menu item", "combo box", "entry", "link", "list item", "menu", "menu item", "page tab",
            "password text", "push button", "push button menu", "radio button", "radio menu item", "slider", "spin button",
            "switch", "toggle button", "tree item", "text"}
@@ -1125,6 +1134,29 @@ class Tree:
         except Failed:
             pass
         return node.get("holds")
+
+    def again(self, ref):
+        """A node said before as it is now: its states and what it holds read again, and where it is (at)."""
+        node, box = self.at(ref)
+        with self.lock:
+            now = self.node((node["bus"], node["path"]), node["app"], node.get("window"))
+            self.held(now)
+            self.refs[ref] = now
+        return now, box
+
+    def options(self, node):
+        """A combo box's options, as its menu has them: each item, and where it is on the screen (None: not shown)."""
+        b, p = node["bus"], node["path"]
+        with self.lock:
+            (kids,) = self.call(b, p, ACC, "GetChildren")
+            for kb, kp in kids[:4]:
+                menu = self._try(self.node, (kb or b, kp), node["app"], node.get("window"))
+                if not menu or menu["role"] not in ("menu", "list box", "list"):
+                    continue
+                (items,) = self.call(menu["bus"], menu["path"], ACC, "GetChildren")
+                found = self._many(lambda r: self._try(self.node, (r[0] or menu["bus"], r[1]), node["app"], node.get("window")), list(items[:FILL_OPTIONS]))
+                return [(n, self._on_screen(n)) for n in found if n]
+        return []
 
     def number(self, node):
         """A node's ref: the one it was given before, while it is the same node on the bus; else the next not given. A
@@ -2040,6 +2072,9 @@ desktop tree [app]                 what can be acted on in the window with the f
                                    accessibility tree: each with a ref, its role, its name and where it is
 desktop find <role> <name>         where one is: x,y and its ref (desktop find button "Send")
 desktop click ref=<n> [button]     click a node desktop tree or find gave, where it is at that moment
+desktop fill <field> <value>...    a form in one command: each field (ref=<n>, or its name as the tree says it)
+                                   given its text, its option (a combo box) or on|off (a check box), read back
+                                   before the next; the first that doesn't hold it stops it. It never sends the form
 Every action answers with what it did, whether the screen changed, and the focus; the names Anthropic's computer
 toolset uses work too (left_click, mouse_move, left_click_drag, ...).
 The display is 1280 by 800; x runs right from 0, y runs down from 0. The clipboard is xclip's
@@ -2205,6 +2240,8 @@ def cli(desk, argv, cwd="/work", env=None):
                     space = args[1]
                 args = args[2:]
             return look(desk, " ".join(args), env, eyes, space)
+        if verb == "fill":
+            return fill(desk, args)
         if verb == "tree":
             pid, title = desk.focused_app()
             said = desk.tree.actable(app=" ".join(args) or None, pid=pid, title=title)
@@ -2360,6 +2397,146 @@ def in_pixels(said, space):
     if not n:
         return said
     return put + ("\n(Its places, in its own 0 to 1000, are given here in the screen's pixels.)" if space == "per-mille" else "\n(Its places, in a frame of its own, are given here in the screen's pixels.)")
+
+
+def fill(desk, args):
+    """`desktop fill <field> <value> ...`: a form filled in one command (C1, fewer model calls an action). Each field
+    is ref=N or its name as the tree says it (the window with the focus): every one found and its value checked before
+    anything is done. Then each in turn, as a person does it: a text field clicked, what it held selected and typed
+    over; a combo box opened and the option of that name clicked where it shows; a check box clicked to on or off; a
+    radio button clicked to on. Each is read back from the tree before the next, and the first that doesn't hold what
+    it was given stops it, saying what it holds; so does a dialog, a page that loads, or the owner's taking the desktop
+    over. Nothing after it is done. Never Return, never a button: sending the form is a command of its own."""
+    if not args or len(args) % 2:
+        raise Refused('fill takes each field and its value: desktop fill "Full name" "Ada Lovelace" ref=13 ada@example.test')
+    pid, title = desk.focused_app()
+    shown = None
+    plan = []
+    for i in range(0, len(args), 2):
+        field, value = args[i], args[i + 1]
+        if field.startswith("ref="):
+            ref = _whole(field[4:], "ref=")
+            node, _ = desk.tree.at(ref)
+        else:
+            if shown is None:
+                shown = [(r, n) for r, n, _ in desk.tree.actable(pid=pid, title=title)]
+            ref, node = _named_field(shown, field)
+        if node["role"] not in FILLED:
+            raise Refused("ref=%d %s \"%s\" isn't a field: fill takes text fields, combo boxes, check boxes and radio buttons "
+                          "(a button is clicked: desktop click ref=%d)" % (ref, node["role"], node["name"][:80], ref))
+        on = value.strip().lower()
+        if node["role"] in FILL_CHECK and on not in SAYS_ON | SAYS_OFF:
+            raise Refused("ref=%d %s \"%s\" takes on or off, not %s" % (ref, node["role"], node["name"][:80], json.dumps(value, ensure_ascii=False)))
+        if node["role"] in FILL_RADIO and on not in SAYS_ON:
+            raise Refused("ref=%d %s \"%s\" takes on (a radio button is turned off by choosing another)" % (ref, node["role"], node["name"][:80]))
+        plan.append((field, ref, value))
+    lines = []
+    for field, ref, value in plan:
+        h = desk.holding()
+        if h:
+            return HELD_EXIT, "".join(lines), "desktop: %s: the fields from %s on weren't filled; do something else meanwhile, and try again after\n" % (desk.held_said(h), field)
+        try:
+            said = _fill_one(desk, ref, value)
+        except Stop as stop:
+            return 1, "".join(lines), "desktop: %s: the fields after it weren't filled\n" % stop
+        except Failed as error:
+            return 1, "".join(lines), "desktop: ref=%d: %s: the fields after it weren't filled\n" % (ref, error)
+        lines.append(said + "\n")
+    return 0, "".join(lines), ""
+
+
+class Stop(Exception):
+    """A field that doesn't hold what it was given: fill stops there."""
+
+
+def _named_field(shown, name):
+    """The field a name means, among those shown: the one named so (any case), else the one whose name has it; one
+    alone, or none. Refused, with what there is, when it can't say."""
+    want = name.strip().lower()
+    fields = [(r, n) for r, n in shown if n["role"] in FILLED]
+    chosen = [(r, n) for r, n in fields if n["name"].strip().lower() == want] or [(r, n) for r, n in fields if want and want in n["name"].lower()]
+    if len(chosen) == 1:
+        return chosen[0]
+    if chosen:
+        raise Refused("more than one field is named like %s: %s; give its ref" % (json.dumps(name, ensure_ascii=False), ", ".join('ref=%d %s "%s"' % (r, n["role"], n["name"][:80]) for r, n in chosen)))
+    other = [(r, n) for r, n in shown if n["name"].strip().lower() == want]
+    if other:
+        return other[0]
+    raise Refused("no field named like %s is in the window with the focus (desktop tree lists them)" % json.dumps(name, ensure_ascii=False))
+
+
+def _fill_one(desk, ref, value):
+    """One field filled, and read back: what it says, or Stop with what it holds."""
+    node, box = desk.tree.again(ref)
+    role, name = node["role"], node["name"][:80]
+    named = 'ref=%d %s "%s"' % (ref, role, name)
+    centre = lambda b: [b[0] + b[2] // 2, b[1] + b[3] // 2]
+    def act(tool, i):
+        answer = desk.tool(tool, i)
+        if answer.get("dialog"):
+            raise Stop("%s: %s" % (named, describe_dialog(answer["dialog"])))
+        if answer.get("navigating"):
+            raise Stop("%s: a page began to load" % named)
+        return answer
+    def until(ok):
+        """The node, read again until `ok` says it holds what it should, FILL_BOUND at most."""
+        deadline = time.monotonic() + FILL_BOUND
+        while True:
+            now, _ = desk.tree.again(ref)
+            if ok(now) or time.monotonic() > deadline:
+                return now
+            time.sleep(0.05)
+    quoted = lambda v: json.dumps(v, ensure_ascii=False)
+    if role in FILL_TEXT:
+        act("left_click", {"coordinate": centre(box)})
+        act("key", {"text": "ctrl+a"})
+        if value:
+            act("type", {"text": value})
+        else:
+            act("key", {"text": "BackSpace"})
+        if role == "password text":
+            return "filled %s (%d characters; a password field isn't read back)" % (named, len(value))
+        now = until(lambda n: n.get("holds") == value)
+        if now.get("holds") != value:
+            raise Stop("%s holds %s, not %s" % (named, quoted(now.get("holds") or ""), quoted(value)))
+        return "filled %s = %s" % (named, quoted(value))
+    if role in HOLDS_CHOICE:
+        want = value.strip().lower()
+        if (node.get("holds") or "").strip().lower() == want:
+            return "chose %s = %s (it held it already)" % (named, quoted(node["holds"]))
+        act("left_click", {"coordinate": centre(box)})
+        desk.settle()
+        options = desk.tree.options(node)
+        pick = [o for o in options if o[0]["name"].strip().lower() == want] or [o for o in options if want and o[0]["name"].strip().lower().startswith(want)]
+        if len(pick) != 1 or pick[0][1] is None:
+            act("key", {"text": "Escape"})
+            if not pick:
+                raise Stop("%s has no option %s (it has %s)" % (named, quoted(value), ", ".join(quoted(o[0]["name"]) for o in options[:20]) or "none"))
+            if len(pick) > 1:
+                raise Stop("%s has more than one option like %s: %s" % (named, quoted(value), ", ".join(quoted(o[0]["name"]) for o in pick[:20])))
+            raise Stop("%s's option %s isn't on the screen: open it and scroll to it, or choose it with its keys" % (named, quoted(pick[0][0]["name"])))
+        item, at = pick[0]
+        act("left_click", {"coordinate": centre(at)})
+        desk.settle()
+        now = until(lambda n: (n.get("holds") or "").strip().lower() == item["name"].strip().lower())
+        if Tree.has(now, "expanded"):
+            act("key", {"text": "Escape"})
+            now, _ = desk.tree.again(ref)
+        if (now.get("holds") or "").strip().lower() != item["name"].strip().lower():
+            raise Stop("%s holds %s, not %s" % (named, quoted(now.get("holds") or ""), quoted(item["name"])))
+        return "chose %s = %s" % (named, quoted(item["name"]))
+    on = value.strip().lower() in SAYS_ON
+    state = lambda n: Tree.has(n, "checked") or Tree.has(n, "pressed")
+    word = "checked" if on else "unchecked"
+    if role in FILL_RADIO:
+        word = "chose"
+    if state(node) == on:
+        return "%s %s (it was already)" % (word, named)
+    act("left_click", {"coordinate": centre(box)})
+    now = until(lambda n: state(n) == on)
+    if state(now) != on:
+        raise Stop("%s is %s, not %s" % (named, "on" if state(now) else "off", "on" if on else "off"))
+    return "%s %s" % (word, named)
 
 
 def look(desk, question, env, eyes="", space=""):

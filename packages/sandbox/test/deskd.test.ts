@@ -1426,6 +1426,156 @@ print(json.dumps({"lines": lines, "found": d.say_node(*found)}, ensure_ascii=Fal
     expect(got.found).toBe('[3] combo box "Plan" = "Team" at 200,292 (200x24) collapsed');
   });
 
+  /**
+   * The bus's form as Chromium works it, for `desktop fill`: the desk's actions done to it. A click on an entry gives
+   * it the focus; ctrl+a, then typing, replaces what it holds; the Plan select opens its options over what is below it,
+   * and a click on one chooses it and closes them; Escape closes them; a click on the check box ticks or unticks it.
+   * `frozen` fields take no typing; the owner takes the desktop over after `hold_after` actions.
+   */
+  const FORM = `
+EXPANDED, SELECTED, CHECKED = 1 << d.STATE["expanded"], 1 << d.STATE["selected"], 1 << d.STATE["checked"]
+TEXTS.clear()
+NODES["/n3m"] = (":1.5", "/n3", "menu", "", VISIBLE, (100, 304, 200, 0))
+OPTIONS = [("/n3a", "Free"), ("/n3b", "Team"), ("/n3c", "Enterprise")]
+for i, (p, name) in enumerate(OPTIONS):
+    NODES[p] = (":1.5", "/n3m", "menu item", name, VISIBLE | (SELECTED if i == 0 else 0), (100, 304 + 24 * i, 200, 0))
+NODES["/n11"] = (":1.5", "/d1", "password text", "Password", ON | EDITABLE, (100, 470, 300, 24))
+def put(path, states=None, box=None):
+    n = NODES[path]
+    NODES[path] = n[:4] + ((n[4] if states is None else states), (n[5] if box is None else box))
+def popup(open):
+    put("/n3", (NODES["/n3"][4] & ~(EXPANDED | COLLAPSED)) | (EXPANDED if open else COLLAPSED))
+    put("/n3m", VISIBLE | (SHOWING if open else 0))
+    for i, (p, _) in enumerate(OPTIONS):
+        put(p, (NODES[p][4] & ~SHOWING) | (ON if open else 0), (100, 304 + 24 * i, 200, 24 if open else 0))
+class FakeDesk:
+    def __init__(self, frozen=(), hold_after=None):
+        self.tree, self.did, self.focus, self.all, self.frozen, self.hold_after, self.hold = t, [], None, False, set(frozen), hold_after, None
+    def focused_app(self):
+        return 300, "Form - Chromium"
+    def holding(self):
+        return self.hold
+    def held_said(self, h):
+        return "the owner took this desktop over 0 s ago"
+    def settle(self, cap=None):
+        self.did.append(["settle"])
+    def under(self, x, y):
+        hit = None
+        for p, n in NODES.items():
+            bx, by, bw, bh = n[5]
+            if n[4] & SHOWING and bw > 0 and bh > 0 and bx <= x < bx + bw and by <= y < by + bh and n[2] not in ("frame", "document web"):
+                hit = p
+        return hit
+    def tool(self, name, i):
+        self.did.append([name, i.get("text", i.get("coordinate"))])
+        if name == "left_click":
+            p = self.under(*i["coordinate"])
+            role = NODES[p][2] if p else None
+            if role in ("entry", "password text"):
+                self.focus, self.all = p, False
+            elif role == "combo box":
+                popup(not NODES[p][4] & EXPANDED)
+            elif role == "menu item":
+                for q, _ in OPTIONS:
+                    put(q, (NODES[q][4] & ~SELECTED) | (SELECTED if q == p else 0))
+                popup(False)
+            elif role == "check box":
+                put(p, NODES[p][4] ^ CHECKED)
+        elif name == "key" and i["text"] == "ctrl+a":
+            self.all = True
+        elif name == "key" and i["text"] == "BackSpace" and self.all and self.focus not in self.frozen:
+            TEXTS[self.focus], self.all = "", False
+        elif name == "key" and i["text"] == "Escape":
+            popup(False)
+        elif name == "type" and self.focus not in self.frozen:
+            TEXTS[self.focus], self.all = ("" if self.all else TEXTS.get(self.focus, "")) + i["text"], False
+        if self.hold_after is not None and len([a for a in self.did if a[0] != "settle"]) >= self.hold_after:
+            self.hold = {"who": "owner"}
+        return {"ok": True, "did": name, "changed": True}
+listed = t.actable(pid=300, title="Form - Chromium")
+def filled(args, **kw):
+    desk = FakeDesk(**kw)
+    try:
+        code, out, err = d.fill(desk, args)
+    except (d.Refused, d.Failed) as e:
+        code, out, err = ("refused" if isinstance(e, d.Refused) else "failed"), "", str(e)
+    return {"code": code, "out": out, "err": err, "did": desk.did, "texts": dict(TEXTS), "plan": [n for p, n in OPTIONS if NODES[p][4] & SELECTED], "terms": bool(NODES["/n4"][4] & CHECKED), "open": bool(NODES["/n3"][4] & EXPANDED)}
+`;
+
+  test("desktop fill: a form in one command, each field by its ref or its name, each read back from the tree before the next; never sent", () => {
+    const got = py(`${BUS}${FORM}
+print(json.dumps(filled(["Name", "Ada Lovelace", "ref=2", "ada@example.test", "plan", "Team", "I agree to the terms", "on", "Password", "fake-pass-0000"]), ensure_ascii=False))`) as Record<string, any>;
+    expect(got.code).toBe(0);
+    expect(got.out.split("\n")).toEqual([
+      'filled ref=1 entry "Name" = "Ada Lovelace"',
+      'filled ref=2 entry "Email" = "ada@example.test"',
+      'chose ref=3 combo box "Plan" = "Team"',
+      'checked ref=4 check box "I agree to the terms"',
+      'filled ref=7 password text "Password" (14 characters; a password field isn\'t read back)',
+      "",
+    ]);
+    expect(got).toMatchObject({ err: "", texts: { "/n1": "Ada Lovelace", "/n2": "ada@example.test", "/n11": "fake-pass-0000" }, plan: ["Team"], terms: true, open: false });
+    // What a person does: each field clicked, its text replaced; the select opened and its option clicked where it
+    // shows. Never Return, never the Send button (130,372): sending is its own command.
+    const did = got.did.filter((a: any[]) => a[0] !== "settle");
+    expect(did).toEqual([
+      ["left_click", [250, 212]], ["key", "ctrl+a"], ["type", "Ada Lovelace"],
+      ["left_click", [250, 252]], ["key", "ctrl+a"], ["type", "ada@example.test"],
+      ["left_click", [200, 292]], ["left_click", [200, 340]],
+      ["left_click", [106, 326]],
+      ["left_click", [250, 482]], ["key", "ctrl+a"], ["type", "fake-pass-0000"],
+    ]);
+    expect(JSON.stringify(got.out + got.err)).not.toContain("fake-pass");
+    // A field that holds it already is left as it is.
+    const again = py(`${BUS}${FORM}
+filled(["Plan", "Team", "I agree to the terms", "on"])
+print(json.dumps(filled(["Plan", "team", "I agree to the terms", "on"])))`) as Record<string, any>;
+    expect(again.out).toBe('chose ref=3 combo box "Plan" = "Team" (it held it already)\nchecked ref=4 check box "I agree to the terms" (it was already)\n');
+    expect(again.did).toEqual([]);
+  });
+
+  test("desktop fill stops at the first field that doesn't hold what it was given, saying what it holds: nothing after it is done", () => {
+    const frozen = py(`${BUS}${FORM}
+print(json.dumps(filled(["Name", "Ada Lovelace", "Email", "ada@example.test", "I agree to the terms", "on"], frozen=["/n2"])))`) as Record<string, any>;
+    expect(frozen.code).toBe(1);
+    expect(frozen.out).toBe('filled ref=1 entry "Name" = "Ada Lovelace"\n');
+    expect(frozen.err).toBe('desktop: ref=2 entry "Email" holds "", not "ada@example.test": the fields after it weren\'t filled\n');
+    expect(frozen.terms).toBe(false);
+    // An option the select hasn't: it is closed again, and said with the options it has.
+    const option = py(`${BUS}${FORM}
+print(json.dumps(filled(["Plan", "Teams", "I agree to the terms", "on"])))`) as Record<string, any>;
+    expect(option.code).toBe(1);
+    expect(option.err).toBe('desktop: ref=3 combo box "Plan" has no option "Teams" (it has "Free", "Team", "Enterprise"): the fields after it weren\'t filled\n');
+    expect(option).toMatchObject({ plan: ["Free"], open: false, terms: false });
+    expect(option.did.filter((a: any[]) => a[0] !== "settle")).toEqual([["left_click", [200, 292]], ["key", "Escape"]]);
+  });
+
+  test("desktop fill refuses before doing anything: a field it can't find or tell apart, one that isn't a field, a value that doesn't fit", () => {
+    const tried = (args: string[]) => py(`${BUS}${FORM}
+print(json.dumps(filled(${JSON.stringify(args)})))`) as Record<string, any>;
+    const refused = (args: string[]) => {
+      const got = tried(args);
+      expect(got.did).toEqual([]);
+      expect(got.code).toBe("refused");
+      return got.err;
+    };
+    expect(refused(["Name", "Ada", "Nickname", "Ada"])).toBe('no field named like "Nickname" is in the window with the focus (desktop tree lists them)');
+    expect(refused(["e", "Ada"])).toBe('more than one field is named like "e": ref=1 entry "Name", ref=2 entry "Email", ref=4 check box "I agree to the terms"; give its ref');
+    expect(refused(["Send", "x"])).toBe('ref=5 push button "Send" isn\'t a field: fill takes text fields, combo boxes, check boxes and radio buttons (a button is clicked: desktop click ref=5)');
+    expect(refused(["I agree to the terms", "maybe"])).toBe('ref=4 check box "I agree to the terms" takes on or off, not "maybe"');
+    expect(refused(["Name"])).toContain("fill takes each field and its value");
+    expect(refused(["ref=99", "x"])).toBe("there is no ref=99: desktop tree (or find) gives them");
+  });
+
+  test("desktop fill stops when the owner takes the desktop over: the fields after it wait for another command", () => {
+    const got = py(`${BUS}${FORM}
+print(json.dumps(filled(["Name", "Ada Lovelace", "Email", "ada@example.test"], hold_after=3)))`) as Record<string, any>;
+    expect(got.code).toBe(75);
+    expect(got.out).toBe('filled ref=1 entry "Name" = "Ada Lovelace"\n');
+    expect(got.err).toBe("desktop: the owner took this desktop over 0 s ago: the fields from Email on weren't filled; do something else meanwhile, and try again after\n");
+    expect(got.texts["/n2"]).toBeUndefined();
+  });
+
   test("an app that can't search its own tree (no Collection) is walked, many calls in flight, never below what isn't showing: the same nodes", () => {
     const got = py(`${BUS}
 COLLECTION = False
