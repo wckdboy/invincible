@@ -4,6 +4,7 @@ import type { LedgerStore, Vault } from "@invincible/ledger";
 import { usageReader } from "./gateway-usage.ts";
 import { gatewaySession, keyHeaders, planOf, resolveProvider } from "./providers.ts";
 import { refusedKeysOf } from "./refused-keys.ts";
+import { WAITED, waitingOutBursts } from "./bursts.ts";
 import { clockUtc, retryAfterAt, spanWords, windowScope, windowsOf, type SpentWindow, type SpentWindows } from "./windows.ts";
 
 /*
@@ -158,6 +159,8 @@ export interface GatewayContext {
    * answer is forwarded (gateway-usage.ts), never changing or holding back a byte of it.
    */
   onUsage?(call: { label: string; provider: string; model: string; usage: Usage | null }): void;
+  /** Waits out a burst before a model call is asked again (bursts.ts; tests count the waits instead). */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
 /** A call's `model`, when it is one a model's name may be, or "unknown". */
@@ -355,7 +358,8 @@ function allowedOutput(call: Record<string, unknown> | null): number {
  * within seconds, as Claude Code does either way, and the next model on an agent's list takes over (measured 21 Nov
  * 2026). So a window that ends later than WAIT_OUT_MS is said as a spent quota, with no time to wait for, in words that
  * Hermes too takes as final (it reads "usage limit" or "quota" beside "resets in" as a wait). A shorter one stays the
- * provider's 429 and retry-after, for the tool's own retry on the same model.
+ * provider's 429 and retry-after, for the tool's own retry on the same model; and too many calls at once (a 429 that
+ * names no allowance, its wait a minute at most) is waited out here first and asked again (bursts.ts), then said as that.
  */
 const WAIT_OUT_MS = 60_000;
 const spent = (provider: string, window: SpentWindow, windows: SpentWindows) =>
@@ -424,9 +428,15 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
   const sent = shaped ? shaped.body : body;
   const report = ctx.onUsage;
   const call = { label: ctx.tokens.labelOf(token) ?? "unknown", provider: providerId, model };
+  // (A model call that meets too many calls at once is waited out and asked again: bursts.ts. A local runtime's, on
+  // your own machine, isn't anyone's plan: its refusals are said as they come.)
+  const asking =
+    request.method === "POST" && !provider.local
+      ? waitingOutBursts(ctx.fetch ?? fetch, { provider: providerId, now: () => windows.now(), ...(ctx.sleep ? { sleep: ctx.sleep } : {}) })
+      : (ctx.fetch ?? fetch);
   let upstream: Response;
   try {
-    upstream = await (ctx.fetch ?? fetch)(target, {
+    upstream = await asking(target, {
       method: request.method,
       headers,
       body: sent,
@@ -440,7 +450,7 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
     throw error;
   }
   const responseHeaders = new Headers();
-  for (const name of ["content-type", "cache-control", "request-id", "x-request-id", "retry-after"]) {
+  for (const name of ["content-type", "cache-control", "request-id", "x-request-id", "retry-after", WAITED]) {
     const value = upstream.headers.get(name);
     if (value) responseHeaders.set(name, value);
   }

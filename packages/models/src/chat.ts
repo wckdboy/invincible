@@ -4,7 +4,8 @@ import { type ModelMessage, RefusalError, refusalWords, type ToolCall, type Tool
 import { conversationFor } from "./responses.ts";
 import { isEmbeddingModel } from "./embeddings.ts";
 import { PRIMARY_SYSTEM, runtimeContext, SHOW_GUIDE, TOOL_GUIDE } from "./persona.ts";
-import { windowScope, windowsOf } from "./windows.ts";
+import { isBurst, windowScope, windowsOf } from "./windows.ts";
+import { waitingOutBursts } from "./bursts.ts";
 import { refusedKeysOf } from "./refused-keys.ts";
 import { followsFormat, readModelCheck, readsScreens, type ModelCheck } from "@invincible/core";
 import { offeredModels, onPlan, PLAN_PROVIDERS, planOf, providerRecords, QUIET_MS, quietly, resolveProvider, whyNoKey } from "./providers.ts";
@@ -16,6 +17,8 @@ export interface ModelsContext {
   fetch?: typeof fetch;
   /** How long a model's call may send nothing before it is ended as failed (providers.ts QUIET_MS; tests pass less). */
   quietMs?: number;
+  /** Waits out a burst before a model's call is asked again (bursts.ts; tests count the waits instead). */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   /**
    * Told of every model call as it ends: the role, the model, and its tokens as the provider reported them
    * (null: it reported nothing). Counts only. Whoever holds the context keeps its own tally with it.
@@ -268,6 +271,13 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
   /** The providers passed over because they aren't set up here, and how many models that was: when it was all, one thing to say. */
   const unset = new Set<string>();
   let unsetRefs = 0;
+  /**
+   * Too many calls at once, waited out (bursts.ts) and still refused: for what it held back (windowScope: a plan, every
+   * model of it), the model it was waited out for. Its others aren't waited on again in this answer. And how many of
+   * the reasons were that: when all were, the error says so, never to add a key.
+   */
+  const waitedOut = new Map<string, string>();
+  let bursts = 0;
   const passOver = (ref: string, error: string): ChatStreamEvent => {
     whyNot.push(`${ref}: ${error.replace(/\s+/g, " ").slice(0, 240)}`);
     return { type: "fallback", from: ref, error };
@@ -309,6 +319,12 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
       yield passOver(ref, windowsOf(ctx.store).why(spentWindow));
       continue;
     }
+    const busy = waitedOut.get(windowScope(ref));
+    if (busy) {
+      bursts += 1;
+      yield passOver(ref, `${windowScope(ref)} is taking too many calls at once just now (waited out for ${busy}): passed over without asking`);
+      continue;
+    }
     const provider = resolveProvider(ctx.store, ctx.vault, parsed.provider, req.coding ? "coding" : "own");
     if (!provider) {
       unset.add(parsed.provider);
@@ -343,7 +359,10 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
         effort: pinned ?? effortFor(req.role),
         signal: req.signal,
         // A call that goes silent is ended as a failed one (QUIET_MS): no turn hangs on a provider that stopped sending.
-        fetch: quietly(ctx.fetch ?? fetch, ctx.quietMs ?? (provider.local ? QUIET_MS.local : QUIET_MS.remote)),
+        // And too many calls at once is waited out and asked again (bursts.ts), except on your own machine's runtime.
+        fetch: provider.local
+          ? quietly(ctx.fetch ?? fetch, ctx.quietMs ?? QUIET_MS.local)
+          : waitingOutBursts(quietly(ctx.fetch ?? fetch, ctx.quietMs ?? QUIET_MS.remote), { provider: parsed.provider, now: () => windowsOf(ctx.store).now(), ...(ctx.sleep ? { sleep: ctx.sleep } : {}) }),
       });
       for (const texts of handed) fresh.interject(texts, "");
       return fresh;
@@ -511,8 +530,12 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
         apart = wrote;
       }
       // A refusal that says its allowance is spent, and until when, is remembered: the next ask passes it over (its plan's
-      // every model, or this model alone: windowScope).
-      windowsOf(ctx.store).note(windowScope(ref), message);
+      // every model, or this model alone: windowScope). Too many calls at once is no window (isBurst): waited out already.
+      const window = windowsOf(ctx.store).note(windowScope(ref), message);
+      if (!window && isBurst(message)) {
+        waitedOut.set(windowScope(ref), ref);
+        bursts += 1;
+      }
       // A provider that refused its key (401/403) is remembered too, for the doctor and the Inbox to say: a later call
       // that gets through forgets it. A local runtime has no key to refuse (its 401 is said of it, not remembered here).
       if (!provider.local) refusedKeysOf(ctx.store).note(parsed.provider, message);
@@ -527,5 +550,12 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
   }
   // (Each model's own reason goes with it: "no model could answer" alone doesn't say whether to add a key or wait an hour.)
   const reasons = whyNot.length ? ` (${whyNot.join("; ").slice(0, 700)})` : "";
-  yield { type: "error", error: declined ? `${declined}. No other model in the roster could take the answer over.` : `no model in the roster could answer; add a key or adjust the roster${reasons}` };
+  yield {
+    type: "error",
+    error: declined
+      ? `${declined}. No other model in the roster could take the answer over.`
+      : bursts && bursts === whyNot.length
+        ? `no model in the roster could answer just now: too many calls at once, a limit on how fast they're called, not their allowance; ask again in a minute${reasons}`
+        : `no model in the roster could answer; add a key or adjust the roster${reasons}`,
+  };
 }

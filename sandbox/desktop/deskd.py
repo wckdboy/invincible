@@ -2338,7 +2338,16 @@ def look(desk, question, env, eyes="", space=""):
     try:
         reply = json.load(urllib.request.urlopen(request, timeout=180))
     except urllib.error.HTTPError as error:
-        return 1, "", "desktop: the model that looks could not answer (%s %s)\n" % (error.code, error.read().decode(errors="replace")[:300].replace("\n", " "))
+        said = error.read().decode(errors="replace")
+        if error.code == 429:
+            # Too many calls at once, which the gateway has waited out a minute already (models' bursts.ts): said in
+            # its words, as what it is, not as eyes that are broken.
+            try:
+                said = json.loads(said)["error"]["message"]
+            except (ValueError, KeyError, TypeError):
+                pass
+            return 1, "", "desktop: no answer to the look this time: %s\n" % str(said)[:400].replace("\n", " ")
+        return 1, "", "desktop: the model that looks could not answer (%s %s)\n" % (error.code, said[:300].replace("\n", " "))
     except Exception as error:
         return 1, "", "desktop: the model that looks could not be reached (%s)\n" % error
     return 0, in_pixels((reply["choices"][0]["message"].get("content") or "").strip() or "(it said nothing)", space) + "\n", ""

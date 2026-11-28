@@ -137,6 +137,8 @@ function gateway(id = "mimo-token") {
     store,
     vault,
     tokens,
+    // (A burst is waited out before it is said, bursts.ts: here at once.)
+    sleep: async () => {},
     fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
       if (init?.method !== "POST") return Response.json({ data: [{ id: "glm-5.3" }] });
       return answer(init);

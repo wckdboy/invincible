@@ -234,6 +234,12 @@ The run loop is carried and renamed (§10), the most proven part of it:
   - A task whose every model is spent, its plan saying when it resets, rests until then and is taken up again by itself
     in its own session, its agent's other work going on meanwhile. Spent again after three rests, it waits for you.
     Claude's usage credits and ChatGPT's credit use are never turned on: they are money, and yours to decide.
+  - Too many calls at once is no spent window: a 429 that names no allowance, its wait a minute at most or unsaid
+    (OpenCode Go's past about 25 calls a minute, 28 November 2026). It is waited out where the call is made, at the
+    gateway for a tool's call and a look and in chat for a run's own turn: as long as the provider said, and at least 2,
+    4, 8, 16 and 30 s, a minute in all at most. Still refused after that, the caller is told plainly (too many calls at
+    once, not its allowance: ask again in a minute), and the turn passes the plan's other models over instead of waiting
+    on them again.
   - Measured with the real tools against a loopback model that refused the first model as each vendor does (10 runs
     each): working again on the next model 0.61 s after the refusal (p50; 1.68 s p95) for Claude Code, 1.03 s (1.54 s)
     for Codex. A run on a seat says its windows to the seat (below).

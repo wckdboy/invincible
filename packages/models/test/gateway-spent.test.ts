@@ -29,10 +29,13 @@ function gateway(answer: (model: string) => Response, id = "opencode-go") {
   const { token } = tokens.mint({ label: "sandbox:0123456789", providers: [id], ttlMinutes: 10, maxRequests: 20 });
   const asked: string[] = [];
   const models: string[] = [];
+  const slept: number[] = [];
   const ctx = {
     store,
     vault,
     tokens,
+    // (A burst is waited out before it is said: bursts.ts. The waits are only counted here.)
+    sleep: async (ms: number) => void slept.push(ms),
     fetch: (async (url: string | URL | Request, init?: RequestInit) => {
       asked.push(`${init?.method ?? "GET"} ${new URL(String(url)).pathname}`);
       if (init?.method !== "POST") return listing();
@@ -45,7 +48,7 @@ function gateway(answer: (model: string) => Response, id = "opencode-go") {
   windowsOf(store).now = () => now;
   const call = (model = "glm-5.3") => handleGateway(new Request(`http://127.0.0.1:7400/gw/${id}/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ model, messages: [] }) }), ctx);
   const list = () => handleGateway(new Request(`http://127.0.0.1:7400/gw/${id}/models`, { headers: { authorization: `Bearer ${token}` } }), ctx);
-  return { store, asked, models, call, list, later: (ms: number) => (now += ms), now: () => now };
+  return { store, asked, models, slept, call, list, later: (ms: number) => (now += ms), now: () => now };
 }
 
 const messageOf = async (response: Response) => ((await response.json()) as { error: { message: string } }).error.message;
@@ -80,7 +83,7 @@ test("a plan's refusal that says its allowance is spent: said as a spent quota w
   expect(g.asked).toHaveLength(3);
 });
 
-test("a refusal that gives only a long time to try again in is a spent window too; a short one stays the provider's", async () => {
+test("a refusal that gives only a long time to try again in is a spent window too; a short one is a burst, waited out here and then said as one", async () => {
   let wait = "7200";
   const g = gateway(() => new Response('{"error":{"message":"Too Many Requests"}}', { status: 429, headers: { "content-type": "application/json", "retry-after": wait } }));
   const long = await g.call();
@@ -88,16 +91,19 @@ test("a refusal that gives only a long time to try again in is a spent window to
   expect(await messageOf(long)).toContain("(2h from now)");
   expect(windowsOf(g.store).spent("opencode-go")?.until).toBe(g.now() + 2 * 3_600_000);
 
-  // A minute or less to wait: the tool's own retry waits it out, on the same model.
+  // A minute or less to wait, and no allowance named: too many calls at once (bursts.ts), waited out here on the same
+  // model, three times 20 s, then said as that, its retry-after kept for the tool. Never a window.
   g.later(2 * 3_600_000 + 1);
   wait = "20";
   const short = await g.call();
   expect(short.status).toBe(429);
   expect(short.headers.get("retry-after")).toBe("20");
-  expect(await short.text()).toContain("Too Many Requests");
+  expect(await messageOf(short)).toContain('too many calls at once: asked 4 times over 60 s, it still answered 429 ("Too Many Requests")');
+  expect(g.slept).toEqual([20_000, 20_000, 20_000]);
+  expect(windowsOf(g.store).list()).toEqual([]);
   // And it is asked again when the tool tries again.
   await g.call();
-  expect(g.asked).toHaveLength(3);
+  expect(g.asked).toHaveLength(1 + 4 + 4);
 });
 
 test("a window told elsewhere (a reviewer's call through chat) holds the gateway's calls back too", async () => {

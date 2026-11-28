@@ -514,6 +514,24 @@ describe("the desktop command: deskd's thin client", () => {
     }
   });
 
+  test("a look the gateway couldn't get answered, its plan taking too many calls at once, is said as that, never as a broken model", async () => {
+    if (!needs()) return;
+    // The gateway's words once it has waited a burst out (models' bursts.ts), as it answers them.
+    const said = `vision is taking too many calls at once: asked 6 times over 60 s, it still answered 429 ("Rate limit exceeded. Please try again later."). That's a limit on how fast it's called, not its allowance: ask again in a minute.`;
+    const gateway = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => Response.json({ error: { type: "invincible_burst", message: said } }, { status: 429, headers: { "x-invincible-waited": "6 asks, 60000 ms" } }) });
+    try {
+      const r = await deskd();
+      const eyes = { INVINCIBLE_EYES: "vision/model-1", INVINCIBLE_GATEWAY: `http://127.0.0.1:${gateway.port}/gw`, INVINCIBLE_TOKEN: "gw_test-only" };
+      const looking = Bun.spawn([built!, "look", "Where is Send?"], { env: { ...r.env, ...eyes }, stdout: "pipe", stderr: "pipe" });
+      const [out, err] = [await new Response(looking.stdout).text(), await new Response(looking.stderr).text()];
+      expect(await looking.exited).toBe(1);
+      expect(out).toBe("");
+      expect(err).toBe(`desktop: no answer to the look this time: ${said}\n`);
+    } finally {
+      gateway.stop(true);
+    }
+  });
+
   test("eyes that answer places in a space of their own (--space, or INVINCIBLE_EYES_SPACE) have them put in the screen's pixels, and said so", async () => {
     if (!needs()) return;
     let said = "";
