@@ -144,6 +144,8 @@ for (const runtime of ["kata", "runc"] as const) {
   describe.skipIf(!available || (runtime === "kata" && !kata))(`another node's task, end to end on real VMs: ${runtime === "kata" ? "Kata microVMs" : "containers (runc)"}`, () => {
     let pair: Pair;
     let log = "";
+    /** The workspace socket this process had before: given back as the run ends, so no later file of the run sees this one's. */
+    const socketBefore = process.env.INVINCIBLE_WORKSPACE_SOCKET;
 
     beforeAll(async () => {
       const bin = wrapper(runtime);
@@ -170,6 +172,8 @@ for (const runtime of ["kata", "runc"] as const) {
     afterAll(async () => {
       await pair?.stop();
       drop();
+      if (socketBefore === undefined) delete process.env.INVINCIBLE_WORKSPACE_SOCKET;
+      else process.env.INVINCIBLE_WORKSPACE_SOCKET = socketBefore;
     });
 
     test("a task handed to beta's agent runs in a VM of its own beside hers, through its gates, review and bring-back, and comes back Proven", async () => {
