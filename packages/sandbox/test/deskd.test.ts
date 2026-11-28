@@ -1679,6 +1679,32 @@ print(json.dumps({"before": before, "box": list(box), "scrolled": bool(node.get(
     expect(got.edge[1]).toBeLessThan(800);
   });
 
+  test("desktop click ref=N on a node the page has scrolled away brings it back into view its own way, clicks it there, and says so; never a click past the screen's edge", () => {
+    const got = py(`${BUS}
+listed = t.actable(pid=300, title="Form - Chromium")
+name = next(r for r, n, b in listed if n["name"] == "Name")
+# The page scrolls on: to the far link, the Name field above the screen now.
+t.find("link", "far below", pid=300)
+moved = NODES["/n1"][5][1]
+clicks = []
+class Desk:
+    tree = t
+    def focused_app(self): return 300, "Form - Chromium"
+    def tool(self, name, i):
+        clicks.append(i["coordinate"])
+        return {"ok": True, "did": "clicked at %d,%d" % tuple(i["coordinate"]), "changed": False}
+code, out, err = d.cli(Desk(), ["click", "ref=%d" % name])
+print(json.dumps({"moved": moved, "clicks": clicks, "code": code, "out": out, "err": err, "asked": scrolled}))`) as Record<string, any>;
+    // (Before: above the screen, where a click would go.)
+    expect(got.moved).toBeLessThan(0);
+    expect(got.asked).toEqual(["/n8", "/n1"]);
+    expect(got.code).toBe(0);
+    expect(got.clicks).toHaveLength(1);
+    expect(got.clicks[0][1]).toBeGreaterThanOrEqual(80);
+    expect(got.clicks[0][1]).toBeLessThan(800);
+    expect(got.out).toMatch(/\(ref=1, entry "Name", scrolled into view\)/);
+  });
+
   test("desktop fill fills a field below the screen: scrolled into view its own way first, and said", () => {
     const got = py(`${BUS}${FORM}
 NODES["/n13"] = (":1.5", "/d1", "entry", "Comment", VISIBLE | SENSITIVE | EDITABLE, (100, 1200, 300, 24))

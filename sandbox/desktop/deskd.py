@@ -1224,11 +1224,8 @@ class Tree:
         below the screen, or across its edge (reachable), scrolled into view first (into_view), and marked so."""
         node, box = self.at(ref)
         with self.lock:
-            if self.beyond_screen(node) or not self.reachable(box):
-                seen = self.into_view(node)
-                if seen:
-                    self.refs[ref] = seen[0]
-                    return seen
+            if node.get("scrolled"):
+                return node, box
             now = self.node((node["bus"], node["path"]), node["app"], node.get("window"))
             self.held(now)
             self.refs[ref] = now
@@ -1256,7 +1253,7 @@ class Tree:
         ref = self.numbers.get(key)
         if ref is None:
             ref = self.numbers[key] = max(self.refs, default=0) + 1
-        self.refs[ref] = node
+        self.refs[ref] = kept(node)
         return ref
 
     def caret_text(self, pid=None, title=None, before=400):
@@ -1309,7 +1306,8 @@ class Tree:
         return None
 
     def at(self, ref):
-        """A node said before, where it is now."""
+        """A node said before, where it is now: one the page has scrolled away (above or below the screen, or across its
+        edge) scrolled back into view its own way (into_view), and marked so; never a place past the screen's edge."""
         with self.lock:
             node = self.refs.get(ref)
             if node is None:
@@ -1320,7 +1318,18 @@ class Tree:
                 raise Failed("ref=%d (%s \"%s\") is gone: desktop tree, again" % (ref, node["role"], node["name"]))
             if box[2] <= 0 or box[3] <= 0:
                 raise Failed("ref=%d (%s \"%s\") isn't on the screen now" % (ref, node["role"], node["name"]))
+            if not self.reachable(box):
+                seen = self.into_view(node)
+                if not seen:
+                    raise Failed("ref=%d (%s \"%s\") is off the screen, and its page didn't bring it into view" % (ref, node["role"], node["name"]))
+                self.refs[ref] = kept(seen[0])
+                return seen
             return node, box
+
+
+def kept(node):
+    """A node as a ref keeps it: without `scrolled`, which says only of the answer that scrolled to it."""
+    return {k: v for k, v in node.items() if k != "scrolled"}
 
 
 def say_node(ref, node, box):
@@ -2190,7 +2199,8 @@ desktop tree [app]                 what can be acted on in the window with the f
                                    accessibility tree: each with a ref, its role, its name and where it is
 desktop find <role> <name>         where one is: x,y and its ref (desktop find button "Send"); one above or below
                                    the screen is scrolled into view, the page's own way, and said
-desktop click ref=<n> [button]     click a node desktop tree or find gave, where it is at that moment
+desktop click ref=<n> [button]     click a node desktop tree or find gave, where it is at that moment (one the
+                                   page has scrolled away brought back into view first, and said)
 desktop fill <field> <value>...    a form in one command: each field (ref=<n>, or its name as the tree says it)
                                    given its text, its option (a combo box) or on|off (a check box), read back
                                    before the next (one off the screen scrolled to first); the first that doesn't
@@ -2392,7 +2402,7 @@ def cli(desk, argv, cwd="/work", env=None):
             if not name:
                 raise Refused("the button is left, right, middle, double or triple")
             answer = desk.tool(name, {"coordinate": [x + w // 2, y + h // 2], **held})
-            answer = dict(answer, did="%s (ref=%d, %s \"%s\")" % (answer.get("did", ""), ref, node["role"], node["name"][:80]))
+            answer = dict(answer, did="%s (ref=%d, %s \"%s\"%s)" % (answer.get("did", ""), ref, node["role"], node["name"][:80], ", scrolled into view" if node.get("scrolled") else ""))
         elif verb == "click":
             if len(args) < 2:
                 raise Refused("click takes two whole numbers: desktop click <x> <y> [left|right|middle|double|triple]")
