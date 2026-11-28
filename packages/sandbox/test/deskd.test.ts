@@ -1323,25 +1323,50 @@ print(json.dumps({"starts": P.starts}))`)).toEqual({ starts: 1 });
   }, BUSY(3.1));
 
   test("the keeper waits on what deskd started, and asks nothing at rest: a piece's end is known as it happens (C1: asking four times a second cost the idle desktop 0.7 % of a core)", async () => {
+    // What the keeper's own threads ask is counted: their waits on their processes, their polls of them, their pauses.
+    // (On the real clock, "within 100 ms" and "within 1.3 s" counted a busy machine's waking too.)
     const got = await py(`
-import os, signal, tempfile
+import os, signal, subprocess, tempfile, threading
 d.RUN = tempfile.mkdtemp()
 p = d.Pieces(home=d.RUN)
+asked = []
+_wait, _poll, _sleep = subprocess.Popen.wait, subprocess.Popen.poll, time.sleep
+def keeper(what, arg):
+    if threading.current_thread().name.startswith("keep-"):
+        asked.append([threading.current_thread().name, what, arg])
+def wait(self, timeout=None):
+    keeper("wait", timeout)
+    return _wait(self, timeout)
+def poll(self):
+    keeper("poll", None)
+    return _poll(self)
+def sleep(s):
+    keeper("sleep", s)
+    return _sleep(s)
+subprocess.Popen.wait, subprocess.Popen.poll, time.sleep = wait, poll, sleep
 ended = []
 p.ended = lambda name: ended.append([name, time.monotonic()])
+def until(done):
+    for _ in range(3000):
+        if done():
+            return
+        _sleep(0.01)
 pid = p._spawn(["sleep", "30"], "kept.log", keep="browser")
-time.sleep(1.1)
-t = time.monotonic(); os.kill(pid, signal.SIGKILL); time.sleep(0.3)
-first = round((ended[0][1] - t) * 1000) if ended else None
+_sleep(1.1)
+os.kill(pid, signal.SIGKILL)
+until(lambda: len(ended) >= 1)
 # One that ends as it starts is started again a second later, not at once, and again.
 pid = p._spawn(["sleep", "30"], "kept.log", keep="windows")
-t = time.monotonic(); os.kill(pid, signal.SIGKILL); time.sleep(1.4)
+t = time.monotonic(); os.kill(pid, signal.SIGKILL)
+until(lambda: len(ended) >= 2)
 second = round((ended[1][1] - t) * 1000) if len(ended) > 1 else None
-print(json.dumps({"ended": [n for n, _ in ended], "first": first, "second": second, "threads": sorted(x.name for x in __import__("threading").enumerate() if x.name.startswith("keep"))}))`) as { ended: string[]; first: number; second: number; threads: string[] };
+until(lambda: not [x for x in threading.enumerate() if x.name.startswith("keep")])
+print(json.dumps({"ended": [n for n, _ in ended], "second": second, "asked": asked, "threads": sorted(x.name for x in threading.enumerate() if x.name.startswith("keep"))}))`) as { ended: string[]; second: number; asked: unknown[]; threads: string[] };
     expect(got.ended).toEqual(["browser", "windows"]);
-    expect(got.first).toBeLessThan(100);
+    // Known as it happens: a piece that ran past a second is waited on once and asked nothing else, and its end is told
+    // with no pause. One that ended as it started has its one pause, of 1 s, before its end is told.
+    expect(got.asked).toEqual([["keep-browser", "wait", null], ["keep-windows", "wait", null], ["keep-windows", "sleep", 1]]);
     expect(got.second).toBeGreaterThanOrEqual(1000);
-    expect(got.second).toBeLessThan(1300);
     expect(got.threads).toEqual([]);
     // Nothing asked at rest: no piece is polled.
     expect(await py(`
