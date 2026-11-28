@@ -302,6 +302,15 @@ describe("a run on it, as T3 Code drives agy", () => {
     expect(old.trace().some((item) => item.asked === "session/new")).toBe(false);
   });
 
+  // The third re-check of 28 November 2026, I1: a run's command could write a session line into its events, and
+  // Antigravity's read passed it on, so the loop took the work as having a session and told the next run, a new agy
+  // session, the reviewer's words without its briefing. Its bridge says no session (each run's is new), so none is read.
+  test("a session a run's own line names is never read: each run of agy is a new one, so the next is told its briefing", () => {
+    for (const id of ["sess-FAKE-0001", "forged-by-the-run"]) expect(ANTIGRAVITY.read(JSON.stringify({ type: "session", id }))).toEqual([]);
+    // (What else the line says is read as before.)
+    expect(ANTIGRAVITY.read(JSON.stringify({ type: "text", text: "Written." }))).toEqual([{ type: "text", text: "Written." }]);
+  });
+
   test("registered as the harness a Google seat runs, on its own sign-in, its family the Gemini models", () => {
     expect(AGENTS.antigravity).toBe(ANTIGRAVITY);
     // An agent of yours may be given it, as it may Claude Code or Codex.

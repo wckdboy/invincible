@@ -174,6 +174,8 @@ export const ANTIGRAVITY: AgentDriver = {
   // (No session is named to it: each run's is new.)
   command: (model) => `python3 -I /work/.agent/antigravity-acp.py --prompt /work/.agent/prompt.md${model.own || !model.model ? "" : ` --model ${quote(model.model)}`}`,
   // Its Google sign-in is in this VM, and a model can make agy print it: its events are scrubbed of it as Claude Code's
-  // and Codex's are (the review of 28 November 2026, M1), and core's redaction knows Google's own tokens.
-  read: readSignedIn,
+  // and Codex's are (the review of 28 November 2026, M1), and core's redaction knows Google's own tokens. And no session
+  // is read from them: its bridge says none, since each run's is new, so a line that names one is a run's own, and would
+  // have the next run told the reviewer's words without its briefing (the third re-check's I1).
+  read: (line) => readSignedIn(line).filter((event) => event.type !== "session"),
 };
