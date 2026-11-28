@@ -52,8 +52,8 @@ What the owner uses every day, built on the carried engine around the new model.
   - R6's forms still read in pieces: `KEY=<base64>` (it can come without intent), `0x<hex>`, a JWT wrapped with its
     label, xxd's own dump;
   - R6's over-redaction: a URL that shows a secret is shown decoded, and a base64 lockfile is hidden whole;
-  - another node's words, once the fabric is on: a dependency's result, a refused hand-off its agent gives itself, the
-    fleet's shared memory;
+  - another node's words: the fleet's shared memory, recalled for a task's goal, now (the log syncs between nodes with
+    the fabric off); a dependency's result and a refused hand-off its agent gives itself, once the fabric is on;
   - a `docker info` slower than 8 s skips the seats' sweep without a word;
   - a kill between the sign-in's two renames leaves no profile (the seat reads as signed out), and on a full ext4
     volume the rename may need a block.
