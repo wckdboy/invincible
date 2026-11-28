@@ -11,6 +11,9 @@ import { runNotifySim } from "../notify/sim.ts";
  * fail once, and a stand-in owner who answers only what reached them. Every number is a count or virtual minutes.
  */
 
+/** How many looks notify.look times in each of its samples. */
+const LOOKS_A_SAMPLE = 20;
+
 export const suite: Suite = {
   name: "notify",
   about: "a seeded week of asks and news on the owner's two devices: are asks answered in time, and how often does it buzz?",
@@ -63,13 +66,18 @@ export const suite: Suite = {
     const sender = { publicKey: async () => "key", send: async (_t: unknown, _p: NotifyPayload) => ({ ok: true, gone: false, status: 200, error: null, attempts: 1 }) };
     const service = new NotifyService({ mind, nodeName: "bench", db, sender, allowed: [], sources, ledger: () => {}, log: () => {}, now: () => clock, tickMs: false });
     await service.tick();
+    // Timed twenty looks at a time, the clock moving the 15 s a sample as before: one look takes about 40 µs, too
+    // little to time alone. Timed alone, one tree's runs on Ultra (at a load of 1) measured 0.035 to 0.198 ms, in two
+    // clusters with each run's samples close together: a run's median fell inside or outside the 25 % band by chance.
     await ctx.timeAsync(
       "notify.look",
       async () => {
-        clock += 15_000;
-        await service.tick();
+        for (let i = 0; i < LOOKS_A_SAMPLE; i++) {
+          clock += 15_000 / LOOKS_A_SAMPLE;
+          await service.tick();
+        }
       },
-      { n: 15, warm: 5, note: "one look with 24 notices, 6 approvals and 2 key requests standing, all told already" },
+      { n: 15, warm: 5, per: LOOKS_A_SAMPLE, note: "one look with 24 notices, 6 approvals and 2 key requests standing, all told already" },
     );
     await service.stop();
     db.close();
