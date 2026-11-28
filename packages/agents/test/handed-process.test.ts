@@ -2,7 +2,7 @@ import { expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { endLeftovers, HANDED_LISTS_COMMAND, HANDED_PROCESS_PY, handedCommand, handedEndCommand } from "../src/handed-process.ts";
 
 // Every test here runs the real helper, a shell and its processes, so its time is the machine's to give: "the 127" took
@@ -407,7 +407,17 @@ test("a gate's git takes no repository it wasn't given: a bare layout as its tre
   try {
     const on = realpathSync(s.path(""));
     for (const sub of ["tree", "home", "tmp"]) mkdirSync(join(on, sub));
-    const gate = (command: string) => spawnSync("python3", ["-I", "-c", `${HANDED_PROCESS_PY}\nsys.exit(run("gate", "task-test", 20.0, sys.argv[1], sys.argv[2]))`, command, on], { encoding: "utf8", timeout: 30_000, env: { ...process.env } });
+    // (Its PATH as a round VM's gives it: the image's /etc/profile sets it afresh, Debian's way, and the VM's read-only
+    // folders follow. Where this machine's folders aren't read-only, a CI job's container's, the helper keeps none of
+    // them, so this test's profile names where this machine's git is, as the image's names /usr/bin.)
+    const git = Bun.which("git");
+    expect(git).not.toBeNull();
+    writeFileSync(marks.path("profile"), `PATH="${dirname(git!)}:/usr/bin:/bin"\nexport PATH\n`);
+    const helper = HANDED_PROCESS_PY.replaceAll("/etc/profile", marks.path("profile"));
+    const gate = (command: string) => spawnSync("python3", ["-I", "-c", `${helper}\nsys.exit(run("gate", "task-test", 20.0, sys.argv[1], sys.argv[2]))`, command, on], { encoding: "utf8", timeout: 30_000, env: { ...process.env } });
+    // (The gate's own git, a real one: what follows is about what it takes for a repository, never whether it runs.)
+    const found = gate('command -v git; git --version');
+    expect([found.status, found.stdout.trim().split("\n")[1]]).toEqual([0, expect.stringMatching(/^git version /)]);
     // Its tree laid out as a bare git directory, whose config makes the tree its work tree and names a command.
     const bare = marks.path("BARE-RAN");
     mkdirSync(join(on, "tree", "objects", "info"), { recursive: true });
