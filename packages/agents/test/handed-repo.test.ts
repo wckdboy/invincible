@@ -480,7 +480,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     // (Nothing of the worktree is touched, and the patch is dropped.)
     expect(git(s.root, "status", "--porcelain").stdout).toBe("");
     expect(existsSync(join(s.keep.agent, "task-x.patch"))).toBe(false);
-  }, 30_000);
+  });
 
   test("R7-1 B: from a commit id its own history names, nothing of the store is walked: not the commit, its tree, or a file of it", () => {
     let fix = "";
@@ -511,7 +511,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
       expect([what, applied.status, applied.stderr.trim()]).toEqual([what, 1, CARRIED]);
       expect([what, existsSync(join(s.root, "r1"))]).toEqual([what, false]);
     }
-  }, 30_000);
+  });
 
   test("R7-1 C: whether the agent's store holds an object is no longer the task's to learn: it is refused the same either way", () => {
     let secret = "";
@@ -528,7 +528,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
       expect([held.status, held.stderr.trim()]).toEqual([1, CARRIED]);
       expect(existsSync(join(s.root, "probe"))).toBe(false);
     }
-  }, 30_000);
+  });
 
   test("R7-2 A: a binary part's size is read only as git writes it: the honest one is held to the limit, and every other spelling is refused", () => {
     const LIMIT = 1 << 20;
@@ -545,7 +545,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
       expect([line, applied.status, applied.stderr.trim()]).toEqual([line, 1, SPELLED]);
       expect([line, existsSync(join(s.root, "big.bin"))]).toEqual([line, false]);
     }
-  }, 30_000);
+  });
 
   test("R7-2 B: a delta part is held to what it makes, never to its own size", () => {
     const LIMIT = 1 << 20;
@@ -561,7 +561,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     const applied = s.apply(patch, LIMIT);
     expect([applied.status, applied.stderr.trim()]).toEqual([1, over(LIMIT)]);
     expect(blobId(readFileSync(join(s.root, "pre.bin")))).toBe(blobId(pre));
-  }, 30_000);
+  });
 
   test("R7-2 C: parts whose content would come from the store are refused, however many of them name it", () => {
     const pre = Buffer.concat(Array.from({ length: 2048 }, () => createHash("sha256").update("r7c").digest()));
@@ -570,7 +570,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     const applied = s.apply(patch, 1 << 20);
     expect([applied.status, applied.stderr.trim()]).toEqual([1, CARRIED]);
     expect(existsSync(join(s.root, "copies"))).toBe(false);
-  }, 30_000);
+  });
 
   test("R7-2 D: a copy or a rename of a file, which its clone's send never makes, is refused whole: 64 copies of one would write it 64 times", () => {
     const LIMIT = 64 << 10;
@@ -586,7 +586,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     const renamed = s.apply(`diff --git a/pre.txt b/moved.txt\nsimilarity index 100%\nrename from pre.txt\nrename to moved.txt\n`, LIMIT);
     expect([renamed.status, renamed.stderr.trim()]).toEqual([1, COPIED]);
     expect([existsSync(join(s.root, "moved.txt")), existsSync(join(s.root, "pre.txt"))]).toEqual([false, true]);
-  }, 30_000);
+  });
 
   test("what git diff writes still comes back: a new binary file, as a literal part", () => {
     const s = setUp();
@@ -600,7 +600,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     const applied = s.apply(sent.stdout);
     expect([applied.status, applied.stderr]).toEqual([0, ""]);
     expect(blobId(readFileSync(join(s.root, "new.bin")))).toBe(blobId(data));
-  }, 30_000);
+  });
 
   test("what git diff writes still comes back: a binary file changed a little, as a delta part", () => {
     const before = noise(8192, "a binary file");
@@ -616,7 +616,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     const applied = s.apply(sent.stdout);
     expect([applied.status, applied.stderr]).toEqual([0, ""]);
     expect(blobId(readFileSync(join(s.root, "data.bin")))).toBe(blobId(after));
-  }, 30_000);
+  });
 
   test("what git diff writes still comes back: a binary file deleted", () => {
     const gone = noise(5000, "a file to go");
@@ -630,7 +630,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     expect([applied.status, applied.stderr]).toEqual([0, ""]);
     expect(existsSync(join(s.root, "old.bin"))).toBe(false);
     expect(s.git(s.root, "diff", "--cached", "--name-status", s.base).stdout.trim()).toBe("D\told.bin");
-  }, 30_000);
+  });
 
   test("what git diff writes still comes back: text and binary parts in one patch", () => {
     const changed = noise(8192, "changed");
@@ -663,7 +663,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     expect(blobId(readFileSync(join(s.root, "data.bin")))).toBe(blobId(after));
     expect(blobId(readFileSync(join(s.root, "new.bin")))).toBe(blobId(added));
     expect(existsSync(join(s.root, "old.bin"))).toBe(false);
-  }, 30_000);
+  });
 
   test("a binary part git would find corrupt is refused before git reads it: base85 it can't decode, a length byte its line can't have, data that inflates to more or fewer bytes than it says", () => {
     const s = setUp();
@@ -692,7 +692,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     const applied = s.apply(good);
     expect([applied.status, applied.stderr]).toEqual([0, ""]);
     expect(blobId(readFileSync(join(s.root, "edge.bin")))).toBe(blobId(data));
-  }, 30_000);
+  });
 
   test("a binary part is refused unless git would read it as it says: a size line outside a part, a part without one or cut short, ids that aren't full", () => {
     const s = setUp();
@@ -719,7 +719,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     const applied = s.apply(good);
     expect([applied.status, applied.stderr]).toEqual([0, ""]);
     expect(blobId(readFileSync(join(s.root, "x.bin")))).toBe(id);
-  }, 30_000);
+  });
 
   test("a delta part is refused unless it applies to a file of the base as patch-delta.c applies one, and one from content the task wasn't given is refused unread", () => {
     let secret = "";
@@ -770,7 +770,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     const right = s.apply(deltaPatch("pre.bin", blobId(pre), blobId(made), inserting(pre.length)));
     expect([right.status, right.stderr]).toEqual([0, ""]);
     expect(readFileSync(join(s.root, "pre.bin"), "utf8")).toBe(made.toString());
-  }, 30_000);
+  });
 
   test("in a repository of sha256 ids, a binary part's ids are 64 hex characters, and its data makes the one it names", () => {
     const agent = temp("handed-agent-");
@@ -799,7 +799,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     const applied = apply(patch("0".repeat(64), id));
     expect([applied.status, applied.stderr]).toEqual([0, ""]);
     expect(createHash("sha256").update(`blob ${data.length}\0`).update(readFileSync(join(root, "x.bin"))).digest("hex")).toBe(id);
-  }, 30_000);
+  });
 });
 
 import { sweepLeftovers } from "../src/handed-repo.ts";
