@@ -14,6 +14,29 @@ object ChatList {
 
     data class Group(val label: String, val items: List<Json>)
 
+    /** A pause long enough that a chat says when it went on (lib/chats.ts MARK_AFTER_MS): a quarter of an hour. */
+    const val MARK_AFTER_MS = 15 * 60_000L
+
+    /**
+     * Which of a chat's messages are marked with when they were said (ListTime.mark), by their indexes (lib/chats.ts
+     * timeMarks, held to the vectors): the first whose time is known, then each said on another day than the one before
+     * it (the calendar's, in [zone]), or a quarter of an hour or more after it. A message whose time isn't known (null) is
+     * never marked and never counts: your agent's answers are given none, so an answer is said under what it answers.
+     */
+    fun timeMarks(ats: List<Long?>, zone: ZoneId): List<Int> {
+        val marked = mutableListOf<Int>()
+        var last: Long? = null
+        ats.forEachIndexed { index, at ->
+            if (at == null) return@forEachIndexed
+            val before = last
+            if (before == null || at - before >= MARK_AFTER_MS || dayOf(at, zone) != dayOf(before, zone)) marked += index
+            last = at
+        }
+        return marked
+    }
+
+    private fun dayOf(ms: Long, zone: ZoneId) = Instant.ofEpochMilli(ms).atZone(zone).toLocalDate()
+
     /**
      * By local midnight, the latest first: Pinned (a pin, whenever), Today, Yesterday, This week (six days back), Earlier;
      * a group with none left out.

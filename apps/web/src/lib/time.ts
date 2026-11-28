@@ -74,17 +74,35 @@ export function listLocale(device: string): string {
 export function listTime(ms: number, now: number, zone?: string, device?: string): string {
   const timeZone = zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const locale = listLocale(device ?? Intl.DateTimeFormat().resolvedOptions().locale);
-  // (Days counted by the calendar there: its dates, not 24-hour spans.)
-  const date = (t: number): number => {
-    const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(t);
-    const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((one) => one.type === type)?.value);
-    return Date.UTC(part("year"), part("month") - 1, part("day")) / DAY;
-  };
-  const days = date(now) - date(ms);
+  const days = calendarDay(now, timeZone) - calendarDay(ms, timeZone);
   if (days === 0) return new Intl.DateTimeFormat(locale, { timeZone, timeStyle: "short" }).format(ms);
   if (days === 1) return "Yesterday";
   if (days > 1 && days < 7) return new Intl.DateTimeFormat(locale, { timeZone, weekday: "long" }).format(ms);
   return new Intl.DateTimeFormat(locale, { timeZone, year: "numeric", month: "numeric", day: "numeric" }).format(ms);
+}
+
+/** The day [ms] falls on by the calendar in [timeZone], as a count of days: its date there, not a 24-hour span. */
+export function calendarDay(ms: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(ms);
+  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((one) => one.type === type)?.value);
+  return Date.UTC(part("year"), part("month") - 1, part("day")) / DAY;
+}
+
+/**
+ * When a chat went on, as its small centred mark says it (after Grok Bot's; I10's for the iPhone): the day as people say
+ * it, then its clock time: "Today 09:41", "Yesterday 18:20", the weekday's name within the week before ("Tuesday
+ * 10:00"), else the date with its month's short name ("21 Nov 2026 09:00"). In the device's time zone, in English with
+ * its region (listLocale), as the list says its times; a day ahead is a date.
+ */
+export function timeMark(ms: number, now: number, zone?: string, device?: string): string {
+  const timeZone = zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const locale = listLocale(device ?? Intl.DateTimeFormat().resolvedOptions().locale);
+  const days = calendarDay(now, timeZone) - calendarDay(ms, timeZone);
+  const clock = new Intl.DateTimeFormat(locale, { timeZone, timeStyle: "short" }).format(ms);
+  if (days === 0) return `Today ${clock}`;
+  if (days === 1) return `Yesterday ${clock}`;
+  if (days > 1 && days < 7) return `${new Intl.DateTimeFormat(locale, { timeZone, weekday: "long" }).format(ms)} ${clock}`;
+  return `${new Intl.DateTimeFormat(locale, { timeZone, year: "numeric", month: "short", day: "numeric" }).format(ms)} ${clock}`;
 }
 
 /** "850 ms", "4.2 s", "3 min 20 s", "1 h 5 min". */

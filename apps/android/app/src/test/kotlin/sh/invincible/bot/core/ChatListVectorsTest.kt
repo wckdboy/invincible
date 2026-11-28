@@ -13,6 +13,13 @@ import java.time.ZoneOffset
 class ChatListVectorsTest {
     private val c = Json.parse(javaClass.classLoader!!.getResource("core-vectors.json")!!.readText())["chats"]
 
+    @Test fun aChatIsMarkedWhereItWentOnAsTheWebMarksIt() {
+        val marks = Json.parse(javaClass.classLoader!!.getResource("core-vectors.json")!!.readText())["chatMarks"]
+        val ats = marks["ats"].list.map { it.long }
+        assertEquals(marks["marked"].list.map { it.int }, ChatList.timeMarks(ats, java.time.ZoneId.of(marks["zone"].string!!)))
+        assertEquals(emptyList<Int>(), ChatList.timeMarks(emptyList(), ZoneOffset.UTC))
+    }
+
     @Test fun theyAreGroupedAsTheWebGroupsThem() {
         val groups = ChatList.groups(c["list"].list, c["now"].long!!, ZoneOffset.UTC)
         assertEquals(c["groups"].list.map { it["label"].string }, groups.map { it.label })

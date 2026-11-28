@@ -176,17 +176,20 @@ fun HomeList(app: AppModel, open: (String) -> Unit, settings: () -> Unit, curren
 }
 
 /**
- * How this phone says when, for the list (ListTime): in its time zone, in the app's words (English) with its region
- * (ListTime.speaking), its clock as it is set (24 hours or 12, as Settings has it) and its numeric date, as Android's own
- * DateFormat writes them there.
+ * How this phone says when, for the list and a chat's marks (ListTime): in its time zone, in the app's words (English)
+ * with its region (ListTime.speaking), its clock as it is set (24 hours or 12, as Settings has it), its numeric date and
+ * its date with the month's short name, as Android's own DateFormat writes them there.
  */
 @Composable
-private fun rememberListTime(): ListTime {
+internal fun rememberListTime(): ListTime {
     val locale = ListTime.speaking(LocalConfiguration.current.locales[0])
     val hours24 = DateFormat.is24HourFormat(LocalContext.current)
     val zone = ZoneId.systemDefault()
     return remember(locale, hours24, zone) {
-        ListTime(zone, locale, clock = DateFormat.getBestDateTimePattern(locale, if (hours24) "Hm" else "hm"), date = DateFormat.getBestDateTimePattern(locale, "yMd"))
+        ListTime(
+            zone, locale, clock = DateFormat.getBestDateTimePattern(locale, if (hours24) "Hm" else "hm"), date = DateFormat.getBestDateTimePattern(locale, "yMd"),
+            day = DateFormat.getBestDateTimePattern(locale, "yMMMd"),
+        )
     }
 }
 

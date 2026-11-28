@@ -27,6 +27,8 @@ data class Bubble(
     val files: List<String> = emptyList(),
     /** A look of its come back: a "user" message that isn't yours, shown as its own note. */
     val look: LookNote? = null,
+    /** When it was said (ms), where the chat marks that (ChatList.timeMarks); null for an answer, said under what it answers. */
+    val at: Long? = null,
 ) {
     val mine: Boolean get() = role == "user" && look == null
     val streaming: Boolean get() = status == "streaming"
@@ -39,6 +41,24 @@ data class Bubble(
  */
 /** The chat the app opens on, of your kept chats (the latest first, as the node lists them): the latest; none, the welcome. */
 internal fun latestKept(chats: List<Json>): String? = chats.firstNotNullOfOrNull { it["id"].string }
+
+/**
+ * A kept chat's messages (core's StoredMessage) as the app shows them. Each of yours says when you said it, and a look of
+ * its when it came back; an answer says nothing of when: it is said under what it answers (ChatList.timeMarks).
+ */
+internal fun bubblesOf(messages: List<Json>): List<Bubble> = messages.map { m ->
+    Bubble(
+        role = m["role"].string ?: "assistant",
+        text = m["content"].string ?: "",
+        status = m["status"].string ?: "done",
+        model = m["model"].string,
+        steps = m["steps"].list.mapNotNull { s -> if (s["kind"].string == "tool") s["title"].string ?: s["name"].string else null },
+        error = m["error"].string,
+        files = m["attachments"].list.mapNotNull { it["name"].string },
+        look = m["look"].let { l -> l["note"].string?.let { LookNote(l["set"].long ?: 0L, it) } },
+        at = if (m["role"].string == "user") m["createdAt"].long else null,
+    )
+}
 
 class ChatModel(private val app: AppModel) {
     private val _conversation = MutableStateFlow<String?>(null)
@@ -204,18 +224,7 @@ class ChatModel(private val app: AppModel) {
             val view = c.post("/api/conversations/get", Json.obj("id" to id))["conversation"]
             if (_conversation.value != id) return
             _title.value = view["title"].string
-            _bubbles.value = view["messages"].list.map { m ->
-                Bubble(
-                    role = m["role"].string ?: "assistant",
-                    text = m["content"].string ?: "",
-                    status = m["status"].string ?: "done",
-                    model = m["model"].string,
-                    steps = m["steps"].list.mapNotNull { s -> if (s["kind"].string == "tool") s["title"].string ?: s["name"].string else null },
-                    error = m["error"].string,
-                    files = m["attachments"].list.mapNotNull { it["name"].string },
-                    look = m["look"].let { l -> l["note"].string?.let { LookNote(l["set"].long ?: 0L, it) } },
-                )
-            }
+            _bubbles.value = bubblesOf(view["messages"].list)
             readQueue(view)
             if (view["unread"].bool == true) runCatching { c.post("/api/conversations/seen", Json.obj("id" to id)) }
             val running = view["turn"]
@@ -236,7 +245,7 @@ class ChatModel(private val app: AppModel) {
         val c = app.client ?: return
         if ((words.isEmpty() && attachments.isEmpty()) || _live.value) return
         val names = attachments.mapNotNull { it["name"].string }
-        _bubbles.value = _bubbles.value + Bubble("user", words, files = names) + Bubble("assistant", "", "streaming")
+        _bubbles.value = _bubbles.value + Bubble("user", words, files = names, at = System.currentTimeMillis()) + Bubble("assistant", "", "streaming")
         val id = _conversation.value
         val body = Json.obj(
             "role" to "planner",

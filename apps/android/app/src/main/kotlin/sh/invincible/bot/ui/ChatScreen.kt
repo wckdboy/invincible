@@ -52,6 +52,7 @@ import sh.invincible.bot.app.Bubble
 import kotlinx.coroutines.delay
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.AgentState
+import sh.invincible.bot.core.ChatList
 import sh.invincible.bot.core.Underway
 import sh.invincible.bot.core.UnderwayWords
 import sh.invincible.bot.core.bool
@@ -81,6 +82,9 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
     // A suggestion pressed: handed to the message box (counted, so the same one pressed again is handed again).
     var offered by remember { mutableStateOf<Pair<Int, String>?>(null) }
     val list = rememberLazyListState()
+    val times = rememberListTime()
+    val minute = rememberMinute()
+    val marks = remember(bubbles, times) { ChatList.timeMarks(bubbles.map { it.at }, times.zone).toSet() }
 
     LaunchedEffect(Unit) {
         away = app.away()
@@ -164,8 +168,12 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
                     }
                 }
             }
-            // Its latest answer's choices may be tapped, once it's done: the choice goes as your reply.
-            itemsIndexed(bubbles) { i, b -> Message(b, if (i == bubbles.lastIndex && !live) { choice -> chat.send(choice) } else null) }
+            // Its latest answer's choices may be tapped, once it's done: the choice goes as your reply. When it went on is said
+            // small and centred over the message it went on with (ChatList.timeMarks, the PWA's).
+            itemsIndexed(bubbles) { i, b ->
+                if (i in marks) b.at?.let { TimeMark(times.mark(it, minute * 60_000)) }
+                Message(b, if (i == bubbles.lastIndex && !live) { choice -> chat.send(choice) } else null)
+            }
             problem?.let { p -> item { Problem(p) } }
         }
         // What is under way in this chat: its agents' tasks given here (Stop on each), its looks that wait (Cancel).
@@ -506,6 +514,18 @@ private fun AsideSheet(app: AppModel, a: sh.invincible.bot.app.ChatModel.Aside, 
             if (a.id != null && a.answer.isNotEmpty() && !a.asking) AnswerPill("Bring back", app.chat::bringBack)
         }
     }
+}
+
+/** When a chat went on, small and centred over the message it went on with (as Grok Bot's chats say it). */
+@Composable
+internal fun TimeMark(words: String) {
+    Text(
+        words,
+        Modifier.fillMaxWidth().padding(horizontal = Space.margin).padding(top = Space.s3, bottom = Space.s1),
+        style = Type.meta,
+        color = LocalBrand.current.quiet,
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+    )
 }
 
 @Composable

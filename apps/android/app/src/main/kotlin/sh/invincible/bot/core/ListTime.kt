@@ -13,16 +13,33 @@ import java.util.Locale
  * vectors): today, its clock time, short ("14:05"); "Yesterday"; the weekday's name for two to six days back
  * ("Thursday"); else a numeric date ("21/11/2026"). Days are the calendar's in [zone], not 24-hour spans, and [locale]
  * is the one it speaks (speaking: English, with the phone's region). [clock] and [date] are patterns as the phone makes
- * them there (Android's DateFormat: its clock as it is set, 24 hours or 12, and its numeric date); one this java.time
- * can't read is the locale's own short form instead. Its digits are the locale's own, as the web's and the iPhone's are.
+ * them there (Android's DateFormat: its clock as it is set, 24 hours or 12, and its numeric date), and [day] the date a
+ * chat's mark says (its month's short name: "yMMMd"); one this java.time can't read is the locale's own form instead. Its digits are the locale's own, as the web's and the iPhone's are.
  */
-class ListTime(private val zone: ZoneId, private val locale: Locale, clock: String, date: String) {
+class ListTime(val zone: ZoneId, private val locale: Locale, clock: String, date: String, day: String = "") {
     private val digits = DecimalStyle.of(locale)
     private val clock = (pattern(clock) ?: DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale)).withDecimalStyle(digits)
     private val date = (pattern(date) ?: DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT).withLocale(locale)).withDecimalStyle(digits)
+    private val day = ((if (day.isEmpty()) null else pattern(day)) ?: DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale)).withDecimalStyle(digits)
 
     // (The weekday's name as it stands alone, as the web's and the iPhone's formats give it.)
     private val weekday = DateTimeFormatter.ofPattern("cccc", locale)
+
+    /**
+     * When a chat went on, as its small centred mark says it (lib/time.ts timeMark, held to the vectors): the day as people
+     * say it, then its clock time: "Today 09:41", "Yesterday 18:20", the weekday's name within the week before ("Tuesday
+     * 10:00"), else the date with its month's short name, as [day]'s pattern writes it ("21 Nov 2026 09:00").
+     */
+    fun mark(ms: Long, now: Long): String {
+        val at = Instant.ofEpochMilli(ms).atZone(zone)
+        val time = clock.format(at)
+        return when (ChronoUnit.DAYS.between(at.toLocalDate(), Instant.ofEpochMilli(now).atZone(zone).toLocalDate())) {
+            0L -> "Today $time"
+            1L -> "Yesterday $time"
+            in 2L..6L -> "${weekday.format(at)} $time"
+            else -> "${day.format(at)} $time"
+        }
+    }
 
     fun of(ms: Long, now: Long): String {
         val at = Instant.ofEpochMilli(ms).atZone(zone)

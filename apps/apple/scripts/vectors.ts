@@ -15,9 +15,9 @@ import { dirname, join } from "node:path";
 import * as core from "../../../packages/core/src/index.ts";
 import { besideChip, primaryState, type AgentState } from "../../web/src/lib/agent-state.ts";
 import { homePrimaryLine, homeRows, primaryNeeds, rosterRows } from "../../web/src/lib/roster.ts";
-import { listLocale, listTime } from "../../web/src/lib/time.ts";
+import { listLocale, listTime, timeMark } from "../../web/src/lib/time.ts";
 import { primaryNow, needsFirst, type NowInput } from "../../web/src/lib/now.ts";
-import { groupConversations } from "../../web/src/lib/chats.ts";
+import { groupConversations, timeMarks } from "../../web/src/lib/chats.ts";
 import { highlight } from "../../web/src/lib/highlight.ts";
 import { parseMarkdown } from "../../web/src/lib/markdown.ts";
 import { detectProvider, detectSignIn, planLine, providerSetup } from "../../web/src/lib/text.ts";
@@ -522,6 +522,23 @@ const listTimes = {
     locale: listLocale(device),
     cases: LIST_MOMENTS.filter((at) => !PADDED.includes(at)).map((at) => ({ at, words: listTime(at, LIST_NOW, LIST_ZONE, device) })),
   })),
+};
+
+// ---- when a chat went on (lib/chats.ts timeMarks: which messages are marked; lib/time.ts timeMark: the mark's words), at the
+// list's now and zone. `ats`: a chat's messages' times, null for one whose time isn't known (your agent's answers), which
+// is never marked. Its words for a phone in British English and one in Danish (English with Denmark's clock). ----
+const cphAt = (month: number, day: number, hour: number, minute: number) => Date.UTC(2026, month - 1, day, hour - 1, minute);
+const MARK_ATS = [cphAt(11, 27, 9, 0), null, cphAt(11, 27, 9, 14), null, cphAt(11, 27, 9, 29), cphAt(11, 27, 23, 59), cphAt(11, 28, 0, 5), cphAt(11, 28, 0, 10), null, cphAt(11, 28, 0, 40)];
+const MARK_MOMENTS = [
+  cphAt(11, 28, 9, 41), cphAt(11, 28, 0, 30), cphAt(11, 27, 18, 20), cphAt(11, 27, 0, 1), cphAt(11, 24, 10, 0), cphAt(11, 22, 9, 0),
+  cphAt(11, 21, 9, 0), cphAt(11, 5, 8, 0), cphAt(6, 3, 8, 0), Date.UTC(2025, 11, 31, 22, 0), cphAt(11, 29, 9, 0),
+];
+const chatMarks = {
+  now: LIST_NOW,
+  zone: LIST_ZONE,
+  ats: MARK_ATS,
+  marked: timeMarks(MARK_ATS, LIST_ZONE),
+  devices: ["en-GB", "da-DK"].map((device) => ({ device, cases: MARK_MOMENTS.map((at) => ({ at, words: timeMark(at, LIST_NOW, LIST_ZONE, device) })) })),
 };
 
 // ---- your agent's line in the list that is home (lib/roster.ts homePrimaryLine): never what waits on you, which its row
@@ -2070,6 +2087,7 @@ const vectors = {
   unread,
   rooms,
   listTimes,
+  chatMarks,
   homePrimary,
   agentForms,
   keys,

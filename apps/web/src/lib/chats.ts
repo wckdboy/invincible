@@ -1,4 +1,5 @@
 import type { ConversationSummary, StoredMessage } from "@invincible/core";
+import { calendarDay } from "./time.ts";
 
 /*
  * Chat history and projects as the app shows them. Pure functions (no DOM), unit-tested.
@@ -12,6 +13,27 @@ export interface ChatGroup {
 const DAY = 86_400_000;
 
 /** Pinned first, then by when they were last active: today, yesterday, this week, earlier. */
+/** A pause long enough that a chat says when it went on (Grok Bot's small centred times): a quarter of an hour. */
+export const MARK_AFTER_MS = 15 * 60_000;
+
+/**
+ * Which of a chat's messages are marked with when they were said (time.ts timeMark), by their indexes: the first whose
+ * time is known, then each said on another day than the one before it (the calendar's, in [zone]), or a quarter of an
+ * hour or more after it. A message whose time isn't known is never marked and never counts: your agent's answers are
+ * given none, so an answer is said under what it answers (I10's rule for the iPhone).
+ */
+export function timeMarks(ats: readonly (number | null)[], zone?: string): number[] {
+  const timeZone = zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const marked: number[] = [];
+  let last: number | null = null;
+  ats.forEach((at, index) => {
+    if (at === null) return;
+    if (last === null || at - last >= MARK_AFTER_MS || calendarDay(at, timeZone) !== calendarDay(last, timeZone)) marked.push(index);
+    last = at;
+  });
+  return marked;
+}
+
 export function groupConversations(list: ConversationSummary[], now = Date.now()): ChatGroup[] {
   const midnight = new Date(now);
   midnight.setHours(0, 0, 0, 0);

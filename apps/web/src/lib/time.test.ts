@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { listLocale, listTime } from "./time.ts";
+import { listLocale, listTime, timeMark } from "./time.ts";
 
 // Saturday 28 November 2026, 14:30 in Copenhagen (13:30 UTC); a list in British English, as the vectors pin it.
 const NOW = Date.UTC(2026, 10, 28, 13, 30);
@@ -46,4 +46,16 @@ test("they're said in English with the device's region: its likely one where it 
   expect(listLocale("en-GB")).toBe("en-GB");
   expect(listLocale("en")).toBe("en-US");
   expect(listLocale("de-AT")).toBe("en-AT");
+});
+
+test("a chat's mark says when it went on: the day as people say it, then its clock time", () => {
+  const mark = (ms: number, device = LOCALE) => timeMark(ms, NOW, ZONE, device);
+  expect(mark(cph(2026, 11, 28, 9, 41))).toBe("Today 09:41");
+  expect(mark(cph(2026, 11, 27, 18, 20))).toBe("Yesterday 18:20");
+  expect(mark(cph(2026, 11, 24, 10, 0))).toBe("Tuesday 10:00");
+  expect(mark(cph(2026, 11, 21, 9, 0))).toBe("21 Nov 2026 09:00");
+  expect(mark(cph(2026, 11, 5, 8, 0))).toBe("5 Nov 2026 08:00");
+  // (A phone in Danish: the app's words, Denmark's clock.)
+  expect(mark(cph(2026, 11, 27, 18, 20), "da-DK")).toBe("Yesterday 18.20");
+  expect(mark(cph(2026, 11, 24, 10, 0), "da-DK")).toBe("Tuesday 10.00");
 });

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ConversationSummary, StoredMessage } from "@invincible/core";
 import { titleFrom } from "../../../../packages/core/src/chats.ts";
-import { chatActions, CHATS_MENU, filterConversations, groupConversations, mostRecent, projectIdFrom, stepsOf, titleRepeats } from "./chats.ts";
+import { chatActions, CHATS_MENU, filterConversations, groupConversations, mostRecent, projectIdFrom, stepsOf, timeMarks, titleRepeats } from "./chats.ts";
 
 const now = new Date(2026, 10, 10, 15, 0).getTime();
 const HOUR = 3_600_000;
@@ -135,5 +135,25 @@ describe("a chat's title, said once", () => {
     expect(titleRepeats("Release plan", "What is left before the release, in order?")).toBe(false);
     // An empty first message (files alone) gives "New chat", which says nothing it repeats.
     expect([titleFrom(""), titleRepeats(titleFrom(""), "")]).toEqual(["New chat", false]);
+  });
+});
+
+describe("when a chat says it went on", () => {
+  // Saturday 28 November 2026 in Copenhagen (UTC + 1).
+  const cph = (day: number, hour: number, minute: number) => Date.UTC(2026, 10, day, hour - 1, minute);
+  const ZONE = "Europe/Copenhagen";
+  test("over its first message, then over one said on another day, or a quarter of an hour or more after the one before", () => {
+    const ats = [cph(27, 9, 0), null, cph(27, 9, 14), null, cph(27, 9, 29), cph(27, 23, 59), cph(28, 0, 5), cph(28, 0, 10)];
+    expect(timeMarks(ats, ZONE)).toEqual([0, 4, 5, 6]);
+  });
+  test("a message whose time isn't known is never marked and never counts: an answer is said under what it answers", () => {
+    expect(timeMarks([null, cph(27, 9, 0), null, cph(27, 9, 16)], ZONE)).toEqual([1, 3]);
+    expect(timeMarks([], ZONE)).toEqual([]);
+    expect(timeMarks([null, null], ZONE)).toEqual([]);
+  });
+  test("its days are the calendar's where the device is, not 24-hour spans", () => {
+    // 23:50 and 00:05 there are two days, though UTC's day turned an hour before.
+    expect(timeMarks([cph(27, 23, 50), cph(28, 0, 5)], ZONE)).toEqual([0, 1]);
+    expect(timeMarks([cph(28, 0, 30), cph(28, 0, 40)], ZONE)).toEqual([0]);
   });
 });

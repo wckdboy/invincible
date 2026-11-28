@@ -34,6 +34,22 @@ class ListTimeTest {
         for (c in cases) assertEquals("at ${c["at"].long}", c["words"].string, danes.of(c["at"].long!!, now))
     }
 
+    @Test fun aChatsMarkSaysTheDayAsPeopleSayItThenItsClockTime() {
+        val marks = Json.parse(javaClass.classLoader!!.getResource("core-vectors.json")!!.readText())["chatMarks"]!!
+        val zone = ZoneId.of(marks["zone"].string!!)
+        // (Android's patterns there, as its DateFormat makes them: "Hm", "yMd" and "yMMMd".)
+        val patterns = mapOf("en-GB" to "HH:mm", "da-DK" to "HH.mm")
+        val devices = marks["devices"].list
+        assertEquals(listOf("en-GB", "da-DK"), devices.map { it["device"].string })
+        for (device in devices) {
+            val tag = device["device"].string!!
+            val times = ListTime(zone, ListTime.speaking(Locale.forLanguageTag(tag)), clock = patterns.getValue(tag), date = "dd/MM/y", day = "d MMM y")
+            val cases = device["cases"].list
+            assertTrue(cases.size >= 11)
+            for (c in cases) assertEquals("$tag at ${c["at"].long}", c["words"].string, times.mark(c["at"].long!!, marks["now"].long!!))
+        }
+    }
+
     @Test fun itsDigitsAreTheLocalesOwn() {
         // (Egyptian Arabic writes its own digits, as the web and the iPhone write them there: java.time alone writes 0-9.)
         val egypt = ListTime(ZoneId.of(v["zone"].string!!), Locale.forLanguageTag("ar-EG"), clock = "HH:mm", date = "d/M/y")
