@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,6 +6,14 @@ import { join } from "node:path";
 import { LEASE_FILE } from "@invincible/core";
 import { SHIPMENT_SCRIPT } from "../src/ship.ts";
 import { changesCommand, checkpointCommand, REPO_TASK_START, repositoryEvidence } from "../src/team-runtime.ts";
+
+// Every test here runs git, a shell and the lease's helpers as processes, so its time is the machine's to give: nine
+// of them ran past their limits (5 s, and the smart-HTTP fetch's 30 s) in a full run at a load of 72 to 151 on 12
+// cores (27 November 2026). With 2 % of a core (what each of about 585 runnable tasks gets of 12) the slowest took
+// 94.2 s ("doesn't fetch, with the lease, through a repository whose configuration would take the fetch elsewhere",
+// 4.4 s on the Mac mini at a load of 59 on 18), the smart-HTTP fetch 49.7 s and the rest at most 44.6 s. One limit for
+// the file, with room: how long a busy machine may take, never what a test checks.
+setDefaultTimeout(180_000);
 
 /*
  * The node's own git in an agent's repository, with the repository's own configuration held off (held-git.ts: the
@@ -341,7 +349,7 @@ describe("the lease's fetch, against a smart-HTTP server", () => {
       gate.stop();
       other.stop();
     }
-  }, 30_000);
+  });
 
   // (The fifth review's R5-3 A: a fetch's negotiation asks an alternate object store for its refs, by the repository's
   // core.alternateRefsCommand, through a shell.)
@@ -368,7 +376,7 @@ describe("the lease's fetch, against a smart-HTTP server", () => {
     } finally {
       gate.stop();
     }
-  }, 30_000);
+  });
 });
 
 describe("a step's checkpoint, and what is kept to ship", () => {
