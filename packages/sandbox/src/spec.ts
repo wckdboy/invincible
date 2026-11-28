@@ -346,9 +346,11 @@ export const execArgs = (id: string, cmd: string[], timeoutSec: number): string[
  * tag in its environment. What the side starts inherits the tag unless it is given an environment of its own (as the
  * node's git is), and stays in the process group its `timeout` leads unless it makes one of its own. The tag and that
  * group are how what the side started is found again in its VM and ended there when the pipe ends it (PIPE_END; the
- * seventh fabric review's I-c).
+ * seventh fabric review's I-c). Only the receiving side is given its input (`input`): a Kata VM runs no other exec while
+ * an interactive one runs (on Ultra, 28 November 2026, a second exec waited out the first; with neither interactive it ran
+ * in 42 ms), so the sending side, which reads none, is no interactive exec, and its end can run beside it.
  */
-export const pipeArgs = (id: string, cmd: string[], timeoutSec: number, tag: string): string[] => ["exec", "--env", `INVINCIBLE_PIPE=${tag}`, ...execArgs(id, cmd, timeoutSec).slice(1)];
+export const pipeArgs = (id: string, cmd: string[], timeoutSec: number, tag: string, input: boolean): string[] => ["exec", "--env", `INVINCIBLE_PIPE=${tag}`, ...(input ? ["--interactive"] : []), "--workdir", "/work", containerName(id), "timeout", "--signal=KILL", `${timeoutSec}s`, ...cmd];
 
 /**
  * A pipe's end, run in one of its VMs with the pipe's tag (`sh -c PIPE_END end <tag>`) once a side's docker client has

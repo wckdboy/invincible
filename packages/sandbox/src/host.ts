@@ -2220,8 +2220,8 @@ export class SandboxHost {
     // The pipe's own tag, 128 bits, in the environment of what both sides start: how that is found again to be ended (I-c).
     const tag = hex(randomBytes(16));
     try {
-      const source = Bun.spawn([this.bin, ...pipeArgs(from.id, from.cmd, opts.timeoutSec, tag)], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-      const sink = Bun.spawn([this.bin, ...pipeArgs(to.id, to.cmd, opts.timeoutSec, tag)], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      const source = Bun.spawn([this.bin, ...pipeArgs(from.id, from.cmd, opts.timeoutSec, tag, false)], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+      const sink = Bun.spawn([this.bin, ...pipeArgs(to.id, to.cmd, opts.timeoutSec, tag, true)], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
       // Each side is ended once: PIPE_END in its VM, while its client still takes its output, and then its client killed,
       // once that has run or past its bound, whatever it did. Killed first, a client left an exec whose output nothing
       // read, and in a Kata VM that held the next exec, PIPE_END's, back for its whole bound: 45 s on Ultra (28 November

@@ -159,16 +159,19 @@ for (const runtime of ["runc", "kata"] as const) {
         Object.assign(pipes, { get: async (id: string) => ([from, to].includes(id) ? ({ id, status: "running" } as unknown as SandboxView) : null) });
         // Neither side would end on its own within the test. Each starts a child without the pipe's tag, as the node's git
         // runs with an environment of its own, in the group its timeout leads; the sender floods past the cap, the receiver
-        // reads its input to its end, and both then wait on their children.
+        // reads its input to its end, and both then wait on their children. In a Kata VM the receiver ends with its input,
+        // as the node's own receivers do: a Kata VM runs no other exec while an interactive one runs, and the receiving
+        // side's is one (its input), so one that ran on past its input could be ended only by its own deadline.
         // (The sides' own deadline is past the test's, so what is gone is gone by the pipe's end, never by their timeout;
         // and the pipe returns well within an end's bound, 45 s, which a Kata VM once made every end wait out.)
         const began = Date.now();
-        const cut = await pipes.pipe(side(from, "env -u INVINCIBLE_PIPE sleep 271 & head -c 50000000 /dev/zero; wait"), side(to, "env -u INVINCIBLE_PIPE sleep 272 & cat >/dev/null; wait"), { timeoutSec: 600, maxBytes: 1_000_000 });
+        const receiver = runtime === "kata" ? "cat >/dev/null" : "env -u INVINCIBLE_PIPE sleep 272 & cat >/dev/null; wait";
+        const cut = await pipes.pipe(side(from, "env -u INVINCIBLE_PIPE sleep 271 & head -c 50000000 /dev/zero; wait"), side(to, receiver), { timeoutSec: 600, maxBytes: 1_000_000 });
         expect(cut.cut).toBe(true);
         expect(Date.now() - began).toBeLessThan(30_000);
         // Once it has returned, nothing of either side runs in either VM: not the untagged children, not the sides' own
         // timeout, and nothing with a pipe's tag in its environment.
-        for (const [name, pattern] of [[from, "[s]leep 271"], [from, "[h]ead -c 50000000"], [from, "[t]imeout --signal=KILL 600s"], [to, "[s]leep 272"], [to, "[t]imeout --signal=KILL 600s"]] as const) {
+        for (const [name, pattern] of [[from, "[s]leep 271"], [from, "[h]ead -c 50000000"], [from, "[t]imeout --signal=KILL 600s"], [to, "[s]leep 272"], [to, "[c]at >/dev/null"], [to, "[t]imeout --signal=KILL 600s"]] as const) {
           expect([name, pattern, await gone(name, pattern)]).toEqual([name, pattern, true]);
         }
         for (const name of [from, to]) expect([name, inside(name, "grep -lsF INVINCIBLE_PIPE= /proc/[0-9]*/environ | wc -l").stdout.trim()]).toEqual([name, "0"]);
