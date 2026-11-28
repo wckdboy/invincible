@@ -21,6 +21,10 @@ sandbox host: the harness is built (below).
   - **`desktop`** (`desktop.c`): the verb the agent and the node speak to deskd with. `desktop --session` is the
     agent's held session; `desktop --owner-session` is yours, opened by the node beside it; `desktop stream` is the
     encoder.
+  - **What `desktop open` opens:** the web, the VM's own files, about: pages and the browser's settings
+    (`chrome://settings` and its pages); never another page of the browser's own, its flags or its extensions above
+    all, nor `javascript:` or `data:`, since you may take the computer over. Yours, from the screen's address field,
+    opens the first three alone.
   - **The encoder** (`stream.c`, run as `desktop stream`): H.264 Constrained Baseline (OpenH264, Debian's
     `libopenh264-8`), run only while someone watches.
     It sends 10 frames a second while the screen changes and nothing while it is still; a `fast` on its stdin, which

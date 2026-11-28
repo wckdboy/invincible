@@ -350,6 +350,18 @@ everything but the model.
     7.0 ms at the median, where the tree's listing took 86.6 (Ultra, the load about 30 on 32 cores from others' work).
     At that load the tree took 76 ms at 552ceadc, before any of these changes, 80 at 02e56493 with the fields' values,
     and 89 to 95 with the count: its baseline's 25 ms was taken on a quieter host.
+- **The browser's settings, opened, 28 November 2026.** The same 6 of 6 model runs of the settings task each asked
+  first for `desktop open chrome://settings/appearance` and were refused: 1 to 3 calls lost, the refused one with them,
+  before the address was typed another way. `desktop open` now takes the settings and their pages, and no other page of
+  the browser's own. On Ultra, in a fresh Kata VM from this branch (the load about 26 on 32 cores):
+  - `chrome://settings/appearance` opened "Settings - Appearance";
+  - `chrome://settings/../flags`, `chrome://settings/%2e%2e/flags` and `chrome://settings/\flags` opened the
+    settings' own first page, `chrome://settings/`;
+  - `about:flags`, `about:extensions` and `about:version` stayed blank pages, each at the address given;
+  - `chrome://flags`, `chrome://extensions`, `javascript:alert(1)` and `data:text/html,x` were refused.
+
+  The shell way's stand-in opens the settings so: 3 calls, 5 of 5 (the load 26 to 28; the form at 3, the terminal at
+  2 and the editor at 3, each 5 of 5, as before).
 
 ### hardware: KiCad and FreeCAD on an agent's desktop
 

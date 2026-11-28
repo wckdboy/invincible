@@ -103,7 +103,8 @@ test("the shell's stand-in sets the settings' font size in one fill, the control
   const vm = desk();
   const run = await viaLoop(GOALS.settings(""), loopAsk(ctx, counted), vm.exec, counted);
   expect([run.error, run.outcome?.status]).toEqual([null, "unverified"]);
-  expect(run.said).toEqual(["desktop key ctrl+l && desktop type chrome://settings/appearance && desktop key Return && desktop settle", 'desktop fill "Font size" Large']);
+  // (Its address opened as every model asked for it first, 28 November 2026: the browser's settings, which open takes.)
+  expect(run.said).toEqual(["desktop open chrome://settings/appearance", 'desktop fill "Font size" Large']);
   expect(run.calls).toBe(3);
 });
 

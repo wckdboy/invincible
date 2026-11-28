@@ -157,7 +157,7 @@ export async function* shellTurns(task: TaskName, where: Where, file: string): A
     yield { calls: [bash(`desktop click ${at(w)} && desktop type 'echo $((6*7)) > ${file}' && desktop key Return`)] };
     yield { text: "DONE\nRan it in the terminal." };
   } else if (task === "settings") {
-    yield { calls: [bash("desktop key ctrl+l && desktop type chrome://settings/appearance && desktop key Return && desktop settle")] };
+    yield { calls: [bash("desktop open chrome://settings/appearance")] };
     // (On the screen or below its edge: `desktop fill` scrolls to it the page's own way, and needs no turn to scroll.)
     const p = await polled(() => where("settings-font"), (q) => typeof q.x === "number" || Boolean(q.offscreen), 8, 400);
     if (typeof p.x !== "number" && !p.offscreen) return yield { text: `GIVE UP\nThe font size setting isn't on the page: ${JSON.stringify(p).slice(0, 200)}` };

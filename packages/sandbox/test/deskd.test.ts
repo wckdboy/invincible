@@ -1679,6 +1679,26 @@ print(json.dumps({"before": before, "box": list(box), "scrolled": bool(node.get(
     expect(got.edge[1]).toBeLessThan(800);
   });
 
+  test("desktop open takes the browser's own settings, chrome://settings and its pages, and refuses every other chrome:// page, javascript: and data:", () => {
+    // (Every settings run of the models, 28 November 2026, 6 of 6, first asked for
+    // `desktop open chrome://settings/appearance` and was refused: 1 to 3 calls lost, the refused one with them, before
+    // it typed the address another way. The browser itself is never weakened from here: its flags, its extensions and
+    // every other page of its own stay out of reach.)
+    const got = py(`
+opened = []
+d.open_address = lambda desk, address: (opened.append(address), "opened " + address)[1]
+def tried(a):
+    code, out, err = d.cli(object(), ["open", a])
+    return [code, out.strip() or err.strip()]
+ok = ["chrome://settings", "chrome://settings/", "chrome://settings/appearance", "chrome://settings/?search=font", "chrome://settings/fonts#size", "http://example.test/", "about:blank"]
+no = ["chrome://flags", "chrome://extensions", "chrome://flags/#enable-something", "chrome://version", "chrome://settingsx", "chrome://settings.evil/", "chrome://settings@flags", "chrome://settings%2F..%2Fflags", "chrome://settings\\\\flags", "chrome://settings/ x", "chrome://settings\\n", "chrome://settings/appearance\\n", "Chrome://settings", "chrome://SETTINGS", "chrome-extension://abc/page.html", "view-source:http://example.test/", "javascript:alert(1)", "data:text/html,<b>x</b>", " chrome://settings"]
+print(json.dumps({"ok": {a: tried(a) for a in ok}, "no": {a: tried(a) for a in no}, "opened": opened}))`) as { ok: Record<string, [number, string]>; no: Record<string, [number, string]>; opened: string[] };
+    for (const [address, [code, said]] of Object.entries(got.ok)) expect([address, code, said]).toEqual([address, 0, `opened ${address}`]);
+    for (const [address, [code, said]] of Object.entries(got.no)) expect([address, code, said]).toEqual([address, 2, "desktop: an address begins with http, https, file or about, or is the browser's settings (chrome://settings and its pages)"]);
+    // Nothing refused was ever opened.
+    expect(got.opened).toEqual(Object.keys(got.ok));
+  });
+
   test("desktop tree ends with one line counting what can be acted on off the screen, which desktop find reaches; nothing when there is none", () => {
     const got = py(`${BUS}
 del NODES["/n6"]

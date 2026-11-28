@@ -54,6 +54,12 @@ OWNER_UID = int(os.environ.get("INVINCIBLE_DESKTOP_OWNER_UID", "1001"))
 # IDLE_STOP s, that no one holds and no one watches, is stopped as `desktop stop` stops it. The next command starts it
 # again, and the agent's next command is told why its screen is fresh. 0 keeps it up.
 IDLE_STOP = float(os.environ.get("INVINCIBLE_DESKTOP_IDLE", "600"))
+# What `desktop open` opens: the web, the VM's own files, about: pages, and of the browser's own pages its settings
+# alone: chrome://settings, bare or with a path, a query or a fragment after it and no space, so the address's host is
+# the settings' own (C1, 28 November 2026: every settings run of the models asked for them first, and was refused).
+# Never another of its own, its flags or its extensions above all, nor javascript: or data:: nothing from here weakens
+# the browser itself, which the owner may take over.
+OPENS = re.compile(r"^(?:https?://|file://|about:)|^chrome://settings(?:[/?#]\S*)?\Z")
 BROWSER_CLASS = "Chromium"  # the browser's windows' WM_CLASS, as the desktop's start launches it (Pieces._start)
 ENCODER_COMM = "desktop-stream"  # the stream's encoder: it runs only while someone watches (desktop.c, stream.c)
 IDLE_NOTE = "idle-stopped"  # left in the run directory by a deskd that stopped an unused desktop, for the next to say
@@ -2188,8 +2194,9 @@ class Desk:
 HELP = """desktop start                      bring up the display, the window manager and the browser
 desktop stream                     the screen as H.264 on stdout while it runs (the node's watching: desktop-stream)
 desktop status | desktop stop       (an unused desktop stops by itself after 10 minutes; the next command starts it)
-desktop open <address>             open an address in the browser (http, https, file or about), the browser brought
-                                   forward with the keyboard in its page
+desktop open <address>             open an address in the browser (http, https, file or about, or its settings:
+                                   chrome://settings and its pages), the browser brought forward with the keyboard
+                                   in its page
 desktop text                       the page in front, as text: its title, its address, what it says
 desktop dialog accept [text] | dismiss   answer a JavaScript dialog on the page (alert, confirm, prompt)
 desktop app <terminal|editor>      start a terminal (xterm) or an editor (mousepad) on the screen
@@ -2314,8 +2321,8 @@ def cli(desk, argv, cwd="/work", env=None):
             return 0, "%s the %s %s\n" % ("accepted" if args[0] == "accept" else "dismissed", done["type"], json.dumps(done["message"], ensure_ascii=False)), ""
         if verb == "open":
             address = args[0] if args else ""
-            if not re.match(r"^(https?://|file://|about:)", address):
-                raise Refused("an address begins with http, https, file or about")
+            if not OPENS.match(address):
+                raise Refused("an address begins with http, https, file or about, or is the browser's settings (chrome://settings and its pages)")
             return 0, open_address(desk, address) + "\n", ""
         if verb == "text":
             got = desk.browser_ready().evaluate("document.title + '\\n' + location.href + '\\n' + (document.body ? document.body.innerText : '').slice(0, 20000)")
