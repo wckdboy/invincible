@@ -880,9 +880,13 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       the same counts at the most it could have been, every byte sent and answered a token. A call cut before its answer
       ends, by its client or the network, is counted as it ends (the fifth re-review's R5-2): each byte sent an input
       token, and the most output it allowed itself (its `max_tokens`, for each answer it asked for: chat's `n`), or what
-      was said or answered if more. What its budget can't count is taken out of a call where the call means the same
-      without it (the fifth re-review's R5-4, `heldToCount`): the providers' own tools, billed per use or run by another
-      model (OpenAI's built-ins; Anthropic's server tools, with code execution's container, the MCP connector's servers,
+      was said or answered if more. A call whose provider had said its usage as its last word when its client went (a
+      usage chunk with no choices left, a Responses completion, Anthropic's output at its stop) is counted as it said:
+      what it bills. A client that goes once its answer is generated is read on for that word for at most 5 seconds and
+      64 KiB, never one that goes in the middle of an answer (`gateway-lease.test.ts`, `gateway-usage.test.ts`).
+      What its budget can't count is taken out of a call where the call means the same without it (the fifth
+      re-review's R5-4, `heldToCount`): the providers' own tools, billed per use or run by another model (OpenAI's
+      built-ins; Anthropic's server tools, with code execution's container, the MCP connector's servers,
       and an advisor), a fallback to another model (Anthropic's `fallbacks`), and a dearer speed or tier (OpenAI's
       priority and scale tiers, Anthropic's fast mode). Codex declares OpenAI's web search in every call (0.172.0,
       captured on 27 November 2026) and goes on without it; Claude Code (2.1.326) declares its own tools alone. Refused:

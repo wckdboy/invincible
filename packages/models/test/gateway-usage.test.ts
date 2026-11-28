@@ -29,6 +29,23 @@ describe("a coding tool's call, read as the gateway forwards it", () => {
     "[DONE]",
   );
 
+  test("when its answer is generated, and when its provider has said its usage as its last word: never a running count mid-answer", () => {
+    /** Where the reader stands after each event: [finished, final]. */
+    const stands = (kind: "openai" | "anthropic", ...events: unknown[]) => {
+      const reader = usageReader(kind);
+      return events.map((e) => (reader.feed(bytes(sse(e))), [reader.finished(), reader.final()]));
+    };
+    // A chat completion: generated at its finish_reason; its usage chunk (no choices in it) is the last word.
+    expect(stands("openai", { choices: [{ delta: { content: "hi" } }] }, { choices: [{ delta: {}, finish_reason: "stop" }] }, { choices: [], usage: { prompt_tokens: 9, completion_tokens: 3 } }, "[DONE]")).toEqual([[false, false], [true, false], [true, true], [true, true]]);
+    // A provider that says a running count in every chunk hasn't said its last word until [DONE].
+    const running = (n: number, finish?: string) => ({ choices: [{ delta: { content: "x" }, ...(finish ? { finish_reason: finish } : {}) }], usage: { prompt_tokens: 9, completion_tokens: n } });
+    expect(stands("openai", running(1), running(2), running(3, "stop"), "[DONE]")).toEqual([[false, false], [false, false], [true, false], [true, true]]);
+    // Anthropic's: the output count at its stop.
+    expect(stands("anthropic", { type: "message_start", message: { usage: { input_tokens: 9, output_tokens: 1 } } }, { type: "content_block_delta", delta: { text: "hi" } }, { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 3 } }, { type: "message_stop" })).toEqual([[false, false], [false, false], [true, true], [true, true]]);
+    // OpenAI's Responses: its completion, with the usage in it.
+    expect(stands("openai", { type: "response.output_text.delta", delta: "hi" }, { type: "response.completed", response: { usage: { input_tokens: 9, output_tokens: 3 } } })).toEqual([[false, false], [true, true]]);
+  });
+
   test("OpenAI's chat completions: the usage on the stream's last chunk, however the stream is cut", () => {
     expect(read("openai", chat)).toEqual({ input: 120, output: 30, cached: 100 });
     expect(read("openai", chat, true)).toEqual({ input: 120, output: 30, cached: 100 });

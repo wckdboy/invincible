@@ -54,6 +54,13 @@ export interface UsageReader {
   feed(chunk: Uint8Array): void;
   /** The answer has ended: its usage, or null when it said none. */
   end(): Usage | null;
+  /** Its answer is generated: a finish_reason, Anthropic's stop, a Responses completion, or [DONE]. What may still come
+   * is its last word on usage, and its end. */
+  finished(): boolean;
+  /** The provider has said its usage as its last word on it: a chat completion's usage chunk (no choices left in it),
+   * a Responses completion's, or Anthropic's output count at its stop. A provider that says a running count in every
+   * chunk hasn't said this until its answer's end. */
+  final(): boolean;
 }
 
 /** Reads one answer's usage as it goes by. `kind` is the provider's protocol; `embeddings`, that the call is one. */
@@ -67,9 +74,16 @@ export function usageReader(kind: "openai" | "anthropic", embeddings = false): U
   let last: Usage | null = null;
   let started: Record<string, unknown> | null = null;
   let finalOutput: number | null = null;
+  let done = false;
+  let lastWord = false;
 
   const event = (data: string): void => {
-    if (data === "[DONE]") return;
+    if (data === "[DONE]") {
+      // (Nothing comes after it: a usage said by then is its last word, whichever chunk said it.)
+      done = true;
+      if (last) lastWord = true;
+      return;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(data);
@@ -84,14 +98,26 @@ export function usageReader(kind: "openai" | "anthropic", embeddings = false): U
     }
     if (e.type === "message_delta") {
       finalOutput = tokenCount(record(e.usage)?.output_tokens) ?? finalOutput;
+      if (record(e.delta)?.stop_reason) {
+        done = true;
+        if (finalOutput !== null) lastWord = true;
+      }
       return;
     }
     if (e.type === "response.completed") {
       last = responsesUsage(record(e.response)?.usage) ?? last;
+      done = true;
+      if (last) lastWord = true;
       return;
     }
-    // A chat completion's last chunk, when the stream was asked for its usage.
-    if (e.usage) last = openAIUsage(e.usage) ?? last;
+    if (e.type === "message_stop") done = true;
+    const choices = Array.isArray(e.choices) ? e.choices : null;
+    if (choices?.some((c) => record(c)?.finish_reason)) done = true;
+    // A chat completion's last chunk, when the stream was asked for its usage: no choices left in it, its usage alone.
+    if (e.usage) {
+      last = openAIUsage(e.usage) ?? last;
+      if (last && !choices?.length) lastWord = true;
+    }
   };
 
   const line = (raw: string): void => {
@@ -102,6 +128,8 @@ export function usageReader(kind: "openai" | "anthropic", embeddings = false): U
   };
 
   return {
+    finished: () => done,
+    final: () => lastWord,
     feed(chunk) {
       const s = text.decode(chunk, { stream: true });
       // A stream is read event by event: the whole of it is kept only until it shows it is one.

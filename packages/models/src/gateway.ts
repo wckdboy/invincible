@@ -163,6 +163,8 @@ export interface GatewayContext {
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   /** The node's one pacer (bursts.ts Pacer), shared with its chat(): a provider with a pace is called within it. Absent: none kept. */
   pacer?: Pacer;
+  /** How long a call whose client went once its answer was generated is read on for its provider's usage (READ_ON_MS; tests shorten it). */
+  drainMs?: number;
 }
 
 /** A call's `model`, when it is one a model's name may be, or "unknown". */
@@ -437,6 +439,12 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
       ? waitingOutBursts(ctx.fetch ?? fetch, { provider: providerId, now: () => windows.now(), ...(ctx.sleep ? { sleep: ctx.sleep } : {}), ...(ctx.pacer && preset(providerId)?.pace ? { pace: { pacer: ctx.pacer, perMinute: preset(providerId)!.pace! } } : {}) })
       : (ctx.fetch ?? fetch);
   let upstream: Response;
+  // The provider's call has an end of its own. Until its answer starts, its client's going ends it, as ever; once a
+  // counted answer has started, the going is weighed below (read on for the provider's last word on usage, or cut).
+  const upstreamCut = new AbortController();
+  const cutUpstream = () => upstreamCut.abort();
+  if (request.signal.aborted) upstreamCut.abort();
+  else request.signal.addEventListener("abort", cutUpstream, { once: true });
   try {
     upstream = await asking(target, {
       method: request.method,
@@ -444,7 +452,7 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
       body: sent,
       // The key is pinned to this provider's origin: it never chases a Location header to another host.
       redirect: "manual",
-      signal: request.signal,
+      signal: upstreamCut.signal,
     });
   } catch (error) {
     // (A held call cut before any answer came, by its client or the network: counted at its most all the same. R5-2.)
@@ -480,19 +488,67 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
   const allowed = held ? allowedOutput(shaped?.call ?? null) : 0;
   let answered = 0;
   let told = false;
-  // Counted once, however its answer ends: read to its end, cut by its client, or broken (R5-2). A held call cut is
-  // counted at its most from what was sent; any other, at what its answer said by then.
+  // Counted once, however its answer ends: read to its end, cut by its client, or broken (R5-2). The provider's own
+  // last word on its usage is what it bills, however its client went: a client that reads to [DONE] and goes before
+  // the stream's end, as OpenCode does, cut nothing. Without that word, a held call cut is counted at its most from
+  // what was sent, and any other at what its answer said by then.
   const tell = (whole: boolean) => {
     if (told) return;
     told = true;
     try {
       const said = reader.end();
-      report({ ...call, usage: whole ? (said ?? (held ? heldUsage(sent?.byteLength ?? 0, answered) : null)) : held ? cutUsage(said, sent?.byteLength ?? 0, answered, allowed) : said });
+      report({ ...call, usage: reader.final() ? said : whole ? (said ?? (held ? heldUsage(sent?.byteLength ?? 0, answered) : null)) : held ? cutUsage(said, sent?.byteLength ?? 0, answered, allowed) : said });
     } catch {
       /* nor does the one told of it */
     }
   };
   const source = upstream.body.getReader();
+  const drainMs = ctx.drainMs ?? READ_ON_MS;
+  let left = false;
+  // Its client has gone. With the answer generated, only the provider's last word on usage, and the stream's end, may
+  // be still to come: it is read on for, for at most drainMs and READ_ON_BYTES, then the call is counted. In the
+  // middle of an answer the call is cut at once: reading on would have its provider generate what no one reads, and it
+  // is counted at its most (R5-2).
+  const leave = () => {
+    if (left || told) return;
+    left = true;
+    request.signal.removeEventListener("abort", leave);
+    const end = () => {
+      source.cancel().catch(() => {});
+      upstreamCut.abort();
+    };
+    if (reader.final() || !reader.finished()) {
+      tell(false);
+      end();
+      return;
+    }
+    void (async () => {
+      const until = Date.now() + drainMs;
+      let read = 0;
+      let whole = false;
+      try {
+        while (!reader.final() && read <= READ_ON_BYTES) {
+          const next = await within(source.read(), until - Date.now());
+          if (!next) break;
+          if (next.done) {
+            whole = true;
+            break;
+          }
+          read += next.value.byteLength;
+          answered += next.value.byteLength;
+          try {
+            reader.feed(next.value);
+          } catch {
+            /* counting never gets in the way */
+          }
+        }
+      } catch {
+        /* its answer broke while it was read on */
+      }
+      tell(whole);
+      end();
+    })();
+  };
   const counted = new ReadableStream<Uint8Array>({
     async pull(controller) {
       let next: Awaited<ReturnType<typeof source.read>>;
@@ -500,12 +556,20 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
         next = await source.read();
       } catch (error) {
         tell(false);
-        controller.error(error);
+        try {
+          controller.error(error);
+        } catch {
+          /* its client has gone */
+        }
         return;
       }
       if (next.done) {
         tell(true);
-        controller.close();
+        try {
+          controller.close();
+        } catch {
+          /* its client has gone */
+        }
         return;
       }
       answered += next.value.byteLength;
@@ -514,17 +578,42 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
       } catch {
         /* counting never gets in the answer's way */
       }
-      controller.enqueue(next.value);
+      try {
+        controller.enqueue(next.value);
+      } catch {
+        /* its client has gone: what it read was counted all the same */
+      }
     },
-    cancel(reason) {
-      tell(false);
-      return source.cancel(reason);
+    cancel() {
+      leave();
     },
   });
-  // (A client that goes may never cancel an answer it stops reading: its request's end says so too.)
-  request.signal.addEventListener("abort", () => {
-    tell(false);
-    source.cancel().catch(() => {});
-  }, { once: true });
+  // (A client that goes may never cancel an answer it stops reading: its request's end says so too.) From here, its
+  // going is weighed as above, not cut at once.
+  request.signal.removeEventListener("abort", cutUpstream);
+  if (request.signal.aborted) leave();
+  else request.signal.addEventListener("abort", leave, { once: true });
   return new Response(counted, { status: upstream.status, headers: responseHeaders });
+}
+
+/** A call whose client went once its answer was generated is read on for its usage this long, at most, and this much. */
+const READ_ON_MS = 5_000;
+const READ_ON_BYTES = 64 * 1024;
+
+/** What `promise` gives within `ms`, or null when the time runs out first (its timer cleared either way). */
+function within<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  if (ms <= 0) return Promise.resolve(null);
+  return new Promise<T | null>((resolve, reject) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }

@@ -405,6 +405,90 @@ test("a held call whose client goes before any answer comes is counted at its mo
 });
 
 /*
+ * A held call whose client goes once the provider is done. Replayed offline on 28 November 2026: OpenCode reads a
+ * stream through its usage and its [DONE], then ends its request before the stream itself ends, so each call it made
+ * through the gateway for a handed task was counted cut, at its most. Ultra's first hand-off was recorded at 44.3k
+ * "tokens" in and 57.3k out for two calls, where DeepSeek said a few thousand and a few hundred: $0.30 for about $0.02.
+ * Such a call is counted as the provider said, which is what it bills. One whose client goes once the answer is
+ * generated, before its usage comes, is counted as the provider then says: the gateway reads on, for a moment, for its
+ * last word. One that goes in the middle of an answer is cut at once and counted at its most, as ever (R5-2).
+ */
+let finishing: "usage-then-hold" | "usage-later" | "never" = "usage-then-hold";
+const providerSaid = { prompt_tokens: 5000, completion_tokens: 300, total_tokens: 5300, prompt_cache_hit_tokens: 4800, prompt_cache_miss_tokens: 200, completion_tokens_details: { reasoning_tokens: 200 } };
+const finished = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  fetch: async (req) => {
+    await req.arrayBuffer();
+    const enc = new TextEncoder();
+    const chunk = (o: object) => enc.encode(`data: ${JSON.stringify({ id: "c", object: "chat.completion.chunk", model: "gpt-paid", ...o })}\n\n`);
+    const mode = finishing;
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(chunk({ choices: [{ index: 0, delta: { content: "hello" }, finish_reason: null }] }));
+        controller.enqueue(chunk({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }));
+        // ("never": the answer is generated, and then nothing more ever comes, nor does the stream end.)
+        if (mode === "never") return;
+        if (mode === "usage-later") await Bun.sleep(150);
+        controller.enqueue(chunk({ choices: [], usage: providerSaid }));
+        controller.enqueue(enc.encode("data: [DONE]\n\n"));
+        // (Then the stream is held open, as a provider's that ends a moment later: its client has gone by then.)
+      },
+    });
+    return new Response(stream, { headers: { "content-type": "text/event-stream" } });
+  },
+});
+afterAll(async () => await finished.stop(true));
+
+/** A held lease's streamed call whose client reads until `until` is among what it read, then goes, as OpenCode does. */
+async function goesAfter(until: string, drainMs?: number) {
+  const identity = newNodeIdentity();
+  const store = new LedgerStore(":memory:");
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
+  const vault = new Vault(store, identity);
+  vault.set("openai", HELD_KEY, { provider: "openai", origin: `http://127.0.0.1:${finished.port}` });
+  store.emit(identity, "provider.set", { id: "openai", kind: "openai", baseUrl: `http://127.0.0.1:${finished.port}/v1`, secret: "openai" });
+  const tokens = new GatewayTokens(new Database(":memory:"));
+  const { token } = tokens.mint({ label: "sandbox:0123456789", providers: ["openai"], models: ["openai/gpt-paid"], ttlMinutes: 30, maxRequests: 500 });
+  const usage: (Usage | null)[] = [];
+  const ask = { model: "gpt-paid", stream: true, max_tokens: 32_000, messages: [{ role: "user", content: "x".repeat(20_000) }] };
+  const client = new AbortController();
+  const answer = await handleGateway(new Request("http://127.0.0.1:7400/gw/openai/chat/completions", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(ask), signal: client.signal }), { store, vault, tokens, onUsage: (c) => void usage.push(c.usage), ...(drainMs !== undefined ? { drainMs } : {}) });
+  const body = answer.body!.getReader();
+  const text = new TextDecoder();
+  let read = "";
+  while (!read.includes(until)) {
+    const next = await body.read();
+    if (next.done) break;
+    read += text.decode(next.value, { stream: true });
+  }
+  await body.cancel();
+  client.abort();
+  for (let i = 0; i < 300 && usage.length === 0; i++) await Bun.sleep(10);
+  return { usage, ask };
+}
+
+test("a held call whose client goes once the provider said its usage, as OpenCode does after [DONE], is counted as the provider said, not at its most", async () => {
+  finishing = "usage-then-hold";
+  const { usage } = await goesAfter("[DONE]");
+  expect(usage).toEqual([{ input: 5000, output: 300, cached: 4800, reasoning: 200 }]);
+});
+
+test("a held call whose client goes once its answer is generated, before its usage comes, is counted as the provider then says: the gateway reads on for it", async () => {
+  finishing = "usage-later";
+  const { usage } = await goesAfter('"finish_reason":"stop"');
+  expect(usage).toEqual([{ input: 5000, output: 300, cached: 4800, reasoning: 200 }]);
+});
+
+test("one whose provider says nothing more once its answer is generated is counted at its most, once the gateway has read on as long as it may", async () => {
+  finishing = "never";
+  const { usage, ask } = await goesAfter('"finish_reason":"stop"', 100);
+  expect(usage).toHaveLength(1);
+  expect(usage[0]!.input).toBeGreaterThanOrEqual(JSON.stringify(ask).length);
+  expect(usage[0]!.output).toBeGreaterThanOrEqual(32_000);
+});
+
+/*
  * What a held lease's budget can't count (the fifth fabric review's R5-4) is taken out of its call where the call means
  * the same without it, and refused where it doesn't. Taken out: a provider's own tools, billed per use or run on another
  * model, and a dearer speed or tier. Refused: a background response, chat's web search, a tool_choice for a tool taken
