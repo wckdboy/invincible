@@ -36,7 +36,7 @@ import {
 import type { ModelMessage, ToolImage } from "@invincible/models";
 import { DESKTOP_EVIDENCE, desktopBriefing, hardwareBriefing, SHIPMENT_SCRIPT, stepsNamed } from "@invincible/agents";
 import { learnedLines, learnFromRun, type RunTrail, runTrail } from "@invincible/agents";
-import { AGENTS, attemptInstructions, chooseAgentModels, commandsRun, type EffortEvent, type EffortPick, type EffortResult, ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramShell, evidenceCollector, gateBy, type GateResult, investigate, type InvestigationOutcome, observation, RUN_DEFAULTS, type RunEvent, type RunOptions, type RunOutcome, runStanding, readResults, runEffort, runLoop, standingAfter, type Trip, timingLine } from "@invincible/agents";
+import { AGENTS, attemptInstructions, chooseAgentModels, commandsRun, escalatedWhy, type EffortEvent, type EffortPick, type EffortResult, ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramShell, evidenceCollector, gateBy, type GateResult, investigate, type InvestigationOutcome, observation, RUN_DEFAULTS, type RunEvent, type RunOptions, type RunOutcome, runStanding, readResults, runEffort, runLoop, standingAfter, type Trip, timingLine } from "@invincible/agents";
 
 /*
  * `invincible do "<goal>"`: a run from the terminal. The loop itself is pure
@@ -441,7 +441,7 @@ export function printRunEvent(event: RunEvent): void {
       console.log(`  ${bold(`${event.model} couldn't answer as ${event.role}`)}: ${event.error.split("\n")[0]}. ${event.answered} answers instead.`);
       return;
     case "escalated":
-      console.log(`  ${bold(`The same gate failed twice in a row: the ${event.to}'s models take the work`)} ${dim(`· $ ${firstLines(event.gate, 1)}`)}`);
+      console.log(`  ${bold(`${escalatedWhy(event)}: the ${event.to}'s models take the work`)}${event.why === "gate" ? ` ${dim(`· $ ${firstLines(event.gate, 1)}`)}` : ""}`);
       return;
     case "routed":
       console.log(`  ${bold(`The ${event.to}'s models do the work`)} ${dim(`· ${event.why}`)}`);
@@ -493,7 +493,7 @@ function printAttempt(attempt: number, event: RunEvent): void {
       console.log(`${tag} ${bold(`${event.model} couldn't answer as ${event.role}`)}: ${event.error.split("\n")[0]}. ${event.answered} answers instead.`);
       return;
     case "escalated":
-      console.log(`${tag} ${bold(`a gate failed twice: the ${event.to} takes the work`)}`);
+      console.log(`${tag} ${bold(`${{ gate: "a gate failed twice", review: "the reviewer sent it back twice", stall: "two audits steered it" }[event.why]}: the ${event.to} takes the work`)}`);
       return;
     case "routed":
       console.log(`${tag} ${bold(`the ${event.to} does the work`)} ${dim(`(${event.why})`)}`);

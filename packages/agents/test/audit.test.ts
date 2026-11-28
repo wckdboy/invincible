@@ -15,8 +15,8 @@ const ok = (stdout = "ok\n"): ExecResult => ({ exitCode: 0, stdout, stderr: "", 
 const commands = (n: number, from = 1) => Array.from({ length: n }, (_, i) => sh(`echo step ${from + i}`));
 
 /** The engineer's own loop, with a script for each role; `minutesPerCommand` moves the run's clock at each command. */
-function engineer(script: { engineer: string[]; reviewer: string[] }, options: Partial<RunOptions>, minutesPerCommand = 0) {
-  const queues: Record<RunRole, string[]> = { planner: ["1. Write the parser.\nDone when: its test passes."], engineer: [...script.engineer], reviewer: [...script.reviewer] };
+function engineer(script: { engineer: string[]; reviewer: string[]; planner?: string[] }, options: Partial<RunOptions>, minutesPerCommand = 0) {
+  const queues: Record<RunRole, string[]> = { planner: [...(script.planner ?? ["1. Write the parser.\nDone when: its test passes."])], engineer: [...script.engineer], reviewer: [...script.reviewer] };
   const seen: { role: RunRole; messages: ChatMessage[] }[] = [];
   const events: RunEvent[] = [];
   let now = 1_000_000;
@@ -42,7 +42,10 @@ function engineer(script: { engineer: string[]; reviewer: string[] }, options: P
   const told = () => seen.filter((s) => s.role === "engineer").map((s) => s.messages.at(-1)!.content);
   /** How hard each call was asked to think: its last message's level. */
   const efforts = (role: RunRole) => seen.filter((s) => s.role === role).map((s) => s.messages.at(-1)!.effort);
-  return { run, audits, asked, told, efforts };
+  /** Who was asked, in order; and when the work moved up (escalate). */
+  const roles = () => seen.map((s) => s.role);
+  const escalated = () => events.filter((e) => e.type === "escalated");
+  return { run, audits, asked, told, efforts, roles, escalated };
 }
 
 describe("an audit's answer", () => {
@@ -108,6 +111,33 @@ describe("the engineer's own loop, audited", () => {
     expect(q.asked()[1]).not.toContain("$ echo step 20\n");
     // It worked on to the end it chose, and its work was judged as anyone's.
     expect(outcome).toMatchObject({ status: "done", steps: 2 * AUDIT_EVERY.steps + 5, summary: "The parser is written and tested." });
+  });
+
+  test("two audits in a row that steer it move the rest of the work to the planner's models (escalate), from the turn the second is said in", async () => {
+    const q = engineer({
+      engineer: commands(2 * AUDIT_EVERY.steps),
+      planner: ["1. Write the parser.\nDone when: its test passes.", ...commands(3, 100), "DONE\nWritten at last."],
+      reviewer: ["STEER\nStop reinstalling; write the test.", "STEER\nStill reinstalling.", "PASS\nIt holds."],
+    }, { audit: true, escalate: true });
+    const outcome = await q.run;
+    expect(outcome.status).toBe("done");
+    expect(q.escalated()).toEqual([{ type: "escalated", to: "planner", why: "stall" }]);
+    // The plan; the engineer's forty commands with the first audit among them; the second audit; then the planner's models.
+    const work = q.roles().slice(1).filter((role) => role !== "reviewer");
+    expect(work).toEqual([...Array(2 * AUDIT_EVERY.steps).fill("engineer"), "planner", "planner", "planner", "planner"]);
+    // The turn it moves in is told the second audit's words, as any steer is.
+    expect(q.told().length).toBe(2 * AUDIT_EVERY.steps);
+  });
+
+  test("a steer, then an ON, then a steer is not twice in a row; and without the switch two steers move nothing", async () => {
+    const q = engineer({ engineer: [...commands(3 * AUDIT_EVERY.steps + 2), "DONE\nWritten."], reviewer: ["STEER\nWrite the test.", "ON\nCloser.", "STEER\nDrifting again.", "PASS\nIt holds."] }, { audit: true, escalate: true });
+    expect((await q.run).status).toBe("done");
+    expect(q.audits().map((a) => a.verdict)).toEqual(["steer", "on", "steer"]);
+    expect(q.escalated()).toEqual([]);
+    const off = engineer({ engineer: [...commands(2 * AUDIT_EVERY.steps + 2), "DONE\nWritten."], reviewer: ["STEER\nWrite the test.", "STEER\nStill not.", "PASS\nIt holds."] }, { audit: true });
+    expect((await off.run).status).toBe("done");
+    expect(off.escalated()).toEqual([]);
+    expect(off.roles().filter((role) => role === "planner")).toEqual(["planner"]);
   });
 
   test("an audit, which only asks whether the work is on its task, thinks little; the turn its steer is said in thinks hardest", async () => {

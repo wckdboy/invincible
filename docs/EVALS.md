@@ -285,7 +285,7 @@ variants` lists them):
 | `revisions` | how many times work may be sent back |
 | `engram` | the engineer is given the sandbox's notes store |
 | `diff` | the reviewer is shown the work itself, the repository's diff |
-| `escalate` | a gate that fails twice in a row moves the rest of the work to the planner's models |
+| `escalate` | the same gate failing twice in a row, the reviewer sending the work back twice, or two audits in a row steering it moves the rest of the work to the planner's models |
 | `remind` | the run's goal, its plan's "Done when:" and its gates are said again every ten commands |
 | `keep-reads` | of the outputs cut short to keep a run affordable, current file reads stay whole |
 | `tools` | the engineer's own tools (a shell, and reading, editing and writing files), several calls a turn, in place of one command a reply |
@@ -346,8 +346,9 @@ score.
 points, 0 to +10), and shown the diff, the reviewer still passed a `normalize` that fails its hidden check three times
 of four. `remind` made none either (±0, −28 to +30) and cost more tokens. The baseline keeps both off.
 
-**On without a measure:** `escalate` is on for `invincible do` (unless its engineer is pinned) and for agents' tasks,
-because it acts only on work already failing. `keep-reads` is on for agents' tasks, and wherever `tools` is, which
+**On without a measure:** `escalate` is on for `invincible do` (unless its engineer is pinned) and for agents' tasks
+(unless their work is held to models: an agent's own, or sensitive mode's), because it acts only on work already
+failing. `keep-reads` is on for agents' tasks, and wherever `tools` is, which
 implies it. `contract` and `remind` are on only in an eval's variant: `invincible eval ab no-gates contract --suite
 agentic --repeat 4` would say whether a contract helps.
 

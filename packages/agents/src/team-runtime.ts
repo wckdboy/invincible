@@ -5,7 +5,7 @@ import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentMod
 import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
 import { apartMatches, chat, choreRole, sameModel, workRole, type ModelsContext, type ChatTools, type ToolImage, type ToolSpec } from "@invincible/models";
-import { commandsRun, DESKTOP_EVIDENCE, runLoop, stepsNamed, type RunEvent, type RunSteer } from "./run.ts";
+import { commandsRun, DESKTOP_EVIDENCE, escalatedWhy, runLoop, stepsNamed, type RunEvent, type RunSteer } from "./run.ts";
 import { type Trip } from "./tripwires.ts";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
 import { HELD_GIT, heldGit } from "./held-git.ts";
@@ -587,7 +587,10 @@ export function progress(event: RunEvent): string {
     }
     case "submitted": return `Submitted for review · ${event.summary}`;
     case "skipped": return `${event.model} couldn't answer as ${event.role}: ${event.error.split("\n")[0]!.replace(/[.\s]+$/, "")}. ${event.answered} answers instead`;
-    case "escalated": return `Escalated · the same gate failed twice in a row: the ${event.to}'s models take the work\n$ ${event.gate}`;
+    case "escalated": {
+      const why = escalatedWhy(event);
+      return `Escalated · ${why[0]!.toLowerCase()}${why.slice(1)}: the ${event.to}'s models take the work${event.why === "gate" ? `\n$ ${event.gate}` : ""}`;
+    }
     case "routed": return `Routed · ${event.why}: the ${event.to}'s models do the work`;
     case "locked": return `Tests changed · ${event.changed.join(", ")}: the tests its gates run are the contract, so the work goes back`;
     case "contract": return event.kept ? `Contract · the planner wrote a test that fails before the work, and the work must make it pass\n$ ${event.command}` : `Contract · none: ${event.why}`;

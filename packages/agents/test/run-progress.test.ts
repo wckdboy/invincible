@@ -106,8 +106,12 @@ describe("where a run stands, from its events", () => {
   });
 
   test("a run that escalated says so where every device shows it: the work moved, and to whose models", () => {
-    const standing = standingAfter({ ...runStanding(30), state: "working" }, { type: "escalated", to: "planner", gate: "bun test" });
-    expect(standing).toMatchObject({ state: "working", doing: "The same gate failed twice in a row: the planner's models take the work" });
+    const working = { ...runStanding(30), state: "working" as const };
+    const standing = standingAfter(working, { type: "escalated", to: "planner", why: "gate", gate: "bun test" });
+    expect([standing.state, standing.doing]).toEqual(["working", "The same gate failed twice in a row: the planner's models take the work"]);
+    // And why else it moved: the reviewer, or the audits, each twice in a row.
+    expect(standingAfter(working, { type: "escalated", to: "planner", why: "review" }).doing).toBe("The reviewer sent it back twice in a row: the planner's models take the work");
+    expect(standingAfter(working, { type: "escalated", to: "planner", why: "stall" }).doing).toBe("Two audits in a row steered it: the planner's models take the work");
   });
 
   test("a command your tripwire stopped is what it is doing until the next thing happens: which rule, and what it did", () => {

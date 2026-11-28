@@ -243,7 +243,7 @@ describe("a gate that fails twice in a row", () => {
       const events: RunEvent[] = [];
       const { outcome } = await runOnNode(client(), { goal: "write hi to a file", network: "isolated", gates: [GATE] }, { emit: (event) => void events.push(event) });
       expect(outcome.status).toBe("unverified");
-      expect(events.filter((e) => e.type === "escalated")).toEqual([{ type: "escalated", to: "planner", gate: GATE }]);
+      expect(events.filter((e) => e.type === "escalated")).toEqual([{ type: "escalated", to: "planner", why: "gate", gate: GATE }]);
       // The work's turns: the engineer's model for the first two submissions, the planner's for the third.
       const work = asked.filter((a) => a.role === "engineer").map((a) => a.model);
       expect(work.slice(0, 2)).toEqual(["m", "m"]);

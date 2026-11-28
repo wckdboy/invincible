@@ -23,6 +23,13 @@ import { checksAfter, tellsAfter, type Trip, tripOf } from "./tripwires.ts";
 
 export type RunRole = "planner" | "engineer" | "reviewer";
 
+/** What moved the work up to the planner's models (escalate): the same gate, the review, or the audits, each twice in a row. */
+export type EscalationWhy = "gate" | "review" | "stall";
+
+/** Why the work moved up, in words that begin a sentence (every surface says it so: the trail, a device, the terminal). */
+export const escalatedWhy = (event: { why: EscalationWhy }): string =>
+  ({ gate: "The same gate failed twice in a row", review: "The reviewer sent it back twice in a row", stall: "Two audits in a row steered it" })[event.why];
+
 export interface RunDeps {
   /**
    * One complete reply from a role (the transport collects the stream). `skipped`: the role's models that
@@ -173,10 +180,11 @@ export interface RunOptions {
    */
   budgetUsd?: number;
   /**
-   * When a gate that failed the last submission fails again, the rest of the work is the planner's models' (and the
-   * engineer's turn is told to find out why before trying again): a model stuck on a gate isn't asked a third time.
-   * The reviewer stays who it was, independent of whoever did the work. A coding agent's run keeps its own models.
-   * Default off: the engineer keeps the work, as ever.
+   * Work stuck on the engineer's models goes up to the planner's (the ladder, climbed once: EscalationWhy), when the
+   * same thing says no twice in a row: a gate that failed the last submission fails again, the reviewer sends it back
+   * again, or a second audit in a row steers it (audit). The rest of the work is the planner's models', its turn told to
+   * find out why before trying again: a model stuck isn't asked a third time. The reviewer stays who it was, apart from
+   * every model that did the work. A coding agent's run keeps its own models. Default off: the engineer keeps the work.
    */
   escalate?: boolean;
   /**
@@ -365,8 +373,12 @@ export type RunEvent =
   | { type: "cost"; usd: number }
   /** A model of the role's couldn't answer and another did (`answered`): said once for each, never passed over in silence. */
   | { type: "skipped"; role: RunRole; model: string; error: string; answered: string }
-  /** A gate failed again as it failed the submission before: the rest of the work is that role's (escalate). */
-  | { type: "escalated"; to: RunRole; gate: string }
+  /**
+   * The work moved up (escalate): the rest of it is that role's. `why`: the same gate failed the submission before and
+   * this one (`gate`), the reviewer sent it back twice in a row, or two audits in a row steered it.
+   */
+  | { type: "escalated"; to: RunRole; why: "gate"; gate: string }
+  | { type: "escalated"; to: RunRole; why: Exclude<EscalationWhy, "gate"> }
   /** The work went to another role's models from its start, and why (escalate: its plan said it is hard). */
   | { type: "routed"; to: RunRole; why: string }
   /**
@@ -2150,6 +2162,15 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     const afterStep = async (): Promise<string> => `${leftNote(o.maxSteps - steps)}${remindNote()}${await spentNote()}`;
     /** The gates the last submission failed (none: it passed them, or it was the reviewer who sent it back). */
     let failedLast = new Set<string>();
+    /** Whether the reviewer sent the last submission back (escalate's: twice in a row moves the work). */
+    let sentBackLast = false;
+    /** The work goes up the ladder, once: the engineer's models to the planner's (escalate). False: it can't, or has. */
+    const climb = (event: { why: "gate"; gate: string } | { why: Exclude<EscalationWhy, "gate"> }): boolean => {
+      if (!o.escalate || worker !== "engineer") return false;
+      worker = "planner";
+      emit({ type: "escalated", to: worker, ...event });
+      return true;
+    };
     const looped = (command: string, seen: string) =>
       finish({ status: "stopped", summary: `Stopped: the same command failed the same way ${LOOP_STOP} times in a row, so running it again would only spend more.\n$ ${command.split("\n")[0]}\n${clip(seen, 600, 300)}` });
 
@@ -2176,8 +2197,11 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         else messages.push({ role: "user", content: steersSaid(heard, o.unreviewed), effort: STEP_EFFORT.hard });
       }
       if (auditDue()) {
+        const before = audits.last?.verdict;
         const found = await audit(trail.slice(auditedAt), true, trail);
         auditedAt = trail.length;
+        // A second audit in a row that steers it: it is going round, and the next turns are the planner's (escalate).
+        if (found.verdict === "steer" && before === "steer") climb({ why: "stall" });
         // A steer is said with what it is told next: its latest message, not sent yet.
         if (found.verdict === "steer") {
           const last = messages.at(-1);
@@ -2526,11 +2550,14 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       const failed = new Set(verdict.by === "gates" && gateRounds.length > rounds ? gateRounds.at(-1)!.filter((g) => g.exitCode !== 0).map((g) => g.command) : []);
       const again = [...failed].find((command) => failedLast.has(command));
       failedLast = failed;
+      // The reviewer sending it back again, the submission before sent back by them too (not by a gate between).
+      const backAgain = verdict.by === "reviewer" && sentBackLast;
+      sentBackLast = verdict.by === "reviewer";
       let stuck = "";
-      if (o.escalate && worker === "engineer" && again !== undefined) {
-        worker = "planner";
-        emit({ type: "escalated", to: worker, gate: again });
+      if (again !== undefined && climb({ why: "gate", gate: again })) {
         stuck = `\n\n$ ${again.split("\n")[0]} has failed twice in a row: before you change anything, find out why it fails, rather than trying the same fix again.`;
+      } else if (backAgain && climb({ why: "review" })) {
+        stuck = "\n\nThe reviewer has sent this back twice in a row: before you change anything, read what they found against the task and the evidence, and find what is still missing, rather than trying the same fix again.";
       }
       // (A steer that came while it was judged is said with why it went back.)
       messages.push({ role: "user", content: `${sentBack(verdict, "verify, then reply DONE again.")}${stuck}${late.length ? `\n\n${steersSaid(late, o.unreviewed)}` : ""}${cut}`, effort: STEP_EFFORT.hard });

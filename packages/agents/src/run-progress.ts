@@ -1,5 +1,5 @@
 import { type GateView, type RunState, redact } from "@invincible/core";
-import type { RunEvent } from "./run.ts";
+import { escalatedWhy, type RunEvent } from "./run.ts";
 
 /*
  * Where a run stands, from its own events: the plan, the step it's on, each gate's
@@ -56,7 +56,7 @@ export function standingAfter(s: RunStanding, event: RunEvent): RunStanding {
     case "skipped":
       return { ...s, doing: line(`${event.model} couldn't answer as ${event.role}: ${event.answered} answers instead`, 300) };
     case "escalated":
-      return { ...s, doing: line(`The same gate failed twice in a row: the ${event.to}'s models take the work`, 300) };
+      return { ...s, doing: line(`${escalatedWhy(event)}: the ${event.to}'s models take the work`, 300) };
     case "routed":
       return { ...s, doing: line(`${event.why[0]!.toUpperCase()}${event.why.slice(1)}: the ${event.to}'s models do it`, 300) };
     case "contract":

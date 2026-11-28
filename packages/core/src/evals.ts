@@ -66,7 +66,8 @@ export type EvalPins = z.infer<typeof EvalPins>;
  * `archive`: the archive's context goes with the plan · `revisions`: how many times work may be sent back ·
  * `engram`: the engineer is given the sandbox's notes store (Engram: its two commands, and how far to trust a
  * note) · `diff`: the reviewer is shown the work itself, the repository's diff, beside what was run and what the
- * tests print · `escalate`: a gate that fails twice in a row moves the rest of the work to the planner's models ·
+ * tests print · `escalate`: the same gate failing twice in a row, the reviewer sending it back twice, or two audits in a
+ * row steering it moves the rest of the work to the planner's models ·
  * `remind`: the run's constraints (its goal, the plan's "Done when:", the gates) are said again every ten commands ·
  * `keepReads`: of the command outputs cut short to keep a run affordable, current file reads stay whole, within a budget ·
  * `tools`: the engineer works with tools of its own (a shell, and reading, editing and writing files), several calls a
@@ -200,7 +201,7 @@ export function describeVariant(options: HarnessOptions): string {
   if (options.revisions !== BASELINE.revisions) said.push(options.revisions ? `${options.revisions} revision${options.revisions === 1 ? "" : "s"}` : "no revisions");
   if (options.engram !== BASELINE.engram) said.push(options.engram ? "the notes store (Engram)" : "no notes store");
   if (options.diff !== BASELINE.diff) said.push(options.diff ? "the reviewer is shown the diff" : "the reviewer isn't shown the diff");
-  if (options.escalate !== BASELINE.escalate) said.push(options.escalate ? "a gate failing twice moves the work to the planner" : "no escalation");
+  if (options.escalate !== BASELINE.escalate) said.push(options.escalate ? "a gate, the review or the audits saying no twice moves the work to the planner" : "no escalation");
   if (options.remind !== BASELINE.remind) said.push(options.remind ? "the run's constraints said again every ten commands" : "no constraints said again");
   if (options.keepReads !== BASELINE.keepReads) said.push(options.keepReads ? "current file reads kept whole" : "file reads cut short like any output");
   if (options.tools !== BASELINE.tools) said.push(options.tools ? "the engineer's own tools, several calls a turn" : "one command a reply");

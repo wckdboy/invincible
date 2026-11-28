@@ -204,7 +204,10 @@ The run loop is carried and renamed (§10), the most proven part of it:
     and the reviewer is told the owner's words stand over the primary's where they differ. A harness that keeps no
     session is told them too: its next run starts again from its briefing with them.
 - **The work as commits:** each step a commit, so a task can be given again from a step.
-- **Effort per step,** and escalation when stuck.
+- **Effort per step,** and escalation when stuck: the same gate failing twice in a row, the reviewer sending the work
+  back twice, or two audits in a row steering it moves the rest of the work from the engineer's models to the
+  planner's, once (`packages/agents/src/run.ts`, `escalate`). Work held to models (an agent's own, or sensitive mode's)
+  stays on them.
 - **Harnesses:**
   - the native tools loop (the default, measured level with OpenCode);
   - Claude Code, Codex and OpenCode through the key gateway (a run uses your keys without seeing them);
