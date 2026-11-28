@@ -174,6 +174,14 @@ turn now costs a tenth. Minutes rose where work that can't be done runs until it
 the budget lasts more calls. On all on the worker, that is every task it can't do. So routed is no longer cheaper than
 all on the lead by much ($0.544 against $0.548), and it is faster (4.96 against 5.39 minutes).
 
+**Going round on both tiers** (run.ts `round`; the owner's choice of 28 November 2026: tell, don't stop). Of the 36
+routed tasks, the 4 that went round on the worker, moved up, and went round on the lead too (stalls nothing can do)
+were told at 6.98 minutes on average. They ran 19.00 minutes in all, until their budget ended them, which is when you
+would otherwise have heard. None of the tasks told ended verified (`routing.notice.false`). Run without the notice,
+the same tasks end the same (`routing.rule.notice-lost`, held at 0), and no notice stands after its task ends
+(`routing.rule.notice-left`, held at 0). The lead counting its own going round from the climb changed no outcome:
+routed is 29 verified, $0.544 and 4.96 minutes a verified task, as before.
+
 **A plan's pace** (`bench/routing/pace.ts`), in virtual time:
 - Eight agents call one plan for ten minutes, each call followed by a command of its own.
 - The plan is OpenCode Go as measured on 28 November 2026: it refuses past 25 calls in a minute, and a call takes 2.58 s,

@@ -209,6 +209,12 @@ The run loop is carried and renamed (§10), the most proven part of it:
   had shown, nothing changed since: seen in its commands, with no model asked) moves the rest of the work from the
   engineer's models to the planner's, once (`packages/agents/src/run.ts`, `escalate`). Work held to models (an agent's
   own, or sensitive mode's) stays on them.
+  - The ladder has one rung, and nothing ends work going round on it (the owner's word, 19 November 2026: no limits,
+    and no audit ends work). At the climb, the planner's models count their own going round. When they too read the
+    same files again `REREADS` times with nothing changed, the run says so (`round`). The node tells you at once with
+    a notice of its own ("Ada's task went round on both tiers", source `routing`, told now, one a task: core's
+    `routing.ts`, `roundNotice`). It says this once, and again only once the work has changed something and goes
+    round anew. The work goes on until you stop it or its budget ends it, and its notice is cleared as it ends.
   - Each task's record keeps whose models did its work (`routing`: where it began and why, why it moved up, and its
     kind), and the agent's next task of the same kind begins by it. That is the memory, by kind of task. A task is a fix
     (of a pull request's checks), desktop work (its VM has a desktop), code (its agent has a repository) or a task, the
