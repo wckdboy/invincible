@@ -131,6 +131,36 @@ final class PerfTests: XCTestCase {
         XCTAssertLessThanOrEqual(Double(asked.count), try budgets.requestsThroughAStallPerMinute, "Through a stall of \(Int(lifted - stalled)) ms the app asked the node \(asked.count) times in a minute: \(byPath) (the Mac's load \(String(format: "%.1f", load.average)) on \(load.cores) cores)")
     }
 
+    /// A task's trail is read again only as its own entry in the team's answer moves (the lead's rule of 28 November 2026,
+    /// the web's and Android's in batch 14): `team` moves with every line of every task at work, so following it read a
+    /// task's trail again for each line of every other. With Builder's task at work on screen (held: its entry still),
+    /// Writer's demo steps through to its review, its lines moving `team` each time: Builder's trail is never read again,
+    /// in its thread or for its Live Activity.
+    @MainActor
+    func testATasksTrailIsReadOnlyAsItMoves() throws {
+        let node = try DevNode.named()
+        let app = XCUIApplication()
+        let launched = try node.now()
+        app.terminate()
+        try app.openApp(node)
+        let working = try node.tasks().working
+        let demo = try node.demo().task
+        app.open(try XCTUnwrap(URL(string: "invincible://task/\(working)")))
+        XCTAssertTrue(app.descendants(matching: .any)["task.screen"].waitForExistence(timeout: 10), "Builder's task never opened")
+        // Its first reads answered, and the app quiet (counted from its launch, its stream among what it opened): from
+        // here, only Writer's demo moves.
+        let since = try node.quiet(since: launched)
+        try node.demoUntil(demo, "review")
+        settle(3)
+        let asked = try node.requests(since: since).requests
+        let trails = asked.filter { $0.path.components(separatedBy: "?")[0] == "/api/team/trail" }
+        report("trail-reads-while-another-works", ["reads": Double(trails.count), "requests": Double(asked.count)])
+        print("PERF trail-reads-while-another-works by route: \(Self.byRoute(asked).joined(separator: ", "))")
+        XCTAssertEqual(trails.count, 0, "Builder's trail was read \(trails.count) times while only Writer's task moved: \(Self.byRoute(asked))")
+        // Writer's demo let go to its end, so a later test's task of Writer's isn't queued behind it (TaskSteerTests).
+        try node.demoUntil(demo, "done")
+    }
+
     /// How many times each route was asked, its query aside.
     static func byRoute(_ asked: [DevNode.Request]) -> [String] {
         Dictionary(grouping: asked, by: { $0.path.components(separatedBy: "?")[0] }).map { "\($0.value.count) \($0.key)" }.sorted()
