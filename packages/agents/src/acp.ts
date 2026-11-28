@@ -364,6 +364,23 @@ export function readBridge(line: string): AgentEvent[] {
 }
 
 /**
+ * A vendor's tool keeps its sign-in in its own VM, and a model can make the tool print it. What such a driver passes on
+ * (Claude Code's, Codex's, Antigravity's) is redacted as every driver's events are, and then of one thing more: the
+ * signed three-part tokens a sign-in is made of (an ID token among them), which have no prefix for the usual redaction
+ * to know them by.
+ */
+const SIGNED_TOKEN = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g;
+const scrubSigned = (text: string) => text.replace(SIGNED_TOKEN, "[redacted token]");
+export function readSignedIn(line: string): AgentEvent[] {
+  return readBridge(line).map((event): AgentEvent => {
+    if (event.type === "text") return { ...event, text: scrubSigned(event.text) };
+    if (event.type === "error") return { ...event, message: scrubSigned(event.message) };
+    if (event.type === "tool") return { ...event, tool: scrubSigned(event.tool), input: scrubSigned(event.input), output: scrubSigned(event.output) };
+    return event;
+  });
+}
+
+/**
  * Whether the command you named starts an ACP agent in this VM: it is started, asked `initialize`, and ended. It exits
  * 0 when the answer is ACP protocol 1, and otherwise says why on stderr (not installed, no ACP answer, another protocol).
  */

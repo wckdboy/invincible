@@ -1,5 +1,5 @@
 import type { AgentDriver } from "./harnesses.ts";
-import { ACP_CLIENT, ACP_ENTRY, notesServer, readBridge, withNotes } from "./acp.ts";
+import { ACP_CLIENT, ACP_ENTRY, notesServer, readSignedIn, withNotes } from "./acp.ts";
 
 /*
  * Google's Antigravity CLI (agy) on its owner's Google sign-in (a Google AI Pro or Ultra plan), driven as T3 Code drives
@@ -135,5 +135,7 @@ export const ANTIGRAVITY: AgentDriver = {
   files: (_models, engram, home) => ({ "/work/.agent/antigravity-acp.py": engram ? `${ACP_CLIENT}${BRIDGE}${withNotes([notesServer(engram, home)])}${ACP_ENTRY}` : ANTIGRAVITY_ACP_BRIDGE }),
   command: (model, session) =>
     `python3 -I /work/.agent/antigravity-acp.py --prompt /work/.agent/prompt.md${model.own || !model.model ? "" : ` --model ${quote(model.model)}`}${session ? ` --session ${quote(session)}` : ""}`,
-  read: readBridge,
+  // Its Google sign-in is in this VM, and a model can make agy print it: its events are scrubbed of it as Claude Code's
+  // and Codex's are (the review of 28 November 2026, M1), and core's redaction knows Google's own tokens.
+  read: readSignedIn,
 };

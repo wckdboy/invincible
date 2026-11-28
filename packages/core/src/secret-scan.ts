@@ -22,6 +22,10 @@ const PATTERNS: [kind: string, pattern: RegExp][] = [
   ["GitHub token", /\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})/g],
   ["AWS access key", /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g],
   ["Google API key", /\bAIza[0-9A-Za-z_-]{35}\b/g],
+  // Google's OAuth tokens, a Google sign-in's (agy's among them: the review of 28 November 2026, M1): an access token,
+  // ya29. and its body, which the high-entropy rule can't begin after a dot; a refresh token, 1//0 and its body.
+  ["Google OAuth access token", /\bya29\.[A-Za-z0-9._-]{20,}/g],
+  ["Google OAuth refresh token", /\b1\/\/0[A-Za-z0-9_-]{20,}/g],
   ["Slack token", /\bxox[abprs]-[A-Za-z0-9-]{10,}/g],
   ["Hugging Face token", /\bhf_[A-Za-z0-9]{30,}/g],
   ["private key", /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/g],

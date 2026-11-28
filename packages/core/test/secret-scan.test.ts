@@ -149,3 +149,44 @@ describe("secret scanning", () => {
     expect(redact("before sk-ant-api03-FAKEFAKEFAKEFAKEFAKEFAKEFAKE after")).toBe("before [redacted Anthropic API key] after");
   });
 });
+
+/* A Google sign-in's tokens, as a tool that holds one prints them (agy, a Gemini seat's: the review of 28 November 2026, M1). */
+describe("Google's OAuth tokens", () => {
+  /** Fake, made the same on every run (xorshift32), never anyone's: shaped as Google's are, so made here, not written down. */
+  const run = (seed: number, n: number): string => {
+    const abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let x = Math.imul(seed, 2654435761) >>> 0 || 1;
+    let out = "";
+    for (let i = 0; i < n; i++) {
+      x ^= x << 13;
+      x >>>= 0;
+      x ^= x >>> 17;
+      x ^= x << 5;
+      x >>>= 0;
+      out += abc[x % 64];
+    }
+    return out;
+  };
+  const ACCESS = `ya29.a0AeXRPp${run(1, 170)}`;
+  const REFRESH = `1//0g${run(2, 98)}`;
+
+  test("an access token on its own, after Bearer, in camelCase or snake_case JSON; a refresh token on its own or in JSON: none of either is left", () => {
+    const printed = [
+      `the token is ${ACCESS}\n`,
+      `> Authorization: Bearer ${ACCESS}\n`,
+      JSON.stringify({ accessToken: ACCESS, refreshToken: REFRESH }),
+      JSON.stringify({ access_token: ACCESS, token_type: "Bearer", refresh_token: REFRESH }),
+      `refresh: ${REFRESH}`,
+    ];
+    for (const text of printed) {
+      const out = redact(text);
+      expect([text.slice(0, 24), out.includes(ACCESS.slice(5)), out.includes(REFRESH.slice(4))]).toEqual([text.slice(0, 24), false, false]);
+    }
+    expect(redact(`the token is ${ACCESS}`)).toBe("the token is [redacted Google OAuth access token]");
+    expect(findSecrets(`x ${REFRESH} y`).map((found) => found.kind)).toEqual(["Google OAuth refresh token"]);
+  });
+
+  test("what only looks near one is left alone", () => {
+    for (const text of ["ya29 is a word", "ya29.short", "1//0 and then words", "see 11//0abcdefghijklmnopqrstuvwxyz"]) expect(redact(text)).toBe(text);
+  });
+});

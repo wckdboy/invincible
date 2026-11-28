@@ -110,7 +110,8 @@ for raw in sys.stdin:
              "options": [{"optionId": "allow-once", "kind": "allow_once", "name": "Allow"}, {"optionId": "reject", "kind": "reject_once", "name": "Reject"}]}})
         granted = json.loads(sys.stdin.readline())
         record({"permission": granted.get("result")})
-        update({"sessionUpdate": "tool_call_update", "toolCallId": "call-1", "status": "completed", "rawOutput": {"stdout": "1 pass"}})
+        # (Or, as a prompt or a repository can make agy do, its command prints the seat's sign-in.)
+        update({"sessionUpdate": "tool_call_update", "toolCallId": "call-1", "status": "completed", "rawOutput": {"stdout": token.read_text() if mode == "prints-token" else "1 pass"}})
         update({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "All tests pass."}})
         out({"jsonrpc": "2.0", "id": said["id"], "result": {"stopReason": "end_turn", "usage": {"inputTokens": 1200, "outputTokens": 80}}})
 `;
@@ -337,5 +338,50 @@ describe("Antigravity and the notes store", () => {
     const refused = { type: "text", text: "Antigravity refused a session with the notes store's MCP server: this run has no notes store" };
     expect(await run(box, "", withNotes())).toEqual({ code: 0, events: [refused, ...WORKED] });
     expect(opened(box, "session/new")).toEqual([[server], []]);
+  });
+});
+
+/* A sign-in agy prints never reaches the node: its Google tokens are scrubbed from what the node reads (the review of 28 November 2026, M1). */
+describe("Antigravity's sign-in, printed", () => {
+  /** Fake, made the same on every run (xorshift32), never anyone's: shaped as Google's are, so made here, not written down. */
+  const seeded = (seed: number, n: number): string => {
+    const abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let x = Math.imul(seed, 2654435761) >>> 0 || 1;
+    let out = "";
+    for (let i = 0; i < n; i++) {
+      x ^= x << 13;
+      x >>>= 0;
+      x ^= x >>> 17;
+      x ^= x << 5;
+      x >>>= 0;
+      out += abc[x % 64];
+    }
+    return out;
+  };
+  const part = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const ACCESS = `ya29.a0AeXRPp${seeded(1, 170)}`;
+  const REFRESH = `1//0g${seeded(2, 98)}`;
+  /** The openid scope's ID token, a JWT naming the account. */
+  const ID_TOKEN = `${part({ alg: "RS256", kid: "FAKE", typ: "JWT" })}.${part({ iss: "https://accounts.google.com", email: "owner@example.test", sub: "0" })}.${seeded(3, 342)}`;
+  const tokens = [ACCESS, REFRESH, ID_TOKEN];
+  /** The tokens of which any part is in what was said. */
+  const leaks = (said: unknown) => tokens.filter((token) => JSON.stringify(said).includes(token.slice(12, 60)));
+
+  test("what the node reads of agy's events is scrubbed of each: an access token, a refresh token, an ID token, in a tool's output, its words and its errors", () => {
+    const line = (type: string, words: string) => JSON.stringify(type === "tool" ? { type, id: "call-1", tool: "run_command", input: "print it", output: words, ok: true } : type === "text" ? { type, text: words } : { type, message: words });
+    for (const type of ["tool", "text", "error"]) for (const token of tokens) expect([type, token.slice(0, 5), leaks(ANTIGRAVITY.read(line(type, `here: ${token}\n`)))]).toEqual([type, token.slice(0, 5), []]);
+  });
+
+  test("a run whose command prints the seat's sign-in carries none of it, in any event the node reads", async () => {
+    const box = vm("prints-token");
+    mkdirSync(join(box.home, "antigravity-acp"), { recursive: true });
+    writeFileSync(join(box.home, "antigravity-acp", TOKEN), JSON.stringify({ token: { access_token: ACCESS, token_type: "Bearer", refresh_token: REFRESH, id_token: ID_TOKEN, expiry: "2099-01-01T00:00:00Z" } }));
+    const { code, events } = await run(box);
+    expect(code).toBe(0);
+    // The bridge passed them on as agy printed them; the node's reading of its lines takes them out.
+    expect(leaks(events)).toEqual(tokens);
+    const read = events.flatMap((event) => ANTIGRAVITY.read(JSON.stringify(event)));
+    expect(read.some((event) => event.type === "tool")).toBe(true);
+    expect(leaks(read)).toEqual([]);
   });
 });

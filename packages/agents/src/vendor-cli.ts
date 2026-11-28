@@ -1,7 +1,7 @@
 import { SeatFingerprint, SeatPlan, SIGN_IN_METHODS, tokenShaped } from "@invincible/core";
 import type { AgentDriver, AgentEvent, AgentModel } from "./harnesses.ts";
 import { engramArgv, engramEnv } from "./engram.ts";
-import { readBridge } from "./hermes.ts";
+import { readSignedIn } from "./acp.ts";
 
 /*
  * The vendors' own coding tools as harnesses: Claude Code and Codex. A subscription (a Claude
@@ -1038,21 +1038,8 @@ function readStatus(stdout: string): { signedIn: boolean; method?: string; plan?
   return { signedIn: false };
 }
 
-/**
- * A sign-in lives in this VM, and a model can make the tool print it. What is passed on is redacted as every
- * driver's events are, and then of one thing more: the signed three-part tokens one vendor's sign-in is made
- * of, which have no prefix for the usual redaction to know them by.
- */
-const SIGNED_TOKEN = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g;
-const scrub = (text: string) => text.replace(SIGNED_TOKEN, "[redacted token]");
-function read(line: string): AgentEvent[] {
-  return readBridge(line).map((event): AgentEvent => {
-    if (event.type === "text") return { ...event, text: scrub(event.text) };
-    if (event.type === "error") return { ...event, message: scrub(event.message) };
-    if (event.type === "tool") return { ...event, tool: scrub(event.tool), input: scrub(event.input), output: scrub(event.output) };
-    return event;
-  });
-}
+/** A sign-in lives in this VM, and a model can make the tool print it: what is passed on is scrubbed of it too (acp.ts readSignedIn). */
+const read = readSignedIn;
 
 const driver = (name: string, title: string, kind: AgentDriver["kind"], script: string, part: string, notes: Notes, signIn: Omit<NonNullable<AgentDriver["signIn"]>, "read" | "seatCheck">, family: readonly string[]): AgentDriver => ({
   name,
