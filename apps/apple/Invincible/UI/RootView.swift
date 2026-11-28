@@ -4,6 +4,8 @@ import SwiftUI
 /// Pairing until this device is in the fleet; the app itself after.
 struct RootView: View {
     let app: AppModel
+    /// Light, dark or as the system is, as chosen on this device (Settings → Appearance).
+    @AppStorage(Appearance.themeKey) private var theme = Appearance.system
 
     var body: some View {
         let _ = PerfProbe.shared.mark("root body")
@@ -20,6 +22,7 @@ struct RootView: View {
             }
         }
         .tint(.ink)
+        .preferredColorScheme(Appearance.scheme(theme))
         .background(WindowTint())
         .background(ClosesKeyboard())
         // What the performance suite reads, when it launched the app to measure it (nothing otherwise).
@@ -43,7 +46,7 @@ private struct WindowTint: UIViewRepresentable {
 }
 
 /// The paired app, asked again every few seconds while a window of it is in front. On an iPhone (and an iPad's narrow
-/// window), your agent's chat with the drawer beside it; on an iPad, the drawer as a sidebar and its choice beside it.
+/// window), Home's list with each chat pushed over it; on an iPad, the list as a sidebar and its choice beside it.
 struct MainView: View {
     let app: AppModel
     let session: Session
@@ -75,57 +78,58 @@ struct MainView: View {
     }
 }
 
-/// An iPhone's app (the owner's word of 28 November 2026: "make it as simple as the grokbot app or t3code ios app"): one
-/// screen, your agent's chat, and the drawer beside it (Drawer.swift: New chat, Needs you, your agents, your chats by day,
-/// Settings). What the drawer opens is pushed over the chat, and the screen's left edge goes back from it: an agent's or a
-/// room's chat, Needs you, Settings; a task from a card. A notification you tap, or a link, opens where it leads.
+/// An iPhone's app (the owner's word of 28 November 2026: "use grok bot as the app look/UX. like a chat app, with the
+/// primary at the top, the other agents, and a settings menu"): Home's list (HomeList.swift), where the app opens, and
+/// pushed over it each chat (your agent's, an agent's, a room's), a task from a card, Needs you, Settings; the screen's
+/// left edge goes back. A notification you tap, or a link, opens where it leads, over the list.
 struct PhoneRoot: View {
     let app: AppModel
     let session: Session
     @State private var path: [Place] = []
-    @State private var drawer = false
 
     var body: some View {
-        DrawerHost(open: $drawer, session: session, current: Self.current(path, chat: session.chat.conversation), pick: pick) {
-            NavigationStack(path: $path) {
-                ChatView(session: session, roster: { withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) { drawer = true } }, forget: { try app.forget() })
-                    .navigationDestination(for: Place.self) { place in destination(place) }
-            }
+        NavigationStack(path: $path) {
+            HomeList(session: session, saysLink: true, open: pick, settings: { path = [.more] }, newChat: newChat)
+                .navigationDestination(for: Place.self) { place in destination(place) }
         }
-        .environment(\.showInbox) { path = [.inbox] }
-        .environment(\.showPrimary) { path = [] }
+        .environment(\.showInbox) { path.append(.inbox) }
+        .environment(\.showPrimary) { path = [.primary] }
         .environment(\.openPlace) { go($0) }
         .task(id: PushCenter.shared.opened) { await follow() }
         .onChange(of: path, initial: true) { PushCenter.shared.showing = Self.showing(path, chat: session.chat.conversation) }
         .onChange(of: session.chat.conversation) { PushCenter.shared.showing = Self.showing(path, chat: session.chat.conversation) }
     }
 
-    /// A place, over your agent's chat (the chat itself, or one of the places the iPhone no longer has: back to it).
+    /// A place, over what is on screen (one the iPhone no longer has, from an older link: the list).
     private func go(_ place: Place) {
         switch place {
-        case .primary, .home, .agents, .chats, .everything: path = []
+        case .home, .agents, .everything: path = []
+        case .chats: path = [.primary]
         default: path.append(place)
         }
     }
 
-    /// What the drawer chose: a chat on the chat's own screen, anything else over it.
-    private func pick(_ choice: DrawerPick) {
+    /// What the list chose: that one's chat, over the list.
+    private func pick(_ choice: HomePick) {
         switch choice {
-        case .newChat:
-            if !session.chat.answering { session.chat.startNew() }
-            path = []
-        case .chat(let id):
-            path = []
-            Task { await session.chat.open(id, with: session.client) }
-        case .needs: path = [.inbox]
+        case .primary: path = [.primary]
         case .agent(let id): path = [.agent(id)]
         case .room(let id): path = [.room(id)]
-        case .settings: path = [.more]
+        case .chat(let id):
+            path = [.primary]
+            Task { await session.chat.open(id, with: session.client) }
         }
+    }
+
+    /// A new chat with your agent (none while it answers: its chat as it is), over the list.
+    private func newChat() {
+        if !session.chat.answering { session.chat.startNew() }
+        path = [.primary]
     }
 
     @ViewBuilder private func destination(_ place: Place) -> some View {
         switch place {
+        case .primary: ChatView(session: session, forget: { try app.forget() })
         case .task(let id): TaskView(session: session, id: id)
         case .agent(let id): AgentView(session: session, id: id)
         case .room(let id): RoomView(session: session, id: id)
@@ -133,26 +137,23 @@ struct PhoneRoot: View {
         case .more, .thisMac: SettingsList(app: app, session: session)
         case .keys: KeysView(session: session)
         case .connectors: ConnectorsView(session: session)
-        // (Places an iPhone no longer has, from an older link: the chat.)
-        case .primary, .home, .agents, .chats, .everything: ChatView(session: session)
+        // (Places an iPhone no longer has, from an older link: your agent's chat.)
+        case .home, .agents, .chats, .everything: ChatView(session: session)
         }
     }
 
-    /// A notification you tapped: its place over the chat, or the chat it names.
+    /// A notification you tapped: its place over the list, or the chat it names.
     private func follow() async {
         guard let opened = PushCenter.shared.opened else { return }
         PushCenter.shared.opened = nil
-        drawer = false
         switch opened {
         case .inbox: path = [.inbox]
         case .settings: path = [.more]
-        // The agents: the drawer, which lists them.
-        case .overview:
-            path = []
-            drawer = true
+        // The agents: the list, which is them.
+        case .overview: path = []
         case .chat(let id):
             if let id { await session.chat.open(id, with: session.client) }
-            path = []
+            path = [.primary]
         case .approval(let id):
             path = [.inbox]
             session.approvalToOpen = id
@@ -164,31 +165,27 @@ struct PhoneRoot: View {
         }
     }
 
-    /// What the screen shows, as a notification would name it: the last place over the chat, or the chat itself.
+    /// What the screen shows, as a notification would name it: the last place over the list (the list names nothing).
     static func showing(_ path: [Place], chat: String?) -> Push.Destination? {
-        (path.last ?? .primary).shown(chat: chat)
-    }
-
-    /// The drawer's row for what is on screen: the chat's own (or none, a new one), or the place over it.
-    static func current(_ path: [Place], chat: String?) -> DrawerPick? {
-        DrawerPick.of(path.last ?? .primary, chat: chat)
+        path.last?.shown(chat: chat)
     }
 }
 
-/// An iPad's window (as T3 Code's on an iPad): the drawer as its sidebar, always there, and beside it what it chose, your
-/// agent's chat first. Each window keeps its own place for the next launch, and the menus and their keys (PadCommands) act
-/// in the one in front.
+/// An iPad's window (as Grok Bot's on an iPad): Home's list as its sidebar, always there, and beside it what it chose,
+/// your agent's chat first; Settings in a sheet from the list's gear. Each window keeps its own place for the next launch,
+/// and the menus and their keys (PadCommands) act in the one in front.
 struct SplitPlaces: View {
     let app: AppModel
     let session: Session
     /// The place this window shows, kept with the window.
     @SceneStorage("place") private var kept = ""
     @State private var composerWanted = false
+    @State private var settingsShown = false
 
     private var place: Place {
         get {
             switch (try? JSONDecoder().decode(Place.self, from: Data(kept.utf8))) ?? .primary {
-            // (Places an iPad no longer has, kept by an older window: the chat.)
+            // (Places an iPad no longer has, kept by an older window: your agent's chat.)
             case .home, .agents, .chats, .everything: .primary
             case let place: place
             }
@@ -198,8 +195,8 @@ struct SplitPlaces: View {
 
     var body: some View {
         NavigationSplitView {
-            Drawer(session: session, current: DrawerPick.of(place, chat: session.chat.conversation), pick: pick)
-                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
+            HomeList(session: session, current: HomePick.of(place), open: pick, settings: { settingsShown = true }, newChat: { newChat?() })
+                .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 400)
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if session.reconnecting {
                         ReconnectingLine(session: session).padding(.horizontal, Space.s3).background(.bar)
@@ -214,6 +211,12 @@ struct SplitPlaces: View {
                 .environment(\.composerWanted, $composerWanted)
                 // An agent's workspace (its computer's, beside its chat) in a column of its own.
                 .workspaceColumn(session: session, seat: place.workspaceSeat(session))
+        }
+        .sheet(isPresented: $settingsShown) {
+            NavigationStack {
+                SettingsList(app: app, session: session)
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { settingsShown = false } } }
+            }
         }
         .environment(\.showInbox) { place = .inbox }
         .environment(\.openPlace) { place = $0 }
@@ -234,17 +237,15 @@ struct SplitPlaces: View {
         }
     }
 
-    /// What the sidebar chose: a chat on the chat's own place, anything else in its place.
-    private func pick(_ choice: DrawerPick) {
+    /// What the list chose: that one's chat beside it.
+    private func pick(_ choice: HomePick) {
         switch choice {
-        case .newChat: newChat?()
+        case .primary: place = .primary
+        case .agent(let id): place = .agent(id)
+        case .room(let id): place = .room(id)
         case .chat(let id):
             place = .primary
             Task { await session.chat.open(id, with: session.client) }
-        case .needs: place = .inbox
-        case .agent(let id): place = .agent(id)
-        case .room(let id): place = .room(id)
-        case .settings: place = .more
         }
     }
 
@@ -263,7 +264,7 @@ struct SplitPlaces: View {
         PushCenter.shared.opened = nil
         switch opened {
         case .inbox: place = .inbox
-        case .settings: place = .more
+        case .settings: settingsShown = true
         // The agents: the sidebar lists them, beside your agent's chat.
         case .overview: place = .primary
         case .chat(let id):
@@ -313,6 +314,7 @@ struct PlaceWindowRoot: View {
     let app: AppModel
     let window: PlaceWindow?
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(Appearance.themeKey) private var theme = Appearance.system
 
     var body: some View {
         Group {
@@ -332,6 +334,7 @@ struct PlaceWindowRoot: View {
             }
         }
         .tint(.ink)
+        .preferredColorScheme(Appearance.scheme(theme))
         .background(WindowTint())
         .background(ClosesKeyboard())
         .task { app.start() }

@@ -143,50 +143,69 @@ extension XCUIApplication {
         descendants(matching: .any).matching(NSPredicate(format: "identifier == 'link.down' OR label == 'No connection to your node'")).firstMatch
     }
 
-    /// What says how many things need you where the app opens: your agent's chat's back arrow, which opens the roster
-    /// ("Your agents", its value "4 things need you"); on an iPad, the roster's own Needs you, in its sidebar.
-    var needsSaid: XCUIElement {
-        let arrow = buttons["roster.open"]
-        return arrow.exists ? arrow : descendants(matching: .any)["roster.needs"]
-    }
+    /// What says how many things need you where the app opens: your agent's row on Home (its value "4 things need you"),
+    /// what waits in its chat: a device asking to join, a key it asked for, an approval no agent stands for.
+    var needsSaid: XCUIElement { descendants(matching: .any)["home.primary"] }
 
-    /// The app is where it opens: your agent's chat, the roster beside it or a tap away.
-    var opened: Bool { buttons["roster.open"].exists || descendants(matching: .any)["roster.needs"].exists }
+    /// The app is where it opens: Home's list (an iPad's sidebar), your agent first.
+    var opened: Bool { descendants(matching: .any)["home.primary"].exists }
 
-    /// How many things need you, as the chat's back arrow says it (nil: not said yet).
+    /// How many things need you in your agent's chat, as its row on Home says it (nil: not said yet).
     var needsCount: Int? {
         let said = needsSaid
         guard said.exists else { return nil }
         let words = [said.value as? String, said.label].compactMap { $0 }.joined(separator: " ")
-        if words.contains("Nothing needs you") || words.contains("Needs you: nothing") { return 0 }
-        guard let range = words.range(of: #"(\d+) (?:needs?|things? need) you|Needs you: (\d+)"#, options: .regularExpression) else { return nil }
+        guard let range = words.range(of: #"(\d+) (?:needs?|things? need) you"#, options: .regularExpression) else { return 0 }
         return Int(words[range].filter(\.isNumber))
     }
 
-    /// The drawer: an iPhone's opened from the chat's drawer button (an iPad's is its sidebar, always there).
-    func openRoster() {
-        let arrow = buttons["roster.open"]
-        if arrow.exists { arrow.tap() }
-        _ = descendants(matching: .any)["roster"].waitForExistence(timeout: 5)
+    /// Home's list, from wherever an iPhone's screen is in it: back to its root (an iPad's sidebar is always there).
+    func home() {
+        let primary = descendants(matching: .any)["home.primary"]
+        var tries = 0
+        while !(primary.exists && primary.isHittable), tries < 4 {
+            let back = navigationBars.buttons.element(boundBy: 0)
+            guard back.exists else { break }
+            back.tap()
+            tries += 1
+            _ = primary.waitForExistence(timeout: 2)
+        }
     }
 
-    /// A new chat with your agent, where the one on screen isn't new already: the chat bar's own button.
+    /// Your agent's chat, from Home.
+    func openPrimary() {
+        home()
+        homeRow("home.primary").tap()
+        _ = descendants(matching: .any)["chat.screen"].waitForExistence(timeout: 10)
+    }
+
+    /// A new chat with your agent: Home's + menu, New chat.
     func newChat() {
-        let new = buttons["chat.new"]
-        guard new.waitForExistence(timeout: 5) else { return }
-        if new.isEnabled { new.tap() }
+        home()
+        let plus = buttons["home.new"]
+        guard plus.waitForExistence(timeout: 5) else { return }
+        plus.tap()
+        let new = buttons["home.new.chat"]
+        if new.waitForExistence(timeout: 5) { new.tap() }
+        _ = descendants(matching: .any)["chat.screen"].waitForExistence(timeout: 10)
     }
 
-    /// One of the drawer's rows (`roster.new`, `roster.needs`, `roster.settings`, `roster.agent.<id>`, `roster.room.<id>`,
-    /// `roster.chat.<id>`).
-    func rosterRow(_ id: String) -> XCUIElement { descendants(matching: .any)[id].firstMatch }
+    /// Needs you in full: your agent's chat, then "N more need you" under the first of what waits there.
+    func openNeeds() {
+        openPrimary()
+        let more = buttons["chat.needs.more"]
+        if more.waitForExistence(timeout: 10) { more.tap() }
+    }
 
-    /// Paired with the dev node, on your agent's chat (where the app opens), the app started afresh: joined through the
-    /// app's own Join screen the first time (the dev node lets the app's request in by itself), the chat at once every time
-    /// after.
+    /// One of Home's rows (`home.primary`, `home.agent.<id>`, `home.room.<id>`, `home.chat.<id>`) or its bar's buttons
+    /// (`home.settings`, `home.new`).
+    func homeRow(_ id: String) -> XCUIElement { descendants(matching: .any)[id].firstMatch }
+
+    /// Paired with the dev node, on Home (where the app opens), the app started afresh: joined through the app's own Join
+    /// screen the first time (the dev node lets the app's request in by itself), Home at once every time after.
     func openApp(_ node: DevNode, timeout: TimeInterval = 60) throws {
         // Afresh whatever ran before (launch ends a running app first): one left on another screen by the test before is
-        // neither the chat nor the Join screen, and was waited on for the whole timeout (26 November 2026: PerfTests,
+        // neither Home nor the Join screen, and was waited on for the whole timeout (26 November 2026: PerfTests,
         // after the Settings NavTests left open). StartTests holds it.
         launch()
         // (A field of several lines: a text view to the tests.)
@@ -201,12 +220,12 @@ extension XCUIApplication {
                 if ask.waitForExistence(timeout: 5) { ask.tap() }
                 let joined = Date().addingTimeInterval(timeout)
                 while !opened, Date() < joined { RunLoop.current.run(until: Date().addingTimeInterval(0.2)) }
-                XCTAssertTrue(opened, "The chat never came after asking to join")
+                XCTAssertTrue(opened, "Home never came after asking to join")
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
-        XCTFail("Neither the chat nor the Join screen came")
+        XCTFail("Neither Home nor the Join screen came")
     }
 }
 

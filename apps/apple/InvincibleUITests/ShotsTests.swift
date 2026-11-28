@@ -4,7 +4,7 @@ import XCTest
 /*
  * Every iPhone screen pictured, as the owner's bar asks before a screen ships (docs/ARCHITECTURE.md §8): in light and
  * dark, at the default text size and at the largest accessibility size, against the dev node's busy fleet. On an iPad
- * the same screens, the roster its sidebar. Each picture
+ * the same screens, Home's list its sidebar. Each picture
  * is an attachment of the run's result bundle, named `shot-<n>-<screen>-<look>` (the Live Activity's `live-<state>-<where>`),
  * kept always:
  *   xcrun xcresulttool export attachments --path <bundle>.xcresult --output-path <folder>
@@ -55,34 +55,34 @@ final class ShotsTests: XCTestCase {
             }
         }
         for look in pictured {
-            // Where the app opens: your agent's chat (its latest, or its welcome), what needs you at its foot.
+            // Where the app opens: Home's list, your agent first, then the agents and the rooms by their latest work.
             try home(app, look, node)
             settle(3)
-            shot("01-chat", look)
-            // The drawer (an iPad's sidebar, in every picture): your chats by day, your agents, Needs you, Settings.
-            app.openRoster()
-            settle(1)
-            shot("02-drawer", look)
-            // Its search, finding a chat by its words.
-            let search = app.textFields["roster.search"]
-            if search.waitForExistence(timeout: 5) {
+            shot("01-home", look)
+            // Its search, pulled down: the agents and your chats that say its words.
+            let search = app.searchFields.firstMatch
+            if !(search.exists && search.isHittable) { app.homeRow("home.primary").swipeDown() }
+            if search.waitForExistence(timeout: 5), search.isHittable {
                 search.tap()
                 search.typeText("release")
-                settle(1.5)
-                shot("02-drawer-search", look)
+                settle(2)
+                shot("02-home-search", look)
             }
-            // A past chat, from the drawer.
+            // Your agent's chat: its latest, what waits on you there at its foot; and its menu's past chats.
             try home(app, look, node)
-            app.openRoster()
-            if tapIfThere(reach(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'roster.chat.'")).firstMatch, app), app) {
+            if tapIfThere(app.homeRow("home.primary"), app) {
                 wait(app, "chat.screen")
                 settle(2)
-                shot("03-past-chat", look)
+                shot("03-primary", look)
+                if tapIfThere(app.buttons["chat.more"], app), tapIfThere(app.buttons["chats"], app) {
+                    settle(2)
+                    shot("03-past-chats", look)
+                    dismissSheet(app)
+                }
             }
             // An agent's chat: Builder's, at work.
             try home(app, look, node)
-            app.openRoster()
-            if tapIfThere(reach(app.rosterRow("roster.agent.builder"), app), app) {
+            if tapIfThere(reach(app.homeRow("home.agent.builder"), app), app) {
                 wait(app, "agent.screen")
                 settle(2)
                 shot("04-agent", look)
@@ -103,23 +103,31 @@ final class ShotsTests: XCTestCase {
             // While it answers: a message queued behind it, and the queue held once it's stopped.
             try home(app, look, node)
             busyChat(app, look)
-            // Needs you, and Settings with what it leads to.
-            for (n, row, screen) in [("09", "roster.needs", "needs.screen"), ("10", "roster.settings", "settings.screen")] {
-                try home(app, look, node)
-                app.openRoster()
-                guard tapIfThere(reach(app.rosterRow(row), app), app) else { continue }
-                wait(app, screen)
+            // Needs you in full, from your agent's chat.
+            try home(app, look, node)
+            app.openNeeds()
+            if app.descendants(matching: .any)["needs.screen"].waitForExistence(timeout: 10) {
                 settle(2)
-                shot("\(n)-\(row.dropFirst("roster.".count))", look)
-                if row == "roster.settings" {
-                    for (m, button, there) in [("11", "settings.about", "about.screen"), ("12", "settings.keys", "keys.screen"), ("13", "settings.connectors", "connectors.screen")] {
-                        guard tapIfThere(reach(app.buttons[button], app), app) else { continue }
-                        wait(app, there)
-                        settle(1.5)
-                        shot("\(m)-\(there.dropLast(".screen".count))", look)
-                        back(app)
-                        wait(app, "settings.screen")
-                    }
+                shot("09-needs", look)
+            }
+            // Settings, from Home's gear, and each of its pages.
+            try home(app, look, node)
+            if tapIfThere(app.homeRow("home.settings"), app) {
+                wait(app, "settings.screen")
+                settle(1.5)
+                shot("10-settings", look)
+                let pages = [
+                    ("11", "settings.providers", "settings.providers.screen"), ("12", "settings.permissions", "settings.permissions.screen"),
+                    ("13", "settings.appearance", "settings.appearance.screen"), ("14", "settings.device", "settings.device.screen"),
+                    ("15", "settings.about", "about.screen"), ("16", "settings.keys", "keys.screen"), ("17", "settings.connectors", "connectors.screen"),
+                ]
+                for (m, button, there) in pages {
+                    guard tapIfThere(reach(app.buttons[button], app), app) else { continue }
+                    wait(app, there)
+                    settle(1.5)
+                    shot("\(m)-\(there.replacingOccurrences(of: ".screen", with: "").replacingOccurrences(of: "settings.", with: ""))", look)
+                    back(app)
+                    wait(app, "settings.screen")
                 }
             }
         }
@@ -179,11 +187,11 @@ final class ShotsTests: XCTestCase {
         }
     }
 
-    /// The app started afresh in a look and paired, on your agent's chat (openApp starts it).
+    /// The app started afresh in a look and paired, on Home (openApp starts it).
     @MainActor
     private func home(_ app: XCUIApplication, _ look: Look, _ node: DevNode) throws {
         dress(app, look)
-        // An iPad wide, its roster a sidebar beside the place (in portrait the system may fold the sidebar away).
+        // An iPad wide, Home's list a sidebar beside the place (in portrait the system may fold the sidebar away).
         if UIDevice.current.userInterfaceIdiom == .pad { XCUIDevice.shared.orientation = .landscapeLeft }
         try app.openApp(node)
     }
@@ -191,7 +199,9 @@ final class ShotsTests: XCTestCase {
     /// Back one page, by the bar's own back button.
     @MainActor
     private func back(_ app: XCUIApplication) {
-        let button = app.navigationBars.buttons.element(boundBy: 0)
+        // (An iPad's Settings is a sheet over the window, whose own bars come first: its back button by its words.)
+        let named = app.navigationBars.buttons.matching(NSPredicate(format: "label IN {'Settings', 'Back'}")).firstMatch
+        let button = named.exists ? named : app.navigationBars.buttons.element(boundBy: 0)
         if button.exists, button.isHittable { button.tap() }
         settle(1)
     }
@@ -204,13 +214,13 @@ final class ShotsTests: XCTestCase {
         return app.descendants(matching: .any)[screen].waitForExistence(timeout: 15)
     }
 
-    /// The primary's chat while it answers, from a new one it takes its time over: a message queued behind it, and once
-    /// it's stopped, the queue held.
+    /// The primary's chat while it answers, from a new one it takes its time over (Home's +): a message queued behind it,
+    /// and once it's stopped, the queue held.
     @MainActor
     private func busyChat(_ app: XCUIApplication, _ look: Look) {
+        app.newChat()
         let chat = app.descendants(matching: .any)["chat.screen"]
         guard chat.waitForExistence(timeout: 10) else { return }
-        app.newChat()
         let bar = chat.descendants(matching: .any)["composer"]
         guard bar.waitForExistence(timeout: 10) else { return }
         bar.tap()

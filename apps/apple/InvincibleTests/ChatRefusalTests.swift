@@ -5,10 +5,11 @@ import Testing
 import UIKit
 @testable import Invincible
 
-/// A node that proves to be another (NodePin) is said on the chat, where the app opens, with Try again and Forget this
-/// device (the lead's word of 27 November 2026: Android found the refusal said only on the old Home and Agents once its app
-/// opened on the chat). Against a node on this machine's loopback (LocalNode, SessionProofTests). Its picture, the chat as
-/// an iPhone shows it refused, in light and dark, is kept with the run (chat-refused-light.png, chat-refused-dark.png).
+/// A node that proves to be another (NodePin) is said on Home, where the app opens (since 28 November 2026), with Try
+/// again, and on the chat with Try again and Forget this device (the lead's word of 27 November 2026: Android found the
+/// refusal said only on some of its screens). Against a node on this machine's loopback (LocalNode, SessionProofTests). Its
+/// pictures, Home and the chat as an iPhone shows them refused, in light and dark, are kept with the run
+/// (home-refused-light.png, chat-refused-light.png and their dark ones).
 @MainActor @Suite(.serialized) struct ChatRefusalTests {
     @Test func aNodeThatProvesToBeAnotherIsSaidOnTheChatWithTryAgainAndForget() async throws {
         let node = try await LocalNode(.b)
@@ -22,19 +23,23 @@ import UIKit
         #expect(refused.notYourNode == node.b)
         #expect(ChatView.refusal(nil) == nil)
         for style in [UIUserInterfaceStyle.light, .dark] {
-            let png = try await Self.picture(session, style)
+            let look = style == .dark ? "dark" : "light"
+            let home = try await Self.picture(AnyView(HomeList(session: session, saysLink: true, open: { _ in }, settings: {}, newChat: {})), style)
+            #expect(home.count > 10_000, "Home drew nothing")
+            Attachment.record(home, named: "home-refused-\(look).png")
+            let png = try await Self.picture(AnyView(ChatView(session: session, forget: {})), style)
             #expect(png.count > 10_000, "the chat drew nothing")
-            Attachment.record(png, named: "chat-refused-\(style == .dark ? "dark" : "light").png")
+            Attachment.record(png, named: "chat-refused-\(look).png")
         }
     }
 
-    /// The chat as an iPhone shows it, in a window of the test's own, drawn as the screen draws it: its bar, its card, its box.
-    private static func picture(_ session: Session, _ style: UIUserInterfaceStyle) async throws -> Data {
+    /// A screen as an iPhone shows it, in a window of the test's own, drawn as the screen draws it: its bar, its card, its box.
+    private static func picture(_ screen: AnyView, _ style: UIUserInterfaceStyle) async throws -> Data {
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         window.overrideUserInterfaceStyle = style
-        window.rootViewController = UIHostingController(rootView: NavigationStack { ChatView(session: session, roster: {}, forget: {}) }.tint(Color.ink))
+        window.rootViewController = UIHostingController(rootView: NavigationStack { screen }.tint(Color.ink))
         window.makeKeyAndVisible()
         defer { window.isHidden = true }
         try await Task.sleep(for: .seconds(2))

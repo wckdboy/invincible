@@ -801,7 +801,7 @@ private struct SteerComposer: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            ComposerBox(composing: composing) {
+            ComposerBox(composing: composing, wide: !typeSize.isAccessibilitySize) {
                 TextField("Tell \(name)…", text: $room.draft, axis: .vertical)
                     .plainField()
                     .lineLimit(1...8)

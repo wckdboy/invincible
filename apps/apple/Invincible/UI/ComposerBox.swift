@@ -1,17 +1,53 @@
 import SwiftUI
 
-/// The message box (the owner's word of 27 November 2026, "something like t3code on desktop, and openmausbot/grokbot on
-/// mobile"; the web's): one rounded box, its words across its whole width, its buttons on a line under them, attach on the
-/// left and what sends on the right. No button shares the words' line, so nothing squeezes them: Queue, Steer and Stop
-/// beside the field had left a phone's box a few words wide while an answer was written. A tap anywhere on it that is no
-/// button puts the keys in it.
+/// The message box, as Grok Bot's (the owner's word of 28 November 2026, the lead's ruling): + on its own disc beside it,
+/// then one pill of the words and what sends, which grows into a big box of many lines as you write. While it works its
+/// buttons (Queue, Steer, Stop) take a line of their own under the words (`wide`): beside the field they had left a
+/// phone's box a few words wide while an answer was written. A tap anywhere on it that is no button puts the keys in it.
 struct ComposerBox<Field: View, Leading: View, Trailing: View>: View {
     var composing: FocusState<Bool>.Binding
+    /// Its buttons need a line of their own under the words.
+    var wide = false
     @ViewBuilder let field: Field
     @ViewBuilder let leading: Leading
     @ViewBuilder let trailing: Trailing
 
     var body: some View {
+        #if os(iOS)
+        HStack(alignment: .bottom, spacing: Space.s2) {
+            leading
+                .frame(width: ComposerBoxMetrics.pill, height: ComposerBoxMetrics.pill)
+                .glassEffect(.regular.interactive(), in: .circle)
+            Group {
+                if wide {
+                    VStack(alignment: .leading, spacing: 0) {
+                        field
+                            .padding(.horizontal, Space.s4)
+                            .padding(.top, Space.s3)
+                            .padding(.bottom, Space.s1)
+                        HStack(spacing: Space.s2) {
+                            Spacer(minLength: Space.s2)
+                            trailing
+                        }
+                        .padding(.horizontal, Space.s1)
+                    }
+                } else {
+                    HStack(alignment: .bottom, spacing: 0) {
+                        field
+                            .padding(.leading, Space.s4)
+                            .padding(.vertical, Space.s3 - 1)
+                        trailing
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: ComposerBoxMetrics.pill, alignment: .leading)
+            .contentShape(.rect(cornerRadius: ComposerBoxMetrics.radius, style: .continuous))
+            .onTapGesture { composing.wrappedValue = true }
+            .glassEffect(.regular, in: .rect(cornerRadius: ComposerBoxMetrics.radius, style: .continuous))
+        }
+        #else
+        // A Mac's (its own redesign's to change): one rounded box, its words across its whole width, its buttons on a line
+        // under them, attach on the left and what sends on the right.
         VStack(alignment: .leading, spacing: 0) {
             field
                 .padding(.horizontal, Space.s4)
@@ -28,12 +64,19 @@ struct ComposerBox<Field: View, Leading: View, Trailing: View>: View {
         .contentShape(.rect(cornerRadius: ComposerBoxMetrics.radius, style: .continuous))
         .onTapGesture { composing.wrappedValue = true }
         .glassEffect(.regular, in: .rect(cornerRadius: ComposerBoxMetrics.radius, style: .continuous))
+        #endif
     }
 }
 
 enum ComposerBoxMetrics {
-    /// Its corners: a thumb's round, as the web's box.
+    /// Its corners: a pill's while it is one line, a thumb's round as it grows (a Mac's box: a thumb's round).
+    #if os(iOS)
+    static let radius: CGFloat = 22
+    #else
     static let radius: CGFloat = 24
+    #endif
+    /// The pill's height while it is one line, and the + disc beside it: a thumb's.
+    static let pill: CGFloat = 44
     /// A button's disc in it (send, stop): drawn this size, touched at a thumb's.
     static let disc: CGFloat = 32
 }

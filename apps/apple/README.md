@@ -6,18 +6,23 @@ does and signs every request the way `packages/core` verifies it. The Mac's app 
 (docs/ARCHITECTURE.md §10), and are Invincible's own: every word of the old theme is gone, and the vocabulary check
 reads these sources too.
 
-On an iPhone it is one screen, your agent's chat, and a drawer (the owner's word of 28 November 2026: "make it as simple
-as the grokbot app or t3code ios app"). The chat's bar holds the drawer button, which counts what needs you, the chat's
-title and New chat, and nothing else. At its foot: what needs you as one card (its first decision, answered in place;
-"N more" opens Needs you), what is under way in it, and a big message box whose words have its whole width, its buttons
-on a line under them (`UI/ComposerBox.swift`). The drawer (`UI/Drawer.swift`) comes from the button or a swipe from the
-screen's left edge, and holds, top to bottom: search, which finds a chat by its words; New chat; Needs you with its
-count, while something does; your agents and rooms as one row of faces, each its own chat; your chats by day, pinned
-first, a swipe pinning or deleting one; and Settings at its foot (`UI/SettingsList.swift`: notifications, your agent's
-mark, keys, connectors, its computer, the node, About, forgetting this device). What it opens is pushed over the chat and
-goes back by the screen's left edge: an agent's or a room's chat (its tasks compact: their title and state, one muted line
-of who and how you stepped in, one line of the latest step, and their answers, Approve, Ship it, Give again, each a tap;
-its box gives it a task), Needs you, Settings. A task opens as a thread of its own
+On an iPhone it opens on Home, a chat app's list (the owner's word of 28 November 2026: "use grok bot as the app
+look/UX. like a chat app, with the primary at the top, the other agents, and a settings menu"; `UI/HomeList.swift`,
+`Core/Home.swift`): your agent pinned first, then the agents and the rooms by their latest work, each row its face with
+its state, its name, one line of what it is doing or last did, when, and how much waits on you there (an ink count).
+Its bar: Settings (the gear), the app's name, and + for a new chat or a new agent; pulled down, a search that finds them
+and your chats by their words. A tap pushes that one's chat over the list, and the screen's left edge goes back: your
+agent's (its bar its face and name, its menu a new chat, your past chats and its computer), an agent's (its tasks
+compact: their title and state, one muted line of who and how you stepped in, one line of the latest step, and their
+answers, Approve, Ship it, Give again, each a tap), a room's. What waits on you sits at the foot of the chat it waits in
+(`UI/NeedsCard.swift`), its first decision answered in place and "N more" a tap from Needs you: an agent's approvals in
+its chat, everything that is no agent's (a device asking to join, a key it asked for) in your agent's. The message box is
+Grok Bot's pill (`UI/ComposerBox.swift`): + beside it (attach, and in an agent's chat Give a task…), then the words and
+send, growing into a big box as you write; while it works, Steer, Queue and Stop take a line of their own under the
+words. Settings (`UI/SettingsList.swift`) is one list of eight pages: Connectors, Keys, Providers (your providers, coding
+plans and seats, and the usage meter; read-only for now), Permissions (what always asks you, your rules on the commands
+the work runs, the hand-offs one node may make without asking; read-only for now), Notifications, Appearance (System,
+Light or Dark, and your agent's mark), This device (and forgetting it) and About. A task opens as a thread of its own
 (`UI/TaskView.swift`: a slim bar with its title, where it is and who has it; the brief, the work folded, the proof as one
 line with its verdict that opens to what it rests on, its answers under it; its details in a sheet). A notification, or an
 `invincible://` link (`task/<id>`, `agent/<handle>`, `approval/<id>`, `chat/<id>`), opens its place over the chat; one
@@ -33,8 +38,8 @@ Edit and Remove, a held queue saying why with Resume, and a side question asked 
 steers it: Steer this task and Queue for after it under its words, what you
 said on its way to it above the box until its run takes it, then in its trail as yours where it was taken, what an
 ended task never took, and its proof saying what its review judged against (`Core/Steer.swift`, the vectors' `steer`;
-`TaskSteerTests` taps it against the dev node). An iPad's window is the same drawer as its sidebar, always there, and what it chose beside it, your agent's chat first. A
-Mac's window keeps its own places (`UI/Places.swift`, `UI/HomeView.swift`, `UI/EverythingView.swift`) until its own
+`TaskSteerTests` taps it against the dev node). An iPad's window is Home's list as its sidebar, always there, and the chat it chose beside it, your agent's first;
+Settings opens as a sheet from the list's gear. A Mac's window keeps its own places (`UI/Places.swift`, `UI/HomeView.swift`, `UI/EverythingView.swift`) until its own
 redesign. A tap anywhere but a field closes the keyboard
 (`KeyboardCloser`).
 

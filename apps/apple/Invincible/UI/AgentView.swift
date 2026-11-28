@@ -80,8 +80,14 @@ struct AgentView: View {
         .defaultScrollAnchor(.bottom, for: .sizeChanges)
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom) {
-            if agent != nil {
-                RoomComposer(room: room, name: name, client: session.client, composing: $composing, seats: [Mentions.Seat(id: id, name: name), Mentions.Seat(id: "primary", name: Primary.name)], give: room.view == nil ? nil : { giving = true })
+            VStack(spacing: Space.s2) {
+                #if os(iOS)
+                // What waits on you from it, answered in place (its proposals are answered on their rows above).
+                NeedsCard(session: session, agent: id)
+                #endif
+                if agent != nil {
+                    RoomComposer(room: room, name: name, client: session.client, composing: $composing, seats: [Mentions.Seat(id: id, name: name), Mentions.Seat(id: "primary", name: Primary.name)], give: room.view == nil ? nil : { giving = true })
+                }
             }
         }
         .screen("agent.screen")
@@ -496,27 +502,16 @@ struct RoomComposer: View {
 
     private var field: some View {
         ComposerBox(composing: composing) {
-            TextField(prompt ?? "Message \(name)…", text: $room.draft, axis: .vertical)
+            TextField(prompt ?? "Ask \(name)…", text: $room.draft, axis: .vertical)
                 .plainField()
                 .lineLimit(1...8)
                 .focused(composing)
                 .sendsOnReturn { if room.sendable { Task { await room.send(with: client) } } }
         } leading: {
-            AttachButton(outbox: room.outbox, client: client)
+            // Giving it a task is the first thing in +, as attaching is the rest (Grok Bot's pill: nothing beside the words
+            // but what sends).
+            AttachButton(outbox: room.outbox, client: client, give: give)
         } trailing: {
-            if let give {
-                Button(action: give) {
-                    Label("Give a task", systemImage: "square.stack.3d.up")
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, Space.s3)
-                        .frame(minHeight: ComposerBoxMetrics.disc)
-                        .overlay(Capsule().strokeBorder(.separator))
-                        .frame(minHeight: Metrics.touch)
-                        .contentShape(.capsule)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("composer.give")
-            }
             // Filled only while there is something to send: the one prominent thing on the screen then.
             ComposerSend(ready: room.sendable, label: "Send to \(name)") { Task { await room.send(with: client) } }
         }

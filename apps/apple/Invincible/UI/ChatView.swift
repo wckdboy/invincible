@@ -1,14 +1,12 @@
 import SwiftUI
 
 /// The primary's chat: your messages and its answers as bubbles, its streaming in as it comes, and the message box on the
-/// keyboard. A new chat keeps the one before it on the node. On an iPhone it is where the app opens, the roster a drawer
-/// from its back arrow (which counts what needs you) or from the screen's left edge.
+/// keyboard. A new chat keeps the one before it on the node. On an iPhone and an iPad it is pushed from Home's list (the
+/// owner's word of 28 November 2026: Grok Bot's look), its bar your agent's face and name, and its menu.
 struct ChatView: View {
     let session: Session
     /// The chat shown, when it isn't the session's (on a Mac, one of its chats in a window of its own).
     private let shown: ChatModel?
-    /// Opens the roster, where it is a drawer (an iPhone's: the chat is where the app opens); nil where it is a sidebar.
-    private let roster: (() -> Void)?
     /// Forgets this device (its key, its pairing), from the refusal of a node that proves to be another (nil: Settings has it).
     private let forget: (() throws -> Void)?
     @FocusState private var composing: Bool
@@ -26,10 +24,9 @@ struct ChatView: View {
     /// A side question asked apart (its menu's Ask on the side…, or "/btw …" typed into the box).
     @State private var aside: SideQuestion?
 
-    init(session: Session, chat: ChatModel? = nil, roster: (() -> Void)? = nil, forget: (() throws -> Void)? = nil) {
+    init(session: Session, chat: ChatModel? = nil, forget: (() throws -> Void)? = nil) {
         self.session = session
         shown = chat
-        self.roster = roster
         self.forget = forget
     }
 
@@ -37,6 +34,14 @@ struct ChatView: View {
     static func refusal(_ trouble: NodeError?) -> NodeError? { trouble?.notYourNode == nil ? nil : trouble }
 
     private var chat: ChatModel { shown ?? session.chat }
+
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var widthClass
+    /// Reconnecting, or what went wrong, said over the chat where no sidebar beside it says so (an iPhone's).
+    private var saysLink: Bool { widthClass == .compact }
+    #else
+    private var saysLink: Bool { false }
+    #endif
     private var latestAnswer: Int? { chat.thread.turns.last { $0.role == .assistant }?.id }
 
     var body: some View {
@@ -83,7 +88,7 @@ struct ChatView: View {
         .defaultScrollAnchor(.bottom)
         .defaultScrollAnchor(.bottom, for: .sizeChanges)
         .scrollDismissesKeyboard(.interactively)
-        .modifier(LinkTrouble(session: session, said: build == nil && shown == nil, drawer: roster != nil, forget: forget))
+        .modifier(LinkTrouble(session: session, said: build == nil && shown == nil, lines: saysLink, forget: forget))
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: Space.s2) {
                 #if os(iOS)
@@ -109,21 +114,41 @@ struct ChatView: View {
         .toolbar {
             if build == nil {
             #if os(iOS)
-            // As Grok's and T3 Code's (the owner's word of 28 November 2026): the drawer, the chat's title, a new chat.
-            // Nothing else: its chats and agents are in the drawer, its computer in Settings, a side question "/btw".
-            if let roster {
-                ToolbarItem(placement: .topBarLeading) {
-                    DrawerButton(needs: session.needsYou, open: roster)
-                }
-            }
+            // As Grok Bot's (the owner's word of 28 November 2026): back to the list, your agent's face and name, and its
+            // menu (a new chat, your past chats, its computer). A side question is "/btw" in the box.
             ToolbarItem(placement: .principal) {
-                Text(chat.title ?? "New chat")
-                    .font(.headline)
-                    .lineLimit(1)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("chat.title")
+                HStack(spacing: Space.s2) {
+                    PrimaryOrb(size: 24, tone: session.primaryTone, mood: session.primaryMood)
+                    Text(Primary.name).font(.headline).lineLimit(1)
+                }
+                .padding(.leading, Space.s1)
+                .padding(.trailing, Space.s3)
+                .frame(minHeight: 36)
+                .glassEffect(.regular, in: .capsule)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Primary.name)
+                .accessibilityValue(chat.title ?? "New chat")
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("chat.title")
             }
-            ToolbarItem(placement: .topBarTrailing) { newChat }
+            .sharedBackgroundVisibility(.hidden)
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    newChat
+                    Button { listing = true } label: { Label("All chats", systemImage: "clock.arrow.circlepath") }
+                        .accessibilityIdentifier("chats")
+                    if session.team?.computer != nil && session.can("sandbox") {
+                        Section("Its computer") {
+                            Button { watching = true } label: { Label("Its screen", systemImage: "display") }
+                            Button { inTerminal = true } label: { Label("Its terminal", systemImage: "apple.terminal") }
+                            Button { inFiles = true } label: { Label("Its files", systemImage: "folder") }
+                        }
+                    }
+                } label: {
+                    Label("More", systemImage: "ellipsis")
+                }
+                .accessibilityIdentifier("chat.more")
+            }
             #else
             ToolbarItem(placement: .navigation) {
                 PrimaryOrb(size: 26, tone: session.primaryTone, mood: session.primaryMood)
@@ -177,17 +202,6 @@ struct ChatView: View {
                 listing = false
                 chat.startNew()
                 composing = true
-            }
-        }
-        // From the left edge, the roster, where it is a drawer (the chat is where an iPhone's app opens: nothing is under
-        // it for that edge to go back to).
-        .overlay(alignment: .leading) {
-            if let roster {
-                Color.clear
-                    .frame(width: 18)
-                    .contentShape(.rect)
-                    .gesture(DragGesture(minimumDistance: 8).onEnded { if $0.translation.width > 36 { roster() } })
-                    .accessibilityHidden(true)
             }
         }
         .task {
@@ -251,13 +265,13 @@ struct ChatView: View {
 }
 
 /// The link's trouble over the chat. A node that proves to be another is said wherever the chat is the session's own, with
-/// Try again and Forget this device (confirmed first). Where the roster is a drawer (an iPhone's), nothing else on the screen
-/// says the rest, so it is said here too: reconnecting, or what went wrong.
+/// Try again and Forget this device (confirmed first). Where no sidebar beside it says the rest (an iPhone's), it is said
+/// here too (`lines`): reconnecting, or what went wrong.
 private struct LinkTrouble: ViewModifier {
     let session: Session
     /// The chat is the session's own (not a Build thread's, nor one in a window of its own).
     let said: Bool
-    let drawer: Bool
+    let lines: Bool
     let forget: (() throws -> Void)?
     @State private var forgetting = false
     @State private var problem: String?
@@ -282,7 +296,7 @@ private struct LinkTrouble: ViewModifier {
     @ViewBuilder private var line: some View {
         if said, let refused = ChatView.refusal(session.trouble) {
             NotYourNodeCard(trouble: refused, retry: { Task { await session.refresh() } }, forget: forget.map { _ in { forgetting = true } })
-        } else if drawer {
+        } else if lines {
             if Session.showsReconnecting(session.reconnecting, trouble: session.trouble) {
                 ReconnectingLine(session: session).padding(.horizontal, Metrics.margin).background(.bar)
             } else if let trouble = session.trouble {
@@ -480,7 +494,7 @@ struct Composer: View {
     }
 
     private var field: some View {
-        ComposerBox(composing: composing) {
+        ComposerBox(composing: composing, wide: chat.answering && !typeSize.isAccessibilitySize) {
             // Made anew with each message sent: clearing a focused multi-line field can leave what was sent on screen, or
             // let the keyboard put back what it still held (a word it was correcting, a dictation finishing). A new one is
             // empty, and nothing late reaches it. While it works it stays open: what you write steers it or is queued
@@ -575,48 +589,3 @@ private struct StepLine: View {
     }
 }
 
-#if os(iOS)
-/// What needs you, at the chat's foot (the owner's word of 28 November 2026: one screen, as Grok's): the first decision,
-/// its one answer in place, and how many more wait, a tap from Needs you. Nothing while nothing does.
-private struct NeedsCard: View {
-    let session: Session
-    @State private var desk = DecisionDesk()
-    @Environment(\.openPlace) private var openPlace
-    @Environment(\.showInbox) private var showInbox
-
-    var body: some View {
-        if let work = session.attended {
-            let decisions = desk.decisions(session, work, go: { openPlace?($0) })
-            if let first = decisions.first {
-                VStack(alignment: .leading, spacing: 0) {
-                    DecisionRow(decision: first, busy: desk.busy.contains(first.id))
-                    if decisions.count > 1 {
-                        Divider()
-                        Button { showInbox?() } label: {
-                            HStack {
-                                Text("\(decisions.count - 1) more need you").font(.subheadline.weight(.semibold))
-                                Spacer(minLength: Space.s2)
-                                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
-                            }
-                            .frame(minHeight: Metrics.touch)
-                            .contentShape(.rect)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("chat.needs.more")
-                    }
-                }
-                .padding(.horizontal, Space.s4)
-                .padding(.vertical, Space.s1)
-                .background(Color(uiColor: .secondarySystemBackground), in: .rect(cornerRadius: ComposerBoxMetrics.radius, style: .continuous))
-                // As wide as the message box under it and what is under way: on an iPad the conversation's column, not
-                // the window's (the first pictures had it out to the sidebar).
-                .padding(.horizontal, Metrics.margin)
-                .readingWidth()
-                .modifier(DecisionDeskSheets(desk: desk, session: session))
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("chat.needs")
-            }
-        }
-    }
-}
-#endif

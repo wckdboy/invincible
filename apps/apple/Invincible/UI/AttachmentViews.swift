@@ -287,6 +287,8 @@ extension View {
 struct AttachButton: View {
     let outbox: Outbox
     let client: NodeClient
+    /// Giving its agent a task, first in the menu (an agent's chat).
+    var give: (() -> Void)? = nil
     @State private var photos: [PhotosPickerItem] = []
     @State private var choosingPhotos = false
     @State private var choosingFiles = false
@@ -294,11 +296,23 @@ struct AttachButton: View {
     @State private var takingPhoto = false
     #endif
 
+    /// Its sign: + beside an iPhone's and an iPad's pill (Grok Bot's), a paperclip in a Mac's box.
+    #if os(iOS)
+    static let glyph = "plus"
+    #else
+    static let glyph = "paperclip"
+    #endif
+
     /// What Files offers: pictures, PDFs, and the kinds of text one attaches (logs, notes, code, data).
     static let kinds: [UTType] = [.image, .pdf, .text, .plainText, .sourceCode, .json, .xml, .yaml, .commaSeparatedText, .log]
 
     var body: some View {
         Menu {
+            if let give {
+                Button(action: give) { Label("Give a task…", systemImage: "square.stack.3d.up") }
+                    .accessibilityIdentifier("composer.give")
+                Divider()
+            }
             Button { choosingFiles = true } label: { Label("Files", systemImage: "folder") }
             #if os(iOS)
             if CameraPicker.available {
@@ -313,13 +327,13 @@ struct AttachButton: View {
             }
             #endif
         } label: {
-            // In the message box (ComposerBox), on its glass: no glass of its own, a thumb's target.
-            Image(systemName: "paperclip").font(.body.weight(.semibold)).frame(minWidth: Metrics.touch, minHeight: Metrics.touch).contentShape(.rect)
+            // Beside the message box (ComposerBox), on the disc it gives it: a thumb's target (a Mac's, in its box).
+            Image(systemName: Self.glyph).font(.body.weight(.semibold)).frame(minWidth: Metrics.touch, minHeight: Metrics.touch).contentShape(.circle)
         }
         .menuIndicator(.hidden)
         .buttonStyle(.borderless)
         .disabled(outbox.full)
-        .accessibilityLabel("Attach pictures or files")
+        .accessibilityLabel(give == nil ? "Attach pictures or files" : "Give a task, or attach pictures or files")
         .accessibilityIdentifier("attach")
         // Each chooser hangs on a view of its own, never on the menu: one presentation per view, each free to show.
         .background { Color.clear.photosPicker(isPresented: $choosingPhotos, selection: $photos, maxSelectionCount: max(1, Attachments.perMessage - outbox.waiting.count), matching: .images) }

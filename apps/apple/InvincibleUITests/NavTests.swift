@@ -1,11 +1,11 @@
 import XCTest
 
 /*
- * Getting around, counted in taps from your agent's chat, where the app opens (the owner's word of 28 November 2026: "make
- * it as simple as the grokbot app or t3code ios app"): the drawer is a tap away (the chat's drawer button, which counts
- * what needs you), so a past chat, an agent, Needs you and Settings are two taps; a running task three (an agent, its
- * card) and an approval three (Needs you, its card); a link none. What is pushed over the chat goes back by the screen's
- * left edge and by its back button. Against the dev node's busy fleet, each from a fresh launch on the chat.
+ * Getting around, counted in taps from Home, where the app opens (the owner's word of 28 November 2026: "use grok bot as
+ * the app look/UX. like a chat app, with the primary at the top, the other agents, and a settings menu"): your agent's
+ * chat, an agent's and Settings one tap; Needs you two (your agent's chat, then "N more need you" under what waits
+ * there); an approval two (your agent's chat, its card there); a running task two (its agent, its card); a past chat four
+ * (your agent, its menu, Past chats, the chat); a link none. Against the dev node's busy fleet, each from a fresh launch.
  */
 final class NavTests: XCTestCase {
     @MainActor
@@ -22,72 +22,83 @@ final class NavTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)[screen].waitForExistence(timeout: 10), "\(screen) never came", file: file, line: line)
     }
 
-    /// The roster opened, and one of its rows chosen.
+    /// One of Home's rows (or its bar's buttons), tapped.
     @MainActor
-    private func pick(_ app: XCUIApplication, _ row: String, file: StaticString = #filePath, line: UInt = #line) {
-        app.openRoster()
-        let chosen = app.rosterRow(row)
-        XCTAssertTrue(chosen.waitForExistence(timeout: 10), "No \(row) in the roster", file: file, line: line)
+    private func tap(_ app: XCUIApplication, _ row: String, file: StaticString = #filePath, line: UInt = #line) {
+        let chosen = app.homeRow(row)
+        XCTAssertTrue(chosen.waitForExistence(timeout: 10), "No \(row) on Home", file: file, line: line)
         chosen.tap()
     }
 
     @MainActor
-    func testAnAgentIsTwoTaps() throws {
+    func testYourAgentsChatIsOneTap() throws {
         let app = try opened()
-        app.openRoster()
-        let agent = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'roster.agent.'")).firstMatch
-        XCTAssertTrue(agent.waitForExistence(timeout: 10), "No agent in the roster")
+        tap(app, "home.primary")
+        shown(app, "chat.screen")
+    }
+
+    @MainActor
+    func testAnAgentIsOneTap() throws {
+        let app = try opened()
+        let agent = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'home.agent.'")).firstMatch
+        XCTAssertTrue(agent.waitForExistence(timeout: 10), "No agent on Home")
         agent.tap()
         shown(app, "agent.screen")
     }
 
     @MainActor
+    func testSettingsIsOneTap() throws {
+        let app = try opened()
+        tap(app, "home.settings")
+        shown(app, "settings.screen")
+    }
+
+    @MainActor
     func testNeedsYouIsTwoTaps() throws {
         let app = try opened()
-        pick(app, "roster.needs")
+        tap(app, "home.primary")
+        let more = app.buttons["chat.needs.more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10), "Nothing more needs you under your agent's chat")
+        more.tap()
         shown(app, "needs.screen")
     }
 
     @MainActor
-    func testARunningTaskIsThreeTaps() throws {
+    func testAnApprovalIsTwoTaps() throws {
         let app = try opened()
-        // The agent at work (the dev node's Builder), then its running task's card.
-        pick(app, "roster.agent.builder")
-        shown(app, "agent.screen")
-        let running = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'card.' AND label CONTAINS 'Working'")).firstMatch
-        XCTAssertTrue(running.waitForExistence(timeout: 10), "No running task on the agent's page")
-        running.tap()
-        shown(app, "task.screen")
-    }
-
-    @MainActor
-    func testAnApprovalIsThreeTaps() throws {
-        let app = try opened()
-        pick(app, "roster.needs")
+        tap(app, "home.primary")
         let approval = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'decision.action:' AND NOT (identifier ENDSWITH '.answer')")).firstMatch
-        XCTAssertTrue(approval.waitForExistence(timeout: 10), "No approval in Needs you")
+        XCTAssertTrue(approval.waitForExistence(timeout: 10), "No approval in your agent's chat")
         approval.tap()
         shown(app, "approval.card")
     }
 
     @MainActor
-    func testSettingsIsTwoTaps() throws {
+    func testARunningTaskIsTwoTaps() throws {
         let app = try opened()
-        pick(app, "roster.settings")
-        shown(app, "settings.screen")
+        tap(app, "home.agent.builder")
+        shown(app, "agent.screen")
+        // Its timeline's card at work (the task's title and its state, Working).
+        let running = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'card.' AND label CONTAINS 'Working'")).firstMatch
+        XCTAssertTrue(running.waitForExistence(timeout: 10), "No running task in Builder's chat")
+        running.tap()
+        shown(app, "task.screen")
     }
 
     @MainActor
-    func testAPastChatIsTwoTaps() throws {
+    func testAPastChatIsFourTaps() throws {
         let app = try opened()
-        app.openRoster()
-        let chat = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'roster.chat.'")).firstMatch
-        XCTAssertTrue(chat.waitForExistence(timeout: 10), "No past chat in the drawer")
+        tap(app, "home.primary")
+        shown(app, "chat.screen")
+        app.buttons["chat.more"].tap()
+        let past = app.buttons["chats"]
+        XCTAssertTrue(past.waitForExistence(timeout: 5), "No All chats in its menu")
+        past.tap()
+        let chat = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'chats.'")).firstMatch
+        XCTAssertTrue(chat.waitForExistence(timeout: 10), "No past chat among them")
         chat.tap()
         shown(app, "chat.screen")
-        if UIDevice.current.userInterfaceIdiom != .pad {
-            XCTAssertTrue(app.descendants(matching: .any)["roster"].waitForNonExistence(timeout: 5), "The drawer stayed over the chat")
-        }
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'chats.'")).firstMatch.waitForNonExistence(timeout: 5), "The list stayed over the chat")
     }
 
     @MainActor
@@ -99,25 +110,25 @@ final class NavTests: XCTestCase {
         shown(app, "task.screen")
     }
 
-    /// Back from an agent's chat to your agent's by the screen's left edge, as a thumb goes back, and by its back button:
-    /// what the drawer opens is pushed over the chat, under the system's bar, and goes back as any pushed page does.
+    /// Back from an agent's chat to Home by the screen's left edge, as a thumb goes back, and by its back button.
     @MainActor
     func testAnAgentsChatGoesBackByTheEdgeAndByItsButton() throws {
-        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "An iPad's agent is a sidebar's place, with nothing to go back to")
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "An iPad's chat is beside the list, with nothing to go back to")
         let app = try opened()
         for way in ["the edge", "its back button"] {
-            pick(app, "roster.agent.builder")
+            tap(app, "home.agent.builder")
             shown(app, "agent.screen")
             if way == "the edge" {
                 let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.55))
                 edge.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.55)))
             } else {
                 let back = app.navigationBars.buttons.element(boundBy: 0)
-                XCTAssertTrue(back.waitForExistence(timeout: 5), "The agent's page has no back button")
+                XCTAssertTrue(back.waitForExistence(timeout: 5), "The chat has no back button")
                 back.tap()
             }
-            XCTAssertTrue(app.descendants(matching: .any)["agent.screen"].waitForNonExistence(timeout: 5), "Still on the agent's page after \(way)")
-            shown(app, "chat.screen")
+            XCTAssertTrue(app.descendants(matching: .any)["agent.screen"].waitForNonExistence(timeout: 5), "Still on Builder's chat after \(way)")
+            let primary = app.homeRow("home.primary")
+            XCTAssertTrue(primary.waitForExistence(timeout: 5) && primary.isHittable, "Home isn't on the screen after \(way)")
         }
     }
 }

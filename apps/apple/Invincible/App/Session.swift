@@ -122,26 +122,32 @@ import Observation
 
     /// The agents as it is drawn: the node's word, or until it has answered, the kept one.
     private var drawnTeam: TeamSnapshot? { team ?? kept?.team }
+    /// The same, for what is drawn from it beyond the session (Home's times).
+    var drawnSnapshot: TeamSnapshot? { drawnTeam }
 
     /// An agent as the agents draw it (its name, its face): the node's word, or the kept team's until the node
     /// has answered. For drawing alone: an agent's page, and anything you change, take `agent`, the node's word.
     func drawn(_ id: String) -> Agent? { drawnTeam?.agents.first { $0.id == id } }
 
     /// The primary's own line: what it's answering here, the turns the node runs, the runs in hand, what waits on you.
-    var primary: PrimaryNow {
+    var primary: PrimaryNow { PrimaryNow(primaryWork) }
+
+    /// What the primary's line is said from: what it's answering here, the turns the node runs, the runs in hand, what
+    /// waits on you, its answers you haven't read.
+    var primaryWork: PrimaryWork {
         // Until the node has answered, as it was kept: the chats under way, what waited for you.
         // (What needs you is one count everywhere: Home's, as kept until the node has answered.)
         if team == nil, let kept {
-            return PrimaryNow(PrimaryWork(answering: chat.answering, step: chat.step, turns: kept.turns, runs: [], needs: kept.waiting, unread: kept.unread))
+            return PrimaryWork(answering: chat.answering, step: chat.step, turns: kept.turns, runs: [], needs: kept.waiting, unread: kept.unread)
         }
-        return PrimaryNow(PrimaryWork(
+        return PrimaryWork(
             answering: chat.answering,
             step: chat.step,
             turns: turns.map(\.title),
             runs: runs.map(\.goal),
             needs: inboxLoaded ? needsYou : nil,
             unread: unreadChats.map(\.title)
-        ))
+        )
     }
 
     /// Where it stands at a glance: the ring round its face, and its word.

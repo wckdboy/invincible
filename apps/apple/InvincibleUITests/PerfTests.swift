@@ -2,17 +2,17 @@ import XCTest
 
 /*
  * The app as you use it, measured against a dev node with a busy fleet (scripts/dev-node.ts --heavy --auto-approve) and
- * held to Budgets.json. The app opens on your agent's chat (since 27 November 2026; Home before), so:
- *  - launch: from the process starting to the chat's first frame with what it shows, its latest chat or its welcome (the
- *    app's own probe, PerfProbe.swift: Apple's launch metric reports nothing on a simulator), the median of five;
- *  - at rest on the chat: what it asks the node in a minute, and its CPU and memory while nothing changes; and what it
- *    asks in a minute with a stall in it (the node silent long enough that the app takes its stream for dead);
- *  - live: from something needing you on the node to the chat's back arrow counting it, the first event after opening
- *    held on its own (it takes the path cold) and the ten after it together, each said with where its time went;
+ * held to Budgets.json. The app opens on Home's list (since 28 November 2026, Grok Bot's look; your agent's chat from 27
+ * November, Home before), so:
+ *  - launch: from the process starting to the list's first frame with its rows (the app's own probe, PerfProbe.swift:
+ *    Apple's launch metric reports nothing on a simulator), the median of five;
+ *  - at rest on Home: what it asks the node in a minute, and its CPU and memory while nothing changes; and what it asks
+ *    in a minute with a stall in it (the node silent long enough that the app takes its stream for dead);
+ *  - live: from something needing you on the node to your agent's row on Home counting it, the first event after
+ *    opening held on its own (it takes the path cold) and the ten after it together, each said with where its time went;
  *  - a dead link: how soon the app says it's reconnecting once the node goes silent (as a half-open connection does),
  *    and how soon it's back once the node can be reached again;
- *  - scrolling your agent's chat (Work's long list, and Home's, before): the frames that came late, in ms a second (Apple's hitch time
- *    ratio).
+ *  - scrolling Home's list, and your agent's chat: the frames that came late, in ms a second (Apple's hitch time ratio).
  * Each prints a PERF line and attaches its numbers, so a run's log and its result bundle say what was measured.
  */
 final class PerfTests: XCTestCase {
@@ -197,7 +197,7 @@ final class PerfTests: XCTestCase {
 
     @MainActor
     private func event(_ app: XCUIApplication, _ node: DevNode) throws -> Event {
-        let before = try XCTUnwrap(app.needsCount, "The chat's back arrow says no count")
+        let before = try XCTUnwrap(app.needsCount, "Your agent's row on Home says no count")
         let poked = try node.poke()
         let start = Date()
         while (app.needsCount ?? before) <= before, Date().timeIntervalSince(start) < 20 { settle(0.02) }
@@ -236,17 +236,37 @@ final class PerfTests: XCTestCase {
     }
 
     @MainActor
+    func testScrollHome() throws {
+        let node = try DevNode.named()
+        let app = XCUIApplication()
+        app.launchArguments = ["-InvincibleMeasure", "YES", "-InvincibleMeasureFrames", "YES"]
+        app.terminate()
+        try app.openApp(node)
+        // Home's list, where the app opens: your agent and the dev node's busy fleet, each face showing its state.
+        let home = app.descendants(matching: .any)["home"]
+        XCTAssertTrue(home.waitForExistence(timeout: 10), "Home never came")
+        settle(5)
+        try scroll(app, home, "scroll-home", "Home's list")
+    }
+
+    @MainActor
     func testScrollChat() throws {
         let node = try DevNode.named()
         let app = XCUIApplication()
         app.launchArguments = ["-InvincibleMeasure", "YES", "-InvincibleMeasureFrames", "YES"]
         app.terminate()
         try app.openApp(node)
-        // Your agent's chat, where the app opens (the owner's word of 28 November 2026: one screen): its latest
-        // conversation, as the dev node's busy fleet makes it, at its latest. Each round flings back into it and down again.
+        // Your agent's chat, a tap from Home: its latest conversation, as the dev node's busy fleet makes it, at its latest.
+        app.openPrimary()
         let chat = app.descendants(matching: .any)["chat.screen"]
         XCTAssertTrue(chat.waitForExistence(timeout: 10), "The chat never came")
         settle(5)
+        try scroll(app, chat, "scroll-chat", "the chat")
+    }
+
+    /// Flung back and forth, each round flinging into it and back again: the frames that came late, held to the budget.
+    @MainActor
+    private func scroll(_ app: XCUIApplication, _ chat: XCUIElement, _ name: String, _ what: String) throws {
         // A fling in the messages' part of the screen (the box at its foot and the bar at its top scroll nothing).
         func fling(_ from: CGFloat, _ to: CGFloat) {
             chat.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
@@ -272,8 +292,8 @@ final class PerfTests: XCTestCase {
         let best = ratios[0], median = ratios[1]
         let load = Self.hostLoad()
         let said = "rounds \(ratios.map { String(format: "%.1f", $0) }), the Mac's load \(String(format: "%.1f", load.average)) on \(load.cores) cores"
-        report("scroll-chat", ["lateMsPerSecond": best, "medianLateMsPerSecond": median, "seconds": rounds.map(\.seconds).reduce(0, +), "hostLoad": load.average, "hostCores": Double(load.cores)])
-        XCTAssertLessThanOrEqual(best, try budgets.scrollLateMsPerSecond, "Scrolling the chat, frames came \(String(format: "%.1f", best)) ms a second late at best (\(said))")
+        report(name, ["lateMsPerSecond": best, "medianLateMsPerSecond": median, "seconds": rounds.map(\.seconds).reduce(0, +), "hostLoad": load.average, "hostCores": Double(load.cores)])
+        XCTAssertLessThanOrEqual(best, try budgets.scrollLateMsPerSecond, "Scrolling \(what), frames came \(String(format: "%.1f", best)) ms a second late at best (\(said))")
         target(median <= (try budgets.scrollLateTargetMsPerSecond), "under \(try! budgets.scrollLateTargetMsPerSecond) ms a second of late frames scrolling; the median round was \(String(format: "%.1f", median)) (\(said))")
     }
 

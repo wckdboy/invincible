@@ -12,10 +12,10 @@ final class ChatComposerTests: XCTestCase {
         let app = XCUIApplication()
         app.terminate()
         try app.openApp(node)
-        // A new chat, where the app opens, which it answers for as long as it likes.
+        // A new chat with your agent (Home's +), which it answers for as long as it likes.
+        app.newChat()
         let chat = app.descendants(matching: .any)["chat.screen"]
         XCTAssertTrue(chat.waitForExistence(timeout: 10), "The chat never came")
-        app.newChat()
         let bar = chat.descendants(matching: .any)["composer"]
         XCTAssertTrue(bar.waitForExistence(timeout: 10), "The chat has no message box")
         bar.tap()

@@ -13,10 +13,7 @@ final class LoopDraftTests: XCTestCase {
         let app = XCUIApplication()
         app.terminate()
         try app.openApp(node)
-        app.openRoster()
-        let needs = app.rosterRow("roster.needs")
-        XCTAssertTrue(needs.waitForExistence(timeout: 5), "No Needs you in the roster")
-        needs.tap()
+        app.openNeeds()
         XCTAssertTrue(app.descendants(matching: .any)["needs.screen"].waitForExistence(timeout: 10), "Needs you never came")
         // Below the fixture's other decisions: drawn once it's scrolled to.
         let row = app.buttons["decision.draft:\(drafted.draft)"]
