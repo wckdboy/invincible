@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import sh.invincible.bot.core.AgentMark
+import sh.invincible.bot.core.Glass
 import sh.invincible.bot.core.After
 import sh.invincible.bot.core.Ask
 import sh.invincible.bot.core.Followers
@@ -134,7 +136,23 @@ data class Table(
     val primaryNeeds: Int = 0,
     /** The chats your agent is answering in, by their titles (null: a temporary chat), as the node said them last. */
     val turns: List<String?> = emptyList(),
+    /** For each agent waiting on you, how much did when its glass last knocked (Glass.nudgeNow), and how many knocks were
+     * armed for it this session: one more, and its glass knocks three times again (GlassMark). */
+    val nudged: Map<String, Int> = emptyMap(),
+    val knocks: Map<String, Int> = emptyMap(),
 ) {
+    /** The knocks after [home]: one more armed for each agent something new waits on (Glass.nudgeNow, from [nudged]). */
+    private fun knocking(home: List<HomeRow>): Pair<Map<String, Int>, Map<String, Int>> {
+        val nudged = HashMap<String, Int>()
+        val knocks = HashMap(this.knocks)
+        for (row in home) if (row.row.kind == "agent") {
+            val (knock, after) = Glass.nudgeNow(this.nudged[row.row.id], Glass.state(AgentMark.state(row.row.state)), row.count)
+            after?.let { nudged[row.row.id] = it }
+            if (knock) knocks[row.row.id] = (knocks[row.row.id] ?: 0) + 1
+        }
+        return nudged to knocks
+    }
+
     /**
      * The agents after a look at the node: `team` its answer for the team (null: it couldn't be read), `turns` its
      * answer for the chats, `asks` the approvals waiting and `inbox` what waits for you that is no task's (the Inbox's
@@ -156,9 +174,11 @@ data class Table(
             needs = owed,
             unread = unread.map { it["title"].string },
         )
+        val home = snapshot?.let { Roster.homeRows(it, asks, now) } ?: emptyList()
+        val (nudged, knocks) = knocking(home)
         return Table(
             snapshot, snapshot?.let { Roster.rows(it, asks, now) } ?: emptyList(), primary, unread, turns?.get("chats")?.text() ?: chats,
-            tasks = work, home = snapshot?.let { Roster.homeRows(it, asks, now) } ?: emptyList(), primaryNeeds = owed, turns = inHand,
+            tasks = work, home = home, primaryNeeds = owed, turns = inHand, nudged = nudged, knocks = knocks,
         )
     }
 
@@ -170,9 +190,11 @@ data class Table(
         fun restored(kept: KeptTable.Kept, snapshot: Snapshot, now: Long): Table {
             val owed = kept.inbox?.let { Roster.primaryNeeds(it, kept.asks, snapshot.agents.map { agent -> agent.id }) }
             val primary = Roster.primaryNow(turns = kept.turns, runs = emptyList(), needs = owed, unread = kept.unread.map { it["title"].string })
+            val home = Roster.homeRows(snapshot, kept.asks, now)
+            val (nudged, knocks) = Table().knocking(home)
             return Table(
                 snapshot, Roster.rows(snapshot, kept.asks, now), primary, kept.unread, asOf = kept.at, tasks = TeamTask.all(kept.team),
-                home = Roster.homeRows(snapshot, kept.asks, now), primaryNeeds = owed ?: 0, turns = kept.turns,
+                home = home, primaryNeeds = owed ?: 0, turns = kept.turns, nudged = nudged, knocks = knocks,
             )
         }
     }

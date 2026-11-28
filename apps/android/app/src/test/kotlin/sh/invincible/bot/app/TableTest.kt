@@ -53,6 +53,18 @@ class TableTest {
         assertEquals(Roster.primaryNow(turns = listOf("Release notes"), runs = emptyList(), needs = 3), after.primary)
     }
 
+    @Test fun anAgentsGlassKnocksWhenSomethingNewWaitsOnItNeverAgainForTheSame() {
+        // Ada asks once: a knock is armed for her glass; asked the same again, none more; a second ask, another.
+        val one = Table().after(team = team, turns = turns, asks = asking, inbox = 1, now = now)
+        assertEquals(1, one.knocks["ada"])
+        val same = one.after(team = team, turns = turns, asks = asking, inbox = 1, now = now)
+        assertEquals(1, same.knocks["ada"])
+        val more = same.after(team = team, turns = turns, asks = asking + Ask("arm:team.0123456789.ada", "forge", "delete"), inbox = 2, now = now)
+        assertEquals(2, more.knocks["ada"])
+        // (Nothing waits on Tester: no knock is armed for it.)
+        assertNull(more.knocks["tester"])
+    }
+
     @Test fun theNodesAnswerForTheTeamReplacesIt() {
         val after = kept().after(team = team, turns = turns, asks = emptyList(), inbox = 0, now = now)
         assertNull(after.asOf)

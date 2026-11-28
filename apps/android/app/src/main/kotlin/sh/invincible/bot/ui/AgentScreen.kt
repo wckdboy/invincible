@@ -111,7 +111,7 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
         barTitle = {
             val line = row?.let { Roster.besideChip(it.line, it.state) }?.takeIf { it.isNotBlank() } ?: person?.role
             ChatPill(person?.name ?: id, line = listOfNotNull(row?.state?.words, line).joinToString(", "), open = { about = true }) {
-                AgentMarkView(id, person?.avatar ?: row?.avatar, 24.dp, state = AgentMark.state(row?.state), live = true)
+                AgentMarkView(id, person?.avatar ?: row?.avatar, 24.dp, state = AgentMark.state(row?.state), live = true, knock = table.knocks[id] ?: 0)
             }
         },
         barAlways = true,

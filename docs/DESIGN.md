@@ -57,9 +57,11 @@ and all eight colours. It is saved as its avatar, `{v: 4, color, shape}`. A colo
 (`snapColor`, as it did); the pickers offer the eight and the 22, and the node's choice. Its state is a dot at its
 bottom-right corner, cut out of it, beside the word that says it: working in blue, needs you in the ink, failed in red,
 and for the rest (queued, paused, done, idle, which the word tells apart) a grey ring (`glassState`, `GLASS_DOT`).
-Only working moves, its light (below), and needs you, its glass nudging: a knock every four seconds, timed from the
-clock, so the glasses that wait on you nudge together (`GLASS_NUDGE`; the lead's word, 28 November 2026: "Ink, not
-amber, in every app ... the avatar's nudge is its motion, not a colour"). Where motion is reduced, both are still. Every app draws it from core's numbers, held by the vectors' `glass`:
+Only working moves, its light (below), and needs you, its glass knocking: three knocks, one at each four seconds of
+the clock, so the glasses that wait on you knock together, then rest; something new waiting on it (more than when it
+last knocked) knocks again (`GLASS_NUDGE`, `nudgeNow`; the lead's words, 28 November 2026: "Ink, not amber, in every
+app ... the avatar's nudge is its motion, not a colour", and "knock three times, then rest"). Nothing moves at rest, and
+where motion is reduced, both are still. Every app draws it from core's numbers, held by the vectors' `glass`:
 the iPhone, iPad and Mac apps with `Core/Glass.swift` and `UI/GlassView.swift` (each shape, ramp, size and page drawn
 once with Core Graphics, its blur with Core Image, and kept), Android with `core/Glass.kt` and `ui/GlassView.kt` (the
 same, its blur SVG's own three boxes each way), behind the faces they drew before, so no call site changed. Every

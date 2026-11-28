@@ -71,14 +71,14 @@ import kotlin.math.sqrt
  * [live] where it is the one in focus (its agent's own page), which alone breathes. Decorative beside its name; named
  * ([description]) where it stands alone. */
 @Composable
-fun GlassMark(glass: Glass, size: Dp, state: Glass.State? = null, description: String? = null, live: Boolean = false) {
+fun GlassMark(glass: Glass, size: Dp, state: Glass.State? = null, description: String? = null, live: Boolean = false, knock: Knock? = null) {
     val dark = LocalBrand.current.paper.luminance() < 0.5f
     val box = with(LocalDensity.current) { size.roundToPx() }
     val picture = remember(glass, size, box, dark) { GlassPictures.picture(glass.shape, glass.color, size.value, box, dark) }
     val motion = motionAllowed()
     val breath = breathing(glassBreathes(state, live, motion))
     val nudges = glassNudges(state, live, motion)
-    val nudge = nudging(nudges)
+    val nudge = nudging(knock, nudges)
     val named = if (description != null) Modifier.clearAndSetSemantics { contentDescription = description } else Modifier.clearAndSetSemantics { }
     val ramp = Glass.RAMPS[glass.color]
     // (Only a glass that may nudge has a layer of its own to turn.)
@@ -106,21 +106,36 @@ fun GlassMark(glass: Glass, size: Dp, state: Glass.State? = null, description: S
 /** Whether a glass nudges: one that waits on you, where it is in focus ([live]), while the phone's animations are on. */
 internal fun glassNudges(state: Glass.State?, live: Boolean, motion: Boolean): Boolean = live && motion && state == Glass.State.NEEDS
 
+/** A glass's knocks, as its agent's table arms them (Table.knocks): its agent, and how many were armed this session. */
+data class Knock(val agent: String, val armed: Int)
+
+/** Which knock each agent's glass has given, for the app's life: a glass drawn again (a row scrolled back, its chat's
+ * bar) doesn't knock again for the same need. */
+private object Knocked {
+    private val given = HashMap<String, Int>()
+
+    fun take(k: Knock): Boolean = ((given[k.agent] ?: 0) < k.armed).also { if (it) given[k.agent] = k.armed }
+}
+
 /**
- * A glass that waits on you, nudged (core's GLASS_NUDGE, the lead's word of 28 November 2026: its motion, not a colour):
- * once every Glass.Nudge.EVERY ms, timed from the clock so the glasses on a page nudge together, a knock through its
- * turns; between knocks it only waits, asking for no frame, and where [on] is false it is still. Its turn is read only in
- * its layer, so a knock draws nothing again: the render thread turns the layer.
+ * A glass that waits on you, knocking (core's GLASS_NUDGE; the lead's words of 28 November 2026: "the avatar's nudge is
+ * its motion, not a colour", "knock three times, then rest"): for each knock armed ([knock]), three knocks through its
+ * turns, one at each multiple of Glass.Nudge.EVERY so the glasses that wait on you knock together, then still. Between
+ * knocks it only waits, asking for no frame, and at rest it asks for none at all; where [on] is false it is still, the
+ * knock taken all the same, so motion turned on later doesn't knock for an old need. Its turn is read only in its layer,
+ * so a knock draws nothing again: the render thread turns the layer.
  */
 @Composable
-private fun nudging(on: Boolean): State<Float> {
+private fun nudging(knock: Knock?, on: Boolean): State<Float> {
     val turn = remember { Animatable(0f) }
-    LaunchedEffect(on) {
+    LaunchedEffect(knock, on) {
         turn.snapTo(0f)
-        if (!on) return@LaunchedEffect
+        if (knock == null || !Knocked.take(knock) || !on) return@LaunchedEffect
         val step = (Glass.Nudge.MS / (Glass.Nudge.TURNS.size - 1)).toInt()
-        while (true) {
+        repeat(Glass.Nudge.COUNT) { n ->
             delay(Glass.Nudge.EVERY - System.currentTimeMillis() % Glass.Nudge.EVERY)
+            // (For the performance runner: each knock, as it begins.)
+            sh.invincible.bot.app.PerfProbe.mark("knock ${knock.agent} ${n + 1}")
             for (t in Glass.Nudge.TURNS.drop(1)) turn.animateTo(t * Glass.Nudge.TURN, tween(step, easing = FastOutSlowInEasing))
         }
     }

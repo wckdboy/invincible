@@ -48,6 +48,12 @@ describe("the page's sprite", () => {
     else Reflect.deleteProperty(globalThis, "document");
   });
 
+  test("a glass knocks when it starts to wait on you and when more waits on it, never again for the same, however often it is drawn (nudgeNow)", () => {
+    const knocks = (needs: number, state: "needs" | "working" = "needs") =>
+      (glassAvatar({ id: "knocks-test", size: 32, state, needs }) as unknown as { attrs: Record<string, string> }).attrs["data-nudge"] !== undefined;
+    expect([knocks(1), knocks(1), knocks(2), knocks(1), knocks(2), knocks(0, "working"), knocks(1)]).toEqual([true, false, true, false, true, false, true]);
+  });
+
   test("made once, with every shape in both its forms, the nine paints and the blur; the page told to pause it when hidden", () => {
     glassAvatar({ id: "coder", size: 24 });
     expect(body).toHaveLength(1);
@@ -86,13 +92,16 @@ describe("its stylesheet", () => {
     expect(GLASS_CSS.match(/animation:/g)).toHaveLength(7);
   });
 
-  test("one that waits on you nudges: a knock through its turns at the start of each 4 s; still where motion is reduced; paused while the page is hidden", () => {
-    expect(GLASS_CSS).toContain(`.agent-glass[data-state="needs"] { animation: gl-nudge ${GLASS_NUDGE.every}ms ease-in-out infinite; }`);
+  test("one that waits on you knocks three times, then rests: a knock through its turns at the start of each 4 s; still where motion is reduced; paused while the page is hidden", () => {
+    expect(GLASS_NUDGE.count).toBe(3);
+    expect(GLASS_CSS).toContain(`.agent-glass[data-nudge] { animation: gl-nudge ${GLASS_NUDGE.every}ms ease-in-out ${GLASS_NUDGE.count}; }`);
+    expect(GLASS_CSS).not.toMatch(/gl-nudge[^;]*infinite/);
     expect(GLASS_CSS).toContain("@keyframes gl-nudge { 0% { transform: rotate(0deg); } 3.75% { transform: rotate(-7deg); } 7.5% { transform: rotate(7deg); } 11.25% { transform: rotate(-3.5deg); } 15%, 100% { transform: rotate(0deg); } }");
-    expect(GLASS_CSS).toContain(':root[data-motion="reduce"] .agent-glass[data-state="needs"] { animation: none; }');
-    expect(GLASS_CSS).toContain('@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .agent-glass[data-state="needs"] { animation: none; } }');
+    expect(GLASS_CSS).toContain(':root[data-motion="reduce"] .agent-glass[data-nudge] { animation: none; }');
+    expect(GLASS_CSS).toContain('@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .agent-glass[data-nudge] { animation: none; } }');
     expect(GLASS_CSS).toContain(":root[data-hidden] .agent-glass { animation-play-state: paused; }");
   });
+
 
   test("its glow follows the page's theme by itself: the pool on a dark page, the shadow on a light one", () => {
     expect(GLASS_CSS).toContain('@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gl-dark: 1; } }');

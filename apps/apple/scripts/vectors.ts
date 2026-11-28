@@ -1975,6 +1975,16 @@ const glass = {
   glow: core.GLASS_GLOW,
   dot: core.GLASS_DOT,
   nudge: core.GLASS_NUDGE,
+  // When a glass knocks (nudgeNow), as an app keeps it from one drawing to the next: it starts to wait on you; the same
+  // again; more; less (one answered); more again (a new one); at work; waiting again; at rest; waiting on three.
+  knocks: (() => {
+    let before: number | null = null;
+    return ([["needs", 1], ["needs", 1], ["needs", 2], ["needs", 1], ["needs", 2], ["working", 0], ["needs", 1], ["idle", 0], ["needs", 3]] as const).map(([state, needs]) => {
+      const now = core.nudgeNow(before, state, needs);
+      before = now.after;
+      return { state, needs, knock: now.knock };
+    });
+  })(),
   states: core.MARK_STATES.map((state) => ({ state, glass: core.glassState(state) })),
   reads: glassReads.map((r) => ({ ...r, glass: core.glassOf(r.id, r.profile), own: core.isGlassProfile(r.profile) })),
   // As a node gives them, one by one in the order they join (the apps preview a new agent's with the same rule): the

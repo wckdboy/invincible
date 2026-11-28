@@ -28,9 +28,10 @@ import sh.invincible.bot.core.Json
  * the marks, v 2, whose colour it keeps; or nothing), its dot showing [state] where one is given. Decorative beside its
  * name; named ([description]) where it stands alone. */
 @Composable
-fun AgentMarkView(id: String, profile: Json?, size: Dp, state: AgentMark.State? = null, description: String? = null, live: Boolean = false) {
+fun AgentMarkView(id: String, profile: Json?, size: Dp, state: AgentMark.State? = null, description: String? = null, live: Boolean = false, knock: Int = 0) {
     val glass = remember(id, profile) { Glass.of(id, profile) }
-    GlassMark(glass, size, state?.let(Glass::state), description, live)
+    // ([knock]: how many knocks its table armed for it, Table.knocks: a new one, and it knocks three times, then rests.)
+    GlassMark(glass, size, state?.let(Glass::state), description, live, knock = if (knock > 0) Knock(id, knock) else null)
 }
 
 /** An agent's mark or the primary's by handle ("primary" is the primary's: your agent's mark), with a dot only where a

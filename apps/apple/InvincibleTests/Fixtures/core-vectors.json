@@ -40223,8 +40223,56 @@
         1,
         -0.5,
         0
-      ]
+      ],
+      "count": 3
     },
+    "knocks": [
+      {
+        "state": "needs",
+        "needs": 1,
+        "knock": true
+      },
+      {
+        "state": "needs",
+        "needs": 1,
+        "knock": false
+      },
+      {
+        "state": "needs",
+        "needs": 2,
+        "knock": true
+      },
+      {
+        "state": "needs",
+        "needs": 1,
+        "knock": false
+      },
+      {
+        "state": "needs",
+        "needs": 2,
+        "knock": true
+      },
+      {
+        "state": "working",
+        "needs": 0,
+        "knock": false
+      },
+      {
+        "state": "needs",
+        "needs": 1,
+        "knock": true
+      },
+      {
+        "state": "idle",
+        "needs": 0,
+        "knock": false
+      },
+      {
+        "state": "needs",
+        "needs": 3,
+        "knock": true
+      }
+    ],
     "states": [
       {
         "state": "idle",

@@ -94,16 +94,26 @@ data class Glass(val color: Int, val shape: Int) {
         fun size(avatar: Float): Size = SIZES.firstOrNull { avatar <= it.upTo } ?: SIZES.last()
     }
 
-    /** How a glass that waits on you nudges (core's GLASS_NUDGE): once every [EVERY] ms, timed from the clock, a knock [MS]
-     * long through [TURNS] (shares of [TURN] degrees, at even steps), then still. */
+    /** How a glass that waits on you nudges (core's GLASS_NUDGE): a knock [MS] long through [TURNS] (shares of [TURN]
+     * degrees, at even steps), [COUNT] times, one every [EVERY] ms timed from the clock, then still: "knock three times,
+     * then rest". */
     object Nudge {
         const val EVERY = 4000L
         const val MS = 600L
         const val TURN = 7f
         val TURNS = listOf(0f, -1f, 1f, -0.5f, 0f)
+        const val COUNT = 3
     }
 
     companion object {
+        /**
+         * Whether a glass knocks now (core's nudgeNow, held to the vectors): when it starts to wait on you, and again when
+         * more waits on it than when it last knocked ([before]; null: it waited on nothing); never again for the same.
+         * Returns whether it knocks, and what to keep for next time.
+         */
+        fun nudgeNow(before: Int?, state: State?, needs: Int): Pair<Boolean, Int?> =
+            if (state != State.NEEDS) false to null else (needs > (before ?: 0)) to needs
+
         /** The shapes, in core's order: a saved shape is its index. */
         val SHAPES: List<Shape> get() = GLASS_SHAPES
         val IBEAM: Shape get() = GLASS_IBEAM

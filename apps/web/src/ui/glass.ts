@@ -1,4 +1,4 @@
-import { GLASS_DOT, GLASS_GLOW, GLASS_IBEAM, GLASS_NUDGE, GLASS_PAINT, GLASS_PEARL, GLASS_RAMPS, GLASS_SHAPES, type GlassRamp, type GlassShape, type GlassState, type GlassStops, glassOf } from "@invincible/core/glass";
+import { GLASS_DOT, GLASS_GLOW, GLASS_IBEAM, GLASS_NUDGE, GLASS_PAINT, GLASS_PEARL, GLASS_RAMPS, GLASS_SHAPES, type GlassRamp, type GlassShape, type GlassState, type GlassStops, glassOf, nudgeNow } from "@invincible/core/glass";
 import { MARK_POLYGON } from "../../../../scripts/mark.ts";
 import { h, svg } from "./dom.ts";
 
@@ -48,8 +48,8 @@ const nudgeAt = (i: number): number => +(((i * GLASS_NUDGE.ms) / (GLASS_NUDGE.tu
 const NUDGE_FRAMES = GLASS_NUDGE.turns.map((turn, i) => `${nudgeAt(i)}%${i === GLASS_NUDGE.turns.length - 1 ? ", 100%" : ""} { transform: rotate(${turn * GLASS_NUDGE.turn}deg); }`).join(" ");
 
 /** Its styles: the glow, the dot, the breathing and the nudge (GLASS_GLOW, GLASS_DOT, GLASS_NUDGE), and your agent's bare
- * I-beam. A glass that waits on you nudges (its motion tells it, its dot the ink): the glasses a page draws together
- * nudge together. */
+ * I-beam. A glass that waits on you knocks three times, then rests (its motion tells it, its dot the ink): it is marked
+ * to knock (data-nudge) only when something new waits on it (nudgeNow). */
 export const GLASS_CSS = `
 :root { --gl-dark: 0; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gl-dark: 1; } }
@@ -75,11 +75,11 @@ export const GLASS_CSS = `
 :root[data-hidden] .agent-glass::before, :root[data-hidden] .agent-glass::after { animation-play-state: paused; }
 :root[data-motion="reduce"] .agent-glass[data-state="working"]::before, :root[data-motion="reduce"] .agent-glass[data-state="working"]::after { animation: none; }
 @media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .agent-glass[data-state="working"]::before, :root:not([data-motion="full"]) .agent-glass[data-state="working"]::after { animation: none; } }
-.agent-glass[data-state="needs"] { animation: gl-nudge ${GLASS_NUDGE.every}ms ease-in-out infinite; }
+.agent-glass[data-nudge] { animation: gl-nudge ${GLASS_NUDGE.every}ms ease-in-out ${GLASS_NUDGE.count}; }
 @keyframes gl-nudge { ${NUDGE_FRAMES} }
 :root[data-hidden] .agent-glass { animation-play-state: paused; }
-:root[data-motion="reduce"] .agent-glass[data-state="needs"] { animation: none; }
-@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .agent-glass[data-state="needs"] { animation: none; } }
+:root[data-motion="reduce"] .agent-glass[data-nudge] { animation: none; }
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .agent-glass[data-nudge] { animation: none; } }
 .gl-dot { position: absolute; right: calc(-1 * var(--gl-dot-out)); bottom: calc(-1 * var(--gl-dot-out)); width: var(--gl-dot); height: var(--gl-dot); border-radius: 50%; background: var(--gl-dot-c); box-shadow: 0 0 0 var(--gl-dot-cut) var(--gl-surface, var(--bg)); }
 [data-state="working"] > .gl-dot { --gl-dot-c: light-dark(${GLASS_DOT.colors.working.light}, ${GLASS_DOT.colors.working.dark}); }
 [data-state="needs"] > .gl-dot { --gl-dot-c: light-dark(${GLASS_DOT.colors.needs.light}, ${GLASS_DOT.colors.needs.dark}); }
@@ -135,15 +135,30 @@ export interface GlassAvatarOptions {
   size: number;
   /** Its state, as a dot; left out, none (its row says it, or nothing is said). */
   state?: GlassState;
+  /** How much waits on you there, while it does (its row's count; left out, one). */
+  needs?: number;
   /** Its accessible name; left out, it is decorative (its name is beside it). */
   label?: string;
 }
 
-/** An agent's glass: its shape in its ramp, its glow, and its state's dot. */
+/** How much waited on each agent's glass when it last knocked (nudgeNow), for the page's life: drawn again for the same,
+ * it doesn't knock again. A glass drawn with no state (a speaker's face) leaves it as it is. */
+const knocked = new Map<string, number>();
+
+function knocks(id: string, state: GlassState | undefined, needs: number): boolean {
+  if (state === undefined) return false;
+  const now = nudgeNow(knocked.get(id) ?? null, state, needs);
+  if (now.after === null) knocked.delete(id);
+  else knocked.set(id, now.after);
+  return now.knock;
+}
+
+/** An agent's glass: its shape in its ramp, its glow, and its state's dot; marked to knock where something new waits on it. */
 export function glassAvatar(options: GlassAvatarOptions): HTMLElement {
   ensureSprite();
   const size = clampSize(options.size);
   const glass = glassOf(String(options.id ?? ""), options.profile);
+  const knock = knocks(String(options.id ?? ""), options.state, options.needs ?? 1);
   const small = size <= 16;
   const ramp = GLASS_RAMPS[glass.color]!;
   const classes = ["agent-orb", "agent-glass", size >= GLASS_GLOW.pool.minSize ? "gl-pool" : "", size >= GLASS_GLOW.shadow.minSize ? "gl-shade" : ""].filter(Boolean).join(" ");
@@ -152,6 +167,7 @@ export function glassAvatar(options: GlassAvatarOptions): HTMLElement {
     {
       class: classes,
       ...(options.state ? { "data-state": options.state } : {}),
+      ...(knock ? { "data-nudge": "" } : {}),
       // (Its colours are core's ramps', never a profile's words: glassOf reads a saved colour only as one of the eight.)
       style: `--orb-size:${size}px;--ga:${ld(ramp, "a")};--gb:${ld(ramp, "b")};${dotStyle(size)}`,
       "data-shape": GLASS_SHAPES[glass.shape]!.id,

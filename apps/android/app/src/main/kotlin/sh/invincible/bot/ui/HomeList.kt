@@ -149,9 +149,9 @@ fun HomeList(app: AppModel, open: (String) -> Unit, settings: () -> Unit, curren
                     selected = marked == (if (row.row.kind == "agent") Nav.agent(row.row.id) else Nav.room(row.row.id)),
                     face = {
                         if (row.row.kind == "agent") {
-                            // (Working breathes, by its glow's layer, and waiting on you nudges, by its own layer's turn: the
-                            // render thread's alone; the rest are still.)
-                            AgentMarkView(row.row.id, row.row.avatar, 44.dp, state = AgentMark.state(row.row.state), live = true)
+                            // (Working breathes, by its glow's layer; waiting on you knocks three times as something new waits on
+                            // it, by its own layer's turn, then rests: the render thread's alone; the rest are still.)
+                            AgentMarkView(row.row.id, row.row.avatar, 44.dp, state = AgentMark.state(row.row.state), live = true, knock = table.knocks[row.row.id] ?: 0)
                         } else {
                             RoomFace()
                         }

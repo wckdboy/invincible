@@ -106,6 +106,15 @@ class GlassTest {
         assertEquals(listOf(nudge["every"].long, nudge["ms"].long), listOf(Glass.Nudge.EVERY, Glass.Nudge.MS))
         assertEquals(nudge["turn"].double!!.toFloat(), Glass.Nudge.TURN, 0f)
         assertEquals(nudge["turns"].list.map { it.double!!.toFloat() }, Glass.Nudge.TURNS)
+        // (Three knocks, then rest: nothing moves at rest.)
+        assertEquals(nudge["count"].int, Glass.Nudge.COUNT)
+        // (A new need knocks again; the same, never: as an app keeps it from one drawing to the next.)
+        var before: Int? = null
+        for (step in g["knocks"].list) {
+            val (knock, after) = Glass.nudgeNow(before, Glass.State.entries.firstOrNull { it.wire == step["state"].string }, step["needs"].int!!)
+            assertEquals(step.text(), step["knock"].bool, knock)
+            before = after
+        }
     }
 
     @Test fun anAgentsGlassIsReadAsCoreReadsIt() {

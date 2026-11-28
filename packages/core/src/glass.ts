@@ -350,11 +350,22 @@ export const GLASS_DOT = {
 
 /**
  * How a glass that waits on you nudges (the lead's word, 28 November 2026: "the avatar's nudge is its motion, not a
- * colour"): once every `every` ms, a knock `ms` long that turns it about its middle through `turns` (each a share of
- * `turn` degrees, at even steps; the last at rest), then still until the next. Timed from the clock (at a multiple of
- * `every`), so the glasses on a page that wait on you nudge together; never where motion is reduced.
+ * colour"): a knock `ms` long that turns it about its middle through `turns` (each a share of `turn` degrees, at even
+ * steps; the last at rest), `count` times, one every `every` ms, then still: "knock three times, then rest", so nothing
+ * moves at rest. Each knock is timed from the clock (at a multiple of `every`), so the glasses that wait on you knock
+ * together; a new need knocks again (nudgeNow); never where motion is reduced.
  */
-export const GLASS_NUDGE = { every: 4000, ms: 600, turn: 7, turns: [0, -1, 1, -0.5, 0] } as const;
+export const GLASS_NUDGE = { every: 4000, ms: 600, turn: 7, turns: [0, -1, 1, -0.5, 0], count: 3 } as const;
+
+/**
+ * Whether a glass knocks now (GLASS_NUDGE): when it starts to wait on you, and again when more waits on it than when it
+ * last knocked; never again for the same, however often it is drawn. [before]: how much waited on it then (null: it
+ * waited on nothing); [needs]: how much waits on it now. Returns whether it knocks, and what to keep for next time.
+ */
+export function nudgeNow(before: number | null, state: GlassState | null, needs: number): { knock: boolean; after: number | null } {
+  if (state !== "needs") return { knock: false, after: null };
+  return { knock: needs > (before ?? 0), after: needs };
+}
 
 /* ---------- who wears what ---------- */
 
