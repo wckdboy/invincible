@@ -210,14 +210,29 @@ private fun RosterBack(needs: Int, open: () -> Unit) {
 private fun UnderwayBar(app: AppModel, live: Boolean, openTask: (String) -> Unit) {
     val conversation by app.chat.conversation.collectAsState()
     val table by app.table.collectAsState()
+    val online by app.online.collectAsState()
     var shown by remember { mutableStateOf(Underway()) }
     var asked by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(conversation, live, asked) {
-        val id = conversation ?: run { shown = Underway(); return@LaunchedEffect }
+    suspend fun ask(): Boolean {
+        val id = conversation ?: return false
+        val got = runCatching { app.client?.post("/api/conversations/underway", Json.obj("id" to id)) }.getOrNull() ?: return false
+        shown = Underway.of(got)
+        return true
+    }
+    // Asked as the chat opens (and when a look is called off here); then as the live stream says the team or the chats
+    // moved (a task moved on, a look set, taken or come due), as the web's under way is: nothing on a timer while the
+    // stream is open.
+    LaunchedEffect(conversation, asked) {
+        if (conversation == null) shown = Underway() else ask()
+    }
+    FollowTopics(app, listOf("team", "turns"), conversation, everyMs = null, gapMs = 2_000) { ask() }
+    // While the stream is down: on its own time, as before there was a stream.
+    LaunchedEffect(conversation, live, online) {
+        if (online != false || conversation == null) return@LaunchedEffect
         while (true) {
-            runCatching { app.client?.post("/api/conversations/underway", Json.obj("id" to id)) }.getOrNull()?.let { shown = Underway.of(it) }
             delay(UnderwayWords.nextAskMs(shown, live))
+            ask()
         }
     }
     if (shown.isEmpty) return

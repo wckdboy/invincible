@@ -43,7 +43,6 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import sh.invincible.bot.app.AppModel
 import sh.invincible.bot.core.Json
@@ -97,7 +96,6 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
         roomOf = { c -> c.post("/api/team/direct", Json.obj("id" to id))["room"].let { it.string ?: it["id"].string } },
         seen = Json.obj("agent" to id),
         assignee = id,
-        busy = row?.state == AgentState.WORKING,
         placeholder = "Write to ${person?.name ?: id}",
         title = person?.name ?: id,
         back = back,
@@ -191,7 +189,6 @@ fun RoomScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) -
         roomOf = { id },
         seen = Json.obj("room" to id),
         assignee = null,
-        busy = table.snapshot?.tasks?.any { it.room == id && it.status == "running" } == true,
         placeholder = "Write to ${room?.name ?: "the room"}",
         title = room?.name ?: "A room",
         back = back,
@@ -220,7 +217,6 @@ private fun Timeline(
     roomOf: suspend (sh.invincible.bot.core.NodeClient) -> String?,
     seen: Json,
     assignee: String?,
-    busy: Boolean,
     placeholder: String,
     title: String,
     back: () -> Unit,
@@ -238,10 +234,10 @@ private fun Timeline(
     val list = rememberLazyListState()
     val names = table.snapshot?.agents?.associate { it.id to it.name } ?: emptyMap()
 
-    suspend fun read() {
-        val c = app.client ?: return
-        try {
-            val r = room ?: roomOf(c).also { room = it } ?: return
+    suspend fun read(): Boolean {
+        val c = app.client ?: return false
+        return try {
+            val r = room ?: roomOf(c).also { room = it } ?: return false
             val view = c.post("/api/team/room", Json.obj("id" to r))
             val said = view["messages"].list.map { m ->
                 val speaker = m["speaker"].string ?: ""
@@ -251,18 +247,20 @@ private fun Timeline(
             val tasks = view["tasks"].list.filter { assignee == null || it["assignee"].string == assignee }.map { t -> Entry(t["createdAt"].long ?: t["updatedAt"].long ?: 0, "t:${t["id"].string}", null, false, "", t) }
             entries = (said + tasks).sortedBy { it.at }
             problem = null
+            true
         } catch (e: NodeError) {
             problem = e.message
+            false
         }
     }
 
+    // Read as it opens; then again as the live stream says the team moved (what was said, its tasks), as the web's room
+    // follows it: no oftener than every two seconds, and on a timer only while the stream is down.
     LaunchedEffect(key) {
         runCatching { app.client?.post("/api/team/seen", seen) }
-        while (true) {
-            read()
-            delay(if (busy) 2_000 else 4_000)
-        }
+        read()
     }
+    FollowTopics(app, listOf("team"), key, everyMs = 2_000, gapMs = 2_000) { read() }
     LaunchedEffect(entries.size) {
         if (entries.isNotEmpty()) list.toEnd()
         // (For the performance runner: what was said here, as many as are shown.)

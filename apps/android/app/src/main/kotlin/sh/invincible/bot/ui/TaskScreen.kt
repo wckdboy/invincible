@@ -160,14 +160,17 @@ fun TaskScreen(app: AppModel, id: String, nav: Nav, wide: Boolean, roomy: Boolea
             }
         }
     }
-    // Its conversation: what was said since it was given, read again every few seconds while it is open.
-    LaunchedEffect(id, task?.room) {
-        val r = task?.room ?: return@LaunchedEffect
-        while (true) {
-            runCatching { app.client?.post("/api/team/room", Json.obj("id" to r)) }.getOrNull()?.let { room = it }
-            delay(if (status == "running" || status == "queued") 4_000 else 8_000)
-        }
+    // Its conversation: what was said since it was given, read as it opens, then again as the live stream says the team
+    // moved (its replies), as the web's thread follows it: no oftener than every two seconds, on a timer only while the
+    // stream is down. At rest, ended or not, it asks nothing.
+    suspend fun readRoom(): Boolean {
+        val r = task?.room ?: return false
+        val got = runCatching { app.client?.post("/api/team/room", Json.obj("id" to r)) }.getOrNull() ?: return false
+        room = got
+        return true
     }
+    LaunchedEffect(id, task?.room) { readRoom() }
+    FollowTopics(app, listOf("team"), task?.room, everyMs = 2_000, gapMs = 2_000) { readRoom() }
     // What it changed, where this device may look into its agent's VM: asked once, and again as the work moves on.
     val agent = snapshot?.agents?.firstOrNull { it.id == task?.assignee }
     LaunchedEffect(id, status, task?.changes?.files) {

@@ -513,6 +513,15 @@ class AppModel(context: Context) {
         }
     }
 
+    /**
+     * A screen's own read, run as the live stream says one of its topics moved, as the web's pages follow theirs
+     * (ctx.live.follow): no closer together than [gapMs]; while the stream is down, at once and then every [everyMs] (null:
+     * once, the screen keeping its own time then); never while the app is off screen. Not at once: the screen reads as it
+     * opens. [run] reads and says whether it got an answer. Returns how to stop. (On the main thread, as the stream is.)
+     */
+    fun follow(topics: List<String>, everyMs: Long?, gapMs: Long, run: (done: (Boolean) -> Unit) -> Unit): () -> Unit =
+        followers.follow(topics, everyMs, gapMs, readNow = true) { _, done -> run(done) }
+
     /** The stream to the node this phone is paired with (null: none yet). */
     private fun linkFor(c: NodeClient): LiveLink = LiveLink(
         // (Opened again from where the last left off: its hello then says what changed since, and only that is read.)
