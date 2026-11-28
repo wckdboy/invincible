@@ -158,9 +158,7 @@ struct PhoneRoot: View {
             path = [.primary]
         case .approval(let id):
             // The ask in its own chat (its agent's, else your agent's), its card opened there behind Face ID (NeedsCard).
-            if !session.waiting.contains(where: { $0.id == id }) { await session.reread(["actions"], force: true) }
-            let agent = session.waiting.first { $0.id == id }.flatMap { NeedsCard.chat(of: $0, work: session.attended) }
-            path = [agent.map { .agent($0) } ?? .primary]
+            path = [await NeedsCard.place(of: id, in: session)]
             session.approvalToOpen = id
         case .task(let id): path = [.task(id)]
         case .agent(let id): path = [.agent(id)]
@@ -276,7 +274,9 @@ struct SplitPlaces: View {
             place = .primary
             if let id { await session.chat.open(id, with: session.client) }
         case .approval(let id):
-            place = .inbox
+            // The ask in its own chat, as an iPhone opens it: the list picks that chat, the detail shows it, and its
+            // card opens over it there (NeedsCard), behind Face ID. It opened the Needs you screen: no chat behind it.
+            place = await NeedsCard.place(of: id, in: session)
             session.approvalToOpen = id
         case .task(let id): place = .task(id)
         case .agent(let id): place = .agent(id)

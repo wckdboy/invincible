@@ -88,5 +88,13 @@ struct NeedsCard: View {
         guard let agent = Roster.agentOfCaller(action.by), let work, work.needs.contains(where: { $0.word == "Allow?" && $0.agent.id == agent }) else { return nil }
         return agent
     }
+
+    /// Where an approval's link (or its notification) opens it, on an iPhone and an iPad alike: the chat it waits in
+    /// (`chat`), the actions read again first when this one isn't known yet.
+    static func place(of id: String, in session: Session) async -> Place {
+        if !session.waiting.contains(where: { $0.id == id }) { await session.reread(["actions"], force: true) }
+        let agent = session.waiting.first { $0.id == id }.flatMap { chat(of: $0, work: session.attended) }
+        return agent.map { .agent($0) } ?? .primary
+    }
 }
 #endif
