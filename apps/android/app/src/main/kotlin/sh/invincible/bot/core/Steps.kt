@@ -473,8 +473,9 @@ object Steps {
         return Trail(fresh.last().n, (trail.entries + fresh).takeLast(KEEP))
     }
 
-    /** When to ask for the next page: at once while the node has more (and this page held something), after a pause while
-     * the task is at work or queued, never once it has ended. */
+    /** When to ask for the next page: at once while the node has more (and this page held something); while the task is
+     * at work or queued, once its entry in the team moves (a screen reads again then, never on a timer); never once it
+     * has ended. */
     enum class Next { NOW, WAIT, DONE }
 
     fun next(status: String, more: Boolean, took: Boolean): Next {

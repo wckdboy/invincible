@@ -49,7 +49,7 @@ import { rosterBack } from "./sidebar.ts";
  * (POST /api/team/room), its changes (POST /api/team/changes, where this device may look into a VM), your prices.
  */
 
-/** A running task's new lines are asked for this often while it is on screen and the app is in front. */
+/** A trail that could not be read is asked for again after three of these. */
 const EVERY_MS = 1500;
 
 /** The agent's own conversation (its direct room), where its Workspace is. */
@@ -93,6 +93,8 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   let trail: Trail = emptyTrail();
   /** The whole trail has been read once (until then, the work isn't drawn: it would arrive in pieces). */
   let trailRead = false;
+  /** Its task's entry in the team as it stood when its trail was last read: read again only once that moves. */
+  let trailEntry = "";
   let asking = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let room: TeamRoomView | null = null;
@@ -170,6 +172,8 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   async function readTrail(): Promise<void> {
     if (asking || !id || scope.disposed) return;
     asking = true;
+    const n = now();
+    trailEntry = n ? JSON.stringify(n.task) : "";
     try {
       for (;;) {
         const page = await ctx.api.post<TrailPage>("/api/team/trail", { task: id, after: trail.after }, scope.signal);
@@ -180,7 +184,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
         trailRead = true;
         draw();
         clearTimeout(timer);
-        if (next === "wait") timer = setTimeout(() => void (document.hidden ? null : readTrail()), EVERY_MS);
+        // (Caught up, at work or ended: read again once its entry moves, never on a timer.)
         break;
       }
     } catch (error) {
@@ -194,6 +198,18 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     } finally {
       asking = false;
     }
+    readIfMoved();
+  }
+
+  /**
+   * Its trail read again only when its own entry in the team moves (a step, a steer, its end: the node writes each line
+   * with its task's entry, in one transaction), so a task at rest is never asked again; while the stream is down the
+   * team is read every few seconds, its entry with it.
+   */
+  function readIfMoved(): void {
+    const n = now();
+    if (!n || !trailRead || asking || document.hidden || scope.disposed) return;
+    if (JSON.stringify(n.task) !== trailEntry) void readTrail();
   }
   scope.listen(document, "visibilitychange", () => {
     if (!document.hidden && trailRead) void readTrail();
@@ -751,6 +767,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
 
   const redraw = () => draw();
   scope.add(ctx.live.team.subscribe(redraw));
+  scope.add(ctx.live.team.subscribe(() => readIfMoved()));
   scope.add(ctx.live.teamProblem.subscribe(redraw));
   scope.add(ctx.live.actions.subscribe(() => (threadVersion = "", draw())));
   scope.add(projectNames.subscribe(() => (headVersion = "", draw())));
@@ -758,8 +775,6 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   scope.add(ctx.live.follow(["team"], () => {
     const n = now();
     if (n) void readRoom(n.task);
-    // Ended since it was read: its last lines.
-    if (n && trailRead && n.task.status !== "running" && trail.entries.length && !asking) void readTrail();
   }, 2000, 2000));
   const resized = () => {
     headVersion = "";

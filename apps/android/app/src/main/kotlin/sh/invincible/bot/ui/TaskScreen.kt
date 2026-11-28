@@ -100,7 +100,7 @@ import sh.invincible.bot.core.AgentMark
  * (POST /api/team/room), its changes (POST /api/team/changes), your prices.
  */
 
-/** A running task's new lines are asked for this often while its thread is on screen. */
+/** A trail that could not be read is asked for again after three of these. */
 private const val EVERY_MS = 1500L
 
 /** Whether the details card is beside the thread on a wide screen: closed until you open it (I10's 16dae258), then as you
@@ -137,8 +137,11 @@ fun TaskScreen(app: AppModel, id: String, nav: Nav, wide: Boolean, roomy: Boolea
     val list = rememberLazyListState()
     val status = task?.status
 
-    // ---- reading what it did: the trail, page by page; again while it runs; once more as it ends ----
-    LaunchedEffect(id, status) {
+    // ---- reading what it did: its trail, page by page, as it opens; then again only when its own entry in the team
+    // answer changes (a step, a steer, its end: the node writes each line with its task's entry, in one transaction), so
+    // a task at rest is never asked again; while the stream is down the team is read every few seconds, its entry with
+    // it. A read that fails is tried again after a pause. ----
+    LaunchedEffect(id, task) {
         val c = app.client ?: return@LaunchedEffect
         while (true) {
             val page = try {
@@ -153,11 +156,8 @@ fun TaskScreen(app: AppModel, id: String, nav: Nav, wide: Boolean, roomy: Boolea
             trail = Steps.take(trail, page["entries"].list.map(TrailEntry::of))
             trailRead = true
             problem = null
-            when (Steps.next(page["task"]["status"].string ?: status ?: "", page["more"].bool == true, trail !== before)) {
-                Steps.Next.NOW -> continue
-                Steps.Next.WAIT -> delay(EVERY_MS)
-                Steps.Next.DONE -> break
-            }
+            // (Caught up, at work or ended: read again when its entry moves.)
+            if (Steps.next(page["task"]["status"].string ?: status ?: "", page["more"].bool == true, trail !== before) != Steps.Next.NOW) break
         }
     }
     // Its conversation: what was said since it was given, read as it opens, then again as the live stream says the team
