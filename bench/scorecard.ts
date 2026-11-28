@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { REFERENCE_SINGLE } from "../packages/core/src/compute.ts";
+import { moneyLabel } from "../packages/core/src/spend.ts";
 import { Scorecard, ScoreMetric } from "../packages/core/src/scorecard.ts";
 
 /*
@@ -211,7 +212,8 @@ function number(value: number): string {
   return value.toPrecision(2);
 }
 
-const amount = (m: ScoreMetric): string => `${number(m.value)}${m.unit ? ` ${m.unit}` : ""}`;
+// (Money is said as everywhere it's shown, in two decimals: "$0.62", never "0.622 $".)
+const amount = (m: ScoreMetric): string => (m.unit === "$" ? moneyLabel(m.value) : `${number(m.value)}${m.unit ? ` ${m.unit}` : ""}`);
 
 function percent(change: number): string {
   const p = change * 100;

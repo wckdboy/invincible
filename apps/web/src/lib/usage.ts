@@ -1,18 +1,19 @@
 import type { UsageMeter } from "@invincible/core";
-import { tokensLabel } from "@invincible/core/spend";
+import { moneyLabel, tokensLabel } from "@invincible/core/spend";
 
 /*
  * Money as the apps say it, and what a phone's Settings says of what this device may do, in every app's words (held by
  * the vectors): money always in two decimals, and the usage meter against its budget, over budget said so (the lead's
- * word, 28 November 2026: "$36.6" was missing its cent, and "· spent" past the budget read wrong). Core's usdLabel, which
- * the CLI and the records say, is left as it is.
+ * word, 28 November 2026: "$36.6" was missing its cent, and "· spent" past the budget read wrong). Its money is core's
+ * moneyLabel, as the terminal says it; core's usdLabel stays where words that say money are kept.
  */
 
 /**
  * Money as the apps say it: always two decimals ("$36.60"); a cent's fraction in four ("$0.0042"). Rounded on the
- * number's exact value, a true half up (toFixed's rule, and every app's): 1.005 is a little under, so $1.00.
+ * number's exact value, a true half up (toFixed's rule, and every app's): 1.005 is a little under, so $1.00. Core's
+ * moneyLabel, as the terminal, the eval reports and the scorecard say it too.
  */
-export const moneyWords = (usd: number): string => (usd > 0 && usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`);
+export const moneyWords = (usd: number): string => moneyLabel(usd);
 
 type Meter = Pick<UsageMeter, "spentUsd" | "complete" | "budgetUsd" | "tokens">;
 

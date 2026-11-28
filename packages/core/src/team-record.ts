@@ -1,4 +1,4 @@
-import { costOf, type Prices, spendTotal, tokensLabel, type UsageLine, usdLabel } from "./spend.ts";
+import { costOf, type Prices, spendTotal, tokensLabel, type UsageLine, moneyLabel } from "./spend.ts";
 import { KIND_WORDS, type TaskKind } from "./routing.ts";
 
 /*
@@ -74,7 +74,7 @@ export function taskPlanFacts(plan: TaskPlanRead): string[] {
   const named = PLAN_NAMES[plan.kind] ?? { plan: "plan", vendor: plan.kind };
   const whose = plan.seat ? `on your ${named.plan}` : `on its own ${named.vendor} sign-in`;
   const shares = plan.windows.filter((window) => window.share > 0).map((window) => `${window.share}% of its ${windowName(window.window)}`);
-  return [shares.length ? `${whose}, ${shares.join(" and ")}` : whose, plan.usd === null ? "" : `≈${usdLabel(plan.usd)} at API prices, covered by the plan`].filter(Boolean);
+  return [shares.length ? `${whose}, ${shares.join(" and ")}` : whose, plan.usd === null ? "" : `≈${moneyLabel(plan.usd)} at API prices, covered by the plan`].filter(Boolean);
 }
 
 const took = (ms: number): string => {
@@ -86,7 +86,7 @@ const took = (ms: number): string => {
 function money(total: ReturnType<typeof spendTotal>, cost: ReturnType<typeof costOf>): string {
   if (!total.calls || total.unknown === total.calls) return "";
   if (cost.unpriced.length) return "no price";
-  return `${cost.complete ? "" : "at least "}${usdLabel(cost.usd)}`;
+  return `${cost.complete ? "" : "at least "}${moneyLabel(cost.usd)}`;
 }
 
 /** Why work moved up to the planner's models, as a fact says it (agents' run.ts EscalationWhy: team.ts TeamTaskRouting). */

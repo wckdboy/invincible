@@ -241,6 +241,8 @@ describe("an outcome it owns", () => {
     // A paused one stays paused at its new budget; one that ended stays ended.
     w.runner.control({ id: made.id, action: "pause" });
     expect(w.runner.control({ id: made.id, action: "budget", budgetUsd: 10 })).toMatchObject({ status: "paused", budgetUsd: 10 });
+    // (Words kept in its room keep money's short form as they were said, "$10.0"; the terminal shows "$10.00".)
+    expect(w.store.messages(made.room).some((m) => m.text.startsWith("The owner set this outcome's budget to $10.0: "))).toBe(true);
     w.runner.control({ id: made.id, action: "stop" });
     expect(() => w.runner.control({ id: made.id, action: "budget", budgetUsd: 20 })).toThrow("it has ended (stopped)");
   });

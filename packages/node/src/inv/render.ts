@@ -1,4 +1,4 @@
-import { plainLine, plainText, usdLabel, visibleText } from "@invincible/core";
+import { plainLine, plainText, moneyLabel, visibleText } from "@invincible/core";
 import type { StateLook } from "../../../../apps/web/src/lib/agent-state.ts";
 import { type StepGroup, workedFor } from "../../../../apps/web/src/lib/steps.ts";
 import type { WorkRow } from "../../../../apps/web/src/lib/work.ts";
@@ -107,7 +107,7 @@ export function boardLines(view: BoardView, style: Style, opts: { doneShown?: nu
   // (A terminal's board keeps a column of margin; piped lines start at the first.)
   const margin = style.width === null ? "" : " ";
   const nodes = view.nodes.map((node) => `${node.online ? "●" : "○"} ${node.name}`).join("  ");
-  const cost = view.cost ? `${view.cost.complete ? "" : "at least "}${usdLabel(view.cost.usd)} today` : "";
+  const cost = view.cost ? `${view.cost.complete ? "" : "at least "}${moneyLabel(view.cost.usd)} today` : "";
   const line = view.primary.needs ? paint(style, "needs", view.primary.line) : view.primary.line;
   const left = `${strong(style, view.primary.name)} · ${line}`;
   if (style.width === null) {
@@ -238,8 +238,8 @@ export function proofLines(proof: ProofJson, style: Style): string[] {
     body.push(`steered ${n === 1 ? "once" : `${n} times`}, ${whose} · ${ending}`);
   }
   if (proof.changes) body.push(`change  ${proof.changes.files} ${proof.changes.files === 1 ? "file" : "files"} · kept as ${proof.changes.artifact}`);
-  const money = proof.costUsd === null ? null : `${proof.costComplete ? "" : "at least "}${usdLabel(proof.costUsd)}`;
-  const spend = money ? (proof.budgetUsd !== null ? `${money} of ${usdLabel(proof.budgetUsd)}` : money) : proof.budgetUsd !== null ? `budget ${usdLabel(proof.budgetUsd)}` : null;
+  const money = proof.costUsd === null ? null : `${proof.costComplete ? "" : "at least "}${moneyLabel(proof.costUsd)}`;
+  const spend = money ? (proof.budgetUsd !== null ? `${money} of ${moneyLabel(proof.budgetUsd)}` : money) : proof.budgetUsd !== null ? `budget ${moneyLabel(proof.budgetUsd)}` : null;
   const cost = [spend, proof.ms !== null ? workedFor(proof.ms) : null].filter(Boolean).join(" · ");
   if (cost) body.push(`cost    ${cost}`);
   body.push(`task    ${proof.task} · ${plainLine(proof.title)}`);

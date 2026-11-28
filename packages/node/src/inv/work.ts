@@ -1,4 +1,4 @@
-import { type ActionView, type FleetView, moneyPrices, plainLine, plainText, type Prices, type ProjectView, type TeamRoom, type TeamSnapshot, type TeamTask, type TeamTrailEntry, type UsageView, usdLabel } from "@invincible/core";
+import { type ActionView, type FleetView, moneyPrices, plainLine, plainText, type Prices, type ProjectView, type TeamRoom, type TeamSnapshot, type TeamTask, type TeamTrailEntry, type UsageView, moneyLabel } from "@invincible/core";
 import { liveStep, stepGroups } from "../../../../apps/web/src/lib/steps.ts";
 import { attended, projectsOfAgents, type WorkRow } from "../../../../apps/web/src/lib/work.ts";
 import type { NodeClient } from "./client.ts";
@@ -179,13 +179,13 @@ async function handOver(client: NodeClient, given: Given, flags: Flags, io: Io, 
   if (!waits.wait) {
     if (flags.json) json(io, { task: given.task, agent: given.agent, room: given.room, why: given.why });
     else {
-      print(io, [`${what} ${given.agent} · task ${given.task}${given.budgetUsd !== null ? ` · budget ${usdLabel(given.budgetUsd)}` : ""}`]);
+      print(io, [`${what} ${given.agent} · task ${given.task}${given.budgetUsd !== null ? ` · budget ${moneyLabel(given.budgetUsd)}` : ""}`]);
       if (given.why) print(io, [faint(io.style, `${given.agent} takes it: ${plainLine(given.why)}`)]);
       print(io, [`It works on without you. inv watch ${given.task} looks in; inv stop ${given.task} stops it.`]);
     }
     return EXIT.ok;
   }
-  if (!flags.json && !flags.stream) print(io, [`${what} ${given.agent} · task ${given.task}${given.budgetUsd !== null ? ` · budget ${usdLabel(given.budgetUsd)}` : ""}`]);
+  if (!flags.json && !flags.stream) print(io, [`${what} ${given.agent} · task ${given.task}${given.budgetUsd !== null ? ` · budget ${moneyLabel(given.budgetUsd)}` : ""}`]);
   return followTask(client, given.task, { json: flags.json, stream: flags.stream, noAsk: flags.noAsk, ...(waits.deadline !== undefined ? { deadline: waits.deadline } : {}), started: { agent: given.agent, room: given.room, why: given.why, budgetUsd: given.budgetUsd } }, io);
 }
 

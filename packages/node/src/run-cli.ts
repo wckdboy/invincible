@@ -26,6 +26,7 @@ import {
   type Price,
   type Prices,
   EVAL_RUN_PREFIX,
+  moneyLabel,
   spendLabel,
   type Usage,
   type UsageLine,
@@ -1082,7 +1083,7 @@ export async function runFromCli(node: NodeClient, options: DoOptions): Promise<
   // What its model calls came to, as the providers reported them (every attempt's and the pick's); money where you've stated prices.
   if (usage.length) {
     const prices = await node.call<{ prices: Record<string, Price> }>("prices").then((r) => r.prices, () => ({}));
-    console.log(dim(`\nSpent: ${spendLabel(usage, prices)}`));
+    console.log(dim(`\nSpent: ${spendLabel(usage, prices, moneyLabel)}`));
   }
   return outcome;
 }

@@ -1,4 +1,4 @@
-import { costOf, type ExecResult, looksAtADesktop, type Prices, type SandboxView, spendTotal, type TeamSnapshot, type TeamTaskRecord, type EvalAnswer, type EvalRecord, evalScore, tokensLabel, usdLabel } from "@invincible/core";
+import { costOf, type ExecResult, looksAtADesktop, type Prices, type SandboxView, spendTotal, type TeamSnapshot, type TeamTaskRecord, type EvalAnswer, type EvalRecord, evalScore, tokensLabel, moneyLabel } from "@invincible/core";
 import { RUN_DEFAULTS, testFilesOf } from "@invincible/agents";
 import { inWorkdir, type NodeClient, runId, runOnNode } from "./run-cli.ts";
 import { quote } from "@invincible/agents";
@@ -137,7 +137,7 @@ export async function readCases(node: NodeClient): Promise<YourCases> {
 function costLine(lines: TeamTaskRecord["spent"], prices: Prices): string {
   const total = spendTotal(lines);
   const cost = costOf(lines, prices);
-  const money = cost.complete ? usdLabel(cost.usd) : cost.usd > 0 ? `at least ${usdLabel(cost.usd)}` : "no price";
+  const money = cost.complete ? moneyLabel(cost.usd) : cost.usd > 0 ? `at least ${moneyLabel(cost.usd)}` : "no price";
   return `${tokensLabel(total.tokens)}${total.complete ? "" : "+"} tokens · ${money}`;
 }
 

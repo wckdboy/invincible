@@ -10,7 +10,7 @@
  * words, and says how many evals it rests on.
  */
 import { compareIntervals, costed, costIndex, evalIndex, type Interval, seededRandom } from "./eval-index.ts";
-import { type Prices, spendTotal, tokensLabel, type UsageLine, usdLabel } from "./spend.ts";
+import { type Prices, spendTotal, tokensLabel, type UsageLine, moneyLabel } from "./spend.ts";
 
 /** An eval as the reports read it (a EvalView has all of this). */
 export interface ReportEval {
@@ -219,8 +219,8 @@ export function compareEvals(a: { name: string; evals: readonly ReportEval[] }, 
   const cost = (m: Measured): string =>
     [
       m.tokensPerEval !== null ? `${tokensLabel(m.tokensPerEval)} tokens an eval` : "tokens unknown",
-      m.usdPerEval !== null ? `${usdLabel(m.usdPerEval)} an eval` : "",
-      m.tokensPerPoint !== null ? `${tokensLabel(m.tokensPerPoint)} tokens a point${m.usdPerPoint !== null ? ` (${usdLabel(m.usdPerPoint)})` : ""}` : m.quality.n ? "no point scored to price" : "",
+      m.usdPerEval !== null ? `${moneyLabel(m.usdPerEval)} an eval` : "",
+      m.tokensPerPoint !== null ? `${tokensLabel(m.tokensPerPoint)} tokens a point${m.usdPerPoint !== null ? ` (${moneyLabel(m.usdPerPoint)})` : ""}` : m.quality.n ? "no point scored to price" : "",
     ]
       .filter(Boolean)
       .join(" · ");
@@ -237,7 +237,7 @@ export function compareEvals(a: { name: string; evals: readonly ReportEval[] }, 
   if (tokensPerPointGained !== null) {
     lines.push(
       tokensPerPointGained > 0
-        ? `Each point ${b.name} gained cost ${tokensLabel(tokensPerPointGained)} more tokens${usdPerPointGained !== null ? ` (${usdLabel(Math.max(0, usdPerPointGained))})` : ""}.`
+        ? `Each point ${b.name} gained cost ${tokensLabel(tokensPerPointGained)} more tokens${usdPerPointGained !== null ? ` (${moneyLabel(Math.max(0, usdPerPointGained))})` : ""}.`
         : `${b.name} scored more and spent fewer tokens an eval.`,
     );
   } else if (ma.tokensPerEval !== null && mb.tokensPerEval !== null && mb.tokensPerEval > ma.tokensPerEval) {

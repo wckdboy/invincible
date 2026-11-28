@@ -27,7 +27,7 @@ import {
   type UsageMeter,
   type UsageView,
   type UsageWindow,
-  usdLabel,
+  moneyLabel,
 } from "@invincible/core";
 import { AGENTS } from "@invincible/agents";
 import { clockUtc, spanWords } from "@invincible/models";
@@ -191,7 +191,7 @@ export function describeModels(reports: readonly RoleReport[]): string {
       const cost = [
         row.tokensPerEval !== null ? `${tokensLabel(row.tokensPerEval)} tokens an eval` : "tokens unknown",
         `${Math.round(row.secondsPerEval)}s an eval`,
-        row.usdPerEval !== null ? `${usdLabel(row.usdPerEval)} an eval` : "no price",
+        row.usdPerEval !== null ? `${moneyLabel(row.usdPerEval)} an eval` : "no price",
         row.perUsd ? `${fig(row.perUsd.mean)} points a dollar (${fig(row.perUsd.low)}–${fig(row.perUsd.high)})` : row.perMTok ? `${fig(row.perMTok.mean)} points a million tokens (${fig(row.perMTok.low)}–${fig(row.perMTok.high)})` : "",
       ].filter(Boolean);
       out.push(`  ${(row.model ?? "the roster as it is").padEnd(40)} ${pct(row.quality.mean).padStart(4)}  ${dim(`90% interval ${pct(row.quality.low)}–${pct(row.quality.high)} · ${row.quality.n} eval${row.quality.n === 1 ? "" : "s"}${row.crashed ? ` · ${row.crashed} crashed` : ""} · ${cost.join(" · ")}`)}`);
@@ -261,7 +261,7 @@ export async function evalCommand(args: EvalArgs): Promise<number> {
     const mine = new Set(made.map((m) => m.run));
     const report = modelReport(evals.filter((t) => mine.has(t.run)), runs, options.prices, suite.id);
     if (report.length) console.log(describeModels(report));
-    console.log(dim(`\nspent in all: ${spendLabel(mergeSpend(spent), options.prices)} · every run of this suite: invincible evals --suite ${suite.id}`));
+    console.log(dim(`\nspent in all: ${spendLabel(mergeSpend(spent), options.prices, moneyLabel)} · every run of this suite: invincible evals --suite ${suite.id}`));
     return made.some((m) => m.evals.length) ? 0 : 1;
   }
   // The same seeded tasks under two variants of the harness: then whether the second measurably helps, and what it cost.
@@ -291,7 +291,7 @@ export async function evalCommand(args: EvalArgs): Promise<number> {
       console.log("");
     }
     if (made.length === 2) console.log(describeComparison(compareEvals({ name: made[0]!.variant.name, evals: made[0]!.result.evals }, { name: made[1]!.variant.name, evals: made[1]!.result.evals }, options.prices)));
-    console.log(dim(`\nspent in all: ${spendLabel(mergeSpend(spent), options.prices)}`));
+    console.log(dim(`\nspent in all: ${spendLabel(mergeSpend(spent), options.prices, moneyLabel)}`));
     return made.length === 2 && made.every((m) => m.result.evals.length) ? 0 : 1;
   }
   if (command === "eval" && sub === "variants" && !rest.length && !str(flags, "suite")) {
@@ -446,8 +446,8 @@ export function spentWindowLine(window: UsageWindow, now: number): string {
 /** The meter in a line: what this period's calls came to at your prices, against your budget and what is left. */
 export function meterLine(m: UsageMeter): string {
   const period = m.per === "day" ? "Today" : "This month";
-  const spent = `${m.complete || m.spentUsd === 0 ? "" : "at least "}${usdLabel(m.spentUsd)}`;
-  const against = m.budgetUsd === null ? "no budget (invincible usage budget <usd> sets one)" : `of ${usdLabel(m.budgetUsd)}, ${m.leftUsd ? `${usdLabel(m.leftUsd)} left` : "spent"}`;
+  const spent = `${m.complete || m.spentUsd === 0 ? "" : "at least "}${moneyLabel(m.spentUsd)}`;
+  const against = m.budgetUsd === null ? "no budget (invincible usage budget <usd> sets one)" : `of ${moneyLabel(m.budgetUsd)}, ${m.leftUsd ? `${moneyLabel(m.leftUsd)} left` : "spent"}`;
   return `${period}: ${spent} ${against} · ${tokensLabel(m.tokens)} tokens in ${m.calls} call${m.calls === 1 ? "" : "s"}${m.unpriced.length ? ` · no price for ${m.unpriced.join(", ")}` : ""}`;
 }
 
@@ -484,7 +484,7 @@ export async function usageCommand(node: NodeClient, flags: Readonly<Record<stri
     console.log(`  ${meterLine(meter)}`);
     for (const window of meter.windows ?? []) console.log(`    ${spentWindowLine(window, Date.now())}`);
   }
-  console.log(`  ${spendLabel(mergeSpend(lines(view.rows)), money)}`);
+  console.log(`  ${spendLabel(mergeSpend(lines(view.rows)), money, moneyLabel)}`);
   const group = (title: string, key: (r: (typeof view.rows)[number]) => string): void => {
     console.log(`\n${bold(title)}`);
     const keys = [...new Set(view.rows.map(key))];
@@ -492,7 +492,7 @@ export async function usageCommand(node: NodeClient, flags: Readonly<Record<stri
     for (const { k, lines: ls } of totals) {
       const t = spendTotal(ls);
       const cost = costOf(ls, money);
-      const said = title === "By model" && onPlan(k) ? dim("a coding plan") : cost.complete ? usdLabel(cost.usd) : cost.unpriced.length ? dim("no price") : `≥ ${usdLabel(cost.usd)}`;
+      const said = title === "By model" && onPlan(k) ? dim("a coding plan") : cost.complete ? moneyLabel(cost.usd) : cost.unpriced.length ? dim("no price") : `≥ ${moneyLabel(cost.usd)}`;
       console.log(`  ${k.padEnd(44)} ${String(t.calls).padStart(6)} calls  ${tokensLabel(t.input).padStart(8)} in  ${tokensLabel(t.output).padStart(8)} out  ${said}${t.unknown ? dim(`  (${t.unknown} unreported)`) : ""}`);
     }
   };

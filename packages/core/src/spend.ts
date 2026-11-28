@@ -179,6 +179,11 @@ export function tokensLabel(n: number): string {
   return `${(n / 1_000_000).toFixed(n < 10_000_000 ? 2 : 1)}M`;
 }
 
+/**
+ * Money in its short form: "$0", "$0.0042", "$0.61", "$12.3", "$240". Where words that say money are kept (a loop's run,
+ * an outcome's notes and its end, a fix refused in a work's trail) and in what an agent is told; what the terminal, the
+ * eval reports, the scorecard and the apps show is moneyLabel's.
+ */
 export function usdLabel(usd: number): string {
   if (usd === 0) return "$0";
   if (usd < 0.01) return `$${usd.toFixed(4)}`;
@@ -186,8 +191,18 @@ export function usdLabel(usd: number): string {
   return `$${usd.toFixed(usd < 100 ? 1 : 0)}`;
 }
 
-/** A tally in a line: tokens always, "at least" when some call reported nothing, money only where every price is known. */
-export function spendLabel(lines: readonly UsageLine[], prices?: Prices): string {
+/**
+ * Money as it is shown (the lead's word, 28 November 2026: the terminal, the eval reports, the scorecard and every app):
+ * always two decimals ("$12.30", "$240.00"), a cent's fraction in four ("$0.0042"). Rounded on the number's exact
+ * value, as toFixed does it (1.005 is a little under, so $1.00).
+ */
+export function moneyLabel(usd: number): string {
+  return usd > 0 && usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
+}
+
+/** A tally in a line: tokens always, "at least" when some call reported nothing, money only where every price is known.
+ * [money]: how it says money (usdLabel where the line is kept; moneyLabel where it is shown). */
+export function spendLabel(lines: readonly UsageLine[], prices?: Prices, money: (usd: number) => string = usdLabel): string {
   const t = spendTotal(lines);
   if (!t.calls) return "no model calls";
   if (t.unknown === t.calls) return `tokens unknown (${t.calls} call${t.calls === 1 ? "" : "s"}, none reported by its provider)`;
@@ -195,9 +210,9 @@ export function spendLabel(lines: readonly UsageLine[], prices?: Prices): string
   parts.push(`${t.calls} call${t.calls === 1 ? "" : "s"}${t.unknown ? `, ${t.unknown} unreported` : ""}`);
   if (prices) {
     const cost = costOf(lines, prices);
-    if (cost.complete) parts.push(usdLabel(cost.usd));
-    else if (cost.unpriced.length) parts.push(`${cost.usd > 0 ? `${usdLabel(cost.usd)} + ` : ""}no price for ${cost.unpriced.join(", ")}`);
-    else parts.push(`at least ${usdLabel(cost.usd)}`);
+    if (cost.complete) parts.push(money(cost.usd));
+    else if (cost.unpriced.length) parts.push(`${cost.usd > 0 ? `${money(cost.usd)} + ` : ""}no price for ${cost.unpriced.join(", ")}`);
+    else parts.push(`at least ${money(cost.usd)}`);
   }
   return parts.join(" · ");
 }

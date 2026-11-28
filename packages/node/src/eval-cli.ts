@@ -27,7 +27,7 @@ import {
   type EvalView,
   type Usage,
   type UsageLine,
-  usdLabel,
+  moneyLabel,
 } from "@invincible/core";
 import { grade, pose, SUITES, EVAL_EVIDENCE, EVAL_INSTRUCTIONS, type EvalProblem } from "@invincible/models";
 import { type RunOutcome } from "@invincible/agents";
@@ -471,7 +471,7 @@ export async function runEvals(node: NodeClient, options: EvalRunOptions): Promi
       const cost = costOf(spent, prices);
       // A money budget can't be kept blind: a call nobody priced ends the run rather than run on uncounted.
       if (cost.unpriced.length) return `a money budget needs a price for every model that answers, and there's none for ${cost.unpriced.join(", ")} (invincible price set …)`;
-      if (cost.usd >= budget.usd) return `the budget of ${usdLabel(budget.usd)} is spent (${usdLabel(cost.usd)} counted)`;
+      if (cost.usd >= budget.usd) return `the budget of ${moneyLabel(budget.usd)} is spent (${moneyLabel(cost.usd)} counted)`;
     }
     return null;
   };
@@ -487,7 +487,7 @@ export async function runEvals(node: NodeClient, options: EvalRunOptions): Promi
     if (budget.tokens !== undefined && each.tokens !== null && spendTotal(spent).tokens + ahead((l) => spendTotal(l).tokens, each.tokens) + each.tokens > budget.tokens)
       return `${tokensLabel(Math.max(0, budget.tokens - spendTotal(spent).tokens))} tokens of the budget are left, and an eval takes about ${tokensLabel(each.tokens)} going by past runs`;
     if (budget.usd !== undefined && each.usd !== null && costOf(spent, prices).usd + ahead((l) => costOf(l, prices).usd, each.usd) + each.usd > budget.usd)
-      return `${usdLabel(Math.max(0, budget.usd - costOf(spent, prices).usd))} of the budget is left, and an eval costs about ${usdLabel(each.usd)} going by past runs`;
+      return `${moneyLabel(Math.max(0, budget.usd - costOf(spent, prices).usd))} of the budget is left, and an eval costs about ${moneyLabel(each.usd)} going by past runs`;
     return null;
   };
   // The budget's own stop: running evals end after their current step (unrecorded), and none starts.
@@ -592,7 +592,7 @@ export function describeEval(t: EvalView, detail = false, prices?: Prices): stri
   }
   if (t.note && (detail || t.status === "crashed")) lines.push(dim(`      ${t.note}`));
   if (detail && t.spent?.lines.length) {
-    lines.push(dim(`      spent: ${spendLabel(t.spent.lines, prices)}`));
+    lines.push(dim(`      spent: ${spendLabel(t.spent.lines, prices, moneyLabel)}`));
     for (const l of t.spent.lines) lines.push(dim(`        ${l.role.padEnd(9)} ${l.model}  ${l.calls} call${l.calls === 1 ? "" : "s"}${l.unknown ? ` (${l.unknown} unreported)` : ""} · ${tokensLabel(l.input)} in, ${tokensLabel(l.output)} out`));
   }
   return lines.join("\n");
@@ -623,7 +623,7 @@ export function describeCost(evals: readonly EvalView[], prices: Prices = {}): s
     i ? `${sig(i.mean)} ${label} ${dim(`(${sig(i.low)}–${sig(i.high)}${i.n < scored.length ? `, ${i.n} of ${scored.length} evals` : ""})`)}` : null;
   const counted = scored.filter((t) => t.spent?.lines.length).length;
   if (!counted) return "";
-  const totals = [index.tokens !== null ? `${tokensLabel(index.tokens)} tokens` : "tokens unknown", minutes(index.seconds), index.usd !== null ? usdLabel(index.usd) : "money unknown (no price, or a call unreported)"];
+  const totals = [index.tokens !== null ? `${tokensLabel(index.tokens)} tokens` : "tokens unknown", minutes(index.seconds), index.usd !== null ? moneyLabel(index.usd) : "money unknown (no price, or a call unreported)"];
   const ratios = [ratio("points per million tokens", index.perMTok), ratio("per hour", index.perHour), ratio("per dollar", index.perUsd)].filter(Boolean);
   return `  ${dim("cost")} ${totals.join(" · ")}${ratios.length ? `\n  ${dim("buys")} ${ratios.join(" · ")}` : ""}`;
 }
@@ -653,12 +653,12 @@ export function describeEffort(evals: readonly EvalView[], runs: EvalRunsView): 
 }
 
 /** A budget in words. */
-export const budgetLabel = (b: EvalBudget): string => [b.tokens !== undefined ? `${tokensLabel(b.tokens)} tokens` : "", b.usd !== undefined ? usdLabel(b.usd) : ""].filter(Boolean).join(" and ") || "none";
+export const budgetLabel = (b: EvalBudget): string => [b.tokens !== undefined ? `${tokensLabel(b.tokens)} tokens` : "", b.usd !== undefined ? moneyLabel(b.usd) : ""].filter(Boolean).join(" and ") || "none";
 
 /** An estimate in words: what it rests on, or that nothing is known. */
 export function estimateLabel(e: RunEstimate): string {
   if (e.tokens === null) return "what it will cost is unknown: none of these problems has been tried with its calls counted";
-  return `going by past runs it will cost about ${tokensLabel(e.tokens)} tokens${e.usd !== null ? ` (${usdLabel(e.usd)})` : ""}${e.known < e.of ? `, known for ${e.known} of its ${e.of} evals and assumed alike for the rest` : ""}`;
+  return `going by past runs it will cost about ${tokensLabel(e.tokens)} tokens${e.usd !== null ? ` (${moneyLabel(e.usd)})` : ""}${e.known < e.of ? `, known for ${e.known} of its ${e.of} evals and assumed alike for the rest` : ""}`;
 }
 
 export async function evalRunFromCli(node: NodeClient, options: Omit<EvalRunOptions, "signal" | "progress">, where = "in the Lab"): Promise<RunResult> {
@@ -701,7 +701,7 @@ export async function evalRunFromCli(node: NodeClient, options: Omit<EvalRunOpti
       const said = [describeCost(evals, options.prices), describeDone(evals)].filter(Boolean);
       console.log(`\n${describeIndex(evals)}${said.length ? `\n${said.join("\n")}` : ""}\n${dim(`run ${run} · invincible evals · invincible eval ${run}`)}`);
     }
-    if (spent.length) console.log(dim(`spent in all: ${spendLabel(spent, options.prices)}`));
+    if (spent.length) console.log(dim(`spent in all: ${spendLabel(spent, options.prices, moneyLabel)}`));
     return result;
   } finally {
     process.off("SIGINT", onInterrupt);

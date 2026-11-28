@@ -8,6 +8,7 @@ import {
   describeVariant,
   evalIndex,
   mergeSpend,
+  moneyLabel,
   moneyPrices,
   OWN_SIGN_IN_TALLY,
   parseVariant,
@@ -127,6 +128,20 @@ describe("money, only where a price is stated", () => {
     expect([tokensLabel(1234), tokensLabel(48_210), tokensLabel(480_000), tokensLabel(2_340_000)]).toEqual(["1,234", "48.2k", "480k", "2.34M"]);
     expect([usdLabel(0), usdLabel(0.0042), usdLabel(0.61), usdLabel(12.3), usdLabel(240)]).toEqual(["$0", "$0.0042", "$0.61", "$12.3", "$240"]);
     expect(spendLabel([line({ input: 48_210, cached: 12_000, output: 3_912, reasoning: 900 })], prices)).toBe("48.2k tokens in (12.0k cached), 3,912 out (900 reasoning) · 1 call · $0.17");
+  });
+
+  test("money as the terminal and the apps show it: always two decimals, a cent's fraction in four; the old form where words are kept", () => {
+    // (The lead's word, 28 November 2026: what the CLI, the eval reports and the scorecard print. Rounded on the number's
+    // exact value, as toFixed does it: 1.005 is a little under, so $1.00; 0.125 is half way, so $0.13.)
+    expect([moneyLabel(0), moneyLabel(0.0042), moneyLabel(0.61), moneyLabel(12.3), moneyLabel(240), moneyLabel(1.005), moneyLabel(0.125)]).toEqual(["$0.00", "$0.0042", "$0.61", "$12.30", "$240.00", "$1.00", "$0.13"]);
+    // The old form stays where its words are kept (a loop's run, an outcome's notes and its end, a fix's refusal in a
+    // trail): what was stored is never said again differently.
+    expect([usdLabel(0), usdLabel(12.3), usdLabel(240)]).toEqual(["$0", "$12.3", "$240"]);
+    // A tally says its money in either: the terminal's two decimals, or a kept summary's form as before.
+    const big = [line({ input: 4_000_000, output: 100_000 })];
+    expect(spendLabel(big, prices, moneyLabel)).toMatch(/ · \$\d+\.\d\d$/);
+    expect(spendLabel(big, prices)).toBe(spendLabel(big, prices, usdLabel));
+    expect(spendLabel([line({ calls: 2, unknown: 1 })], prices, moneyLabel)).toMatch(/at least \$\d+\.\d{2,4}$/);
   });
 
   test("the contracts: a price is for provider/model or provider/*; what an eval spent is read leniently", () => {

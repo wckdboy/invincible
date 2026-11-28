@@ -41,6 +41,11 @@ function board(over: Partial<BoardData> = {}): BoardData {
 }
 
 describe("the board", () => {
+  test("money as the terminal says it, always in two decimals: \"$12.30 today\", never \"$12.3\" (the lead's word, 28 November 2026)", () => {
+    expect(boardLines({ ...boardView(board()), cost: { usd: 12.3, complete: true } }, PLAIN)[0]).toContain("$12.30 today");
+    expect(boardLines({ ...boardView(board()), cost: { usd: 240, complete: false } }, PLAIN)[0]).toContain("at least $240.00 today");
+  });
+
   test("in a terminal: your agent's line, the nodes and today's cost, then NEEDS YOU, ACTIVE, WORKING and DONE in the apps' words and colours", () => {
     const lines = boardLines(boardView(board()), TTY);
     const text = lines.join("\n");
