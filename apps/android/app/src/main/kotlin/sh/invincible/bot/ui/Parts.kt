@@ -7,6 +7,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -28,6 +31,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -135,6 +139,37 @@ fun ChatPill(name: String, line: String?, open: (() -> Unit)?, face: @Composable
     ) {
         face()
         Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/**
+ * Their message, as Grok Bot's chats show one (the owner's word, 28 November 2026; I10's for the iPhone): their face beside
+ * a quiet grey bubble, in a room their [name] over it; what came before the words ([above]: the steps it took) and after
+ * them ([below]: it is still writing, it stopped, why it failed) beside the bubble. A card in the bubble (a chart, a
+ * table, code) is drawn on the paper there, so it keeps its edge on the grey.
+ */
+@Composable
+fun TheirBubble(
+    face: @Composable () -> Unit,
+    name: String? = null,
+    above: (@Composable () -> Unit)? = null,
+    below: (@Composable () -> Unit)? = null,
+    content: (@Composable () -> Unit)?,
+) {
+    val brand = LocalBrand.current
+    Row(Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s1), horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+        Box(Modifier.padding(top = 2.dp)) { face() }
+        Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(Space.s1)) {
+            name?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            above?.invoke()
+            if (content != null) {
+                Box(Modifier.clip(MaterialTheme.shapes.large).background(brand.raised).padding(horizontal = Space.s3, vertical = Space.s2)) {
+                    CompositionLocalProvider(LocalBrand provides brand.copy(raised = brand.paper)) { content() }
+                }
+            }
+            below?.invoke()
+        }
+        Spacer(Modifier.width(Space.s6))
     }
 }
 

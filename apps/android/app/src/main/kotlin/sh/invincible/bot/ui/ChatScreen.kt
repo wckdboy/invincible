@@ -562,17 +562,21 @@ private fun Message(b: Bubble, choose: ((String) -> Unit)?) {
         }
         return
     }
-    Column(Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s2), verticalArrangement = Arrangement.spacedBy(Space.s1)) {
-        if (b.text.isNotEmpty()) Markdown(b.text, choose = choose)
-        for (step in b.steps.takeLast(4)) Text("· $step", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        // Work under way is a word beside a live dot in its colour, its light going out, never a spinner.
-        if (b.streaming) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-            Dot(brand.working, live = true)
-            Text(if (b.text.isEmpty()) "Thinking" else "Writing", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        b.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = brand.failed) }
-        if (b.status == "stopped" && b.error == null) Text("Stopped", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
+    // Its answer in a quiet grey bubble, its I-beam beside it; the steps it took over it, and under it what is still to come.
+    TheirBubble(
+        face = { PrimaryMark(28.dp) },
+        above = if (b.steps.isEmpty()) null else ({ for (step in b.steps.takeLast(4)) Text("· $step", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }),
+        below = {
+            // Work under way is a word beside a live dot in its colour, its light going out, never a spinner.
+            if (b.streaming) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+                Dot(brand.working, live = true)
+                Text(if (b.text.isEmpty()) "Thinking" else "Writing", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            b.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = brand.failed) }
+            if (b.status == "stopped" && b.error == null) Text("Stopped", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        },
+        content = if (b.text.isEmpty()) null else ({ Markdown(b.text, choose = choose) }),
+    )
 }
 
 /** What you might ask it first (the PWA's welcome's, the iPhone's): a press puts it in the message box, to send or change. */

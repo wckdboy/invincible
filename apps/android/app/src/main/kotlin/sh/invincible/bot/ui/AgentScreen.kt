@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import sh.invincible.bot.app.AppModel
+import sh.invincible.bot.core.ChatList
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.AgentState
 import sh.invincible.bot.core.NodeError
@@ -61,7 +62,7 @@ import sh.invincible.bot.core.Primary
 import sh.invincible.bot.core.AgentMark
 
 /** A line of an agent's timeline: something said, or a task as it stands. */
-private data class Entry(val at: Long, val key: String, val speaker: String?, val mine: Boolean, val text: String, val task: Json?)
+private data class Entry(val at: Long, val key: String, val speaker: String?, val mine: Boolean, val text: String, val task: Json?, val speakerId: String? = null)
 
 /**
  * An agent's page: its face and state, then its timeline (what you and it said, and its tasks as they stand, oldest
@@ -221,7 +222,7 @@ private fun Timeline(
             val said = view["messages"].list.map { m ->
                 val speaker = m["speaker"].string ?: ""
                 val who = when (speaker) { "owner" -> null; "primary" -> Primary.name; "system" -> "The agents"; else -> m["speakerName"].string ?: names[speaker] ?: speaker }
-                Entry(m["createdAt"].long ?: 0, "m:${m["id"].string ?: m["createdAt"].long}", who, speaker == "owner", m["text"].string ?: "", null)
+                Entry(m["createdAt"].long ?: 0, "m:${m["id"].string ?: m["createdAt"].long}", who, speaker == "owner", m["text"].string ?: "", null, speaker)
             }
             val tasks = view["tasks"].list.filter { assignee == null || it["assignee"].string == assignee }.map { t -> Entry(t["createdAt"].long ?: t["updatedAt"].long ?: 0, "t:${t["id"].string}", null, false, "", t) }
             entries = (said + tasks).sortedBy { it.at }
@@ -247,13 +248,21 @@ private fun Timeline(
     }
 
     val headerGone by remember { derivedStateOf { list.firstVisibleItemIndex > 0 } }
+    val agents = table.snapshot?.agents ?: emptyList()
+    val times = rememberListTime()
+    val minute = rememberMinute()
+    val marks = remember(entries, times) { ChatList.timeMarks(entries.map { e -> e.at.takeIf { it > 0 } }, times.zone).toSet() }
     Column(Modifier.fillMaxSize().imePadding()) {
         val named = headerGone || barAlways
         PageBar(if (named) title else "", back, actions = actions, titleContent = if (named) barTitle else null)
         LazyColumn(Modifier.weight(1f), state = list, contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = Space.s4)) {
             item { header() }
             problem?.let { item { Problem(it) } }
-            items(entries, key = { it.key }) { e -> if (e.task != null) TaskCard(app, e.task, openTask) else Said(e) }
+            // When it went on, small and centred over what went on with it (ChatList.timeMarks, the PWA's).
+            itemsIndexed(entries, key = { _, e -> e.key }) { i, e ->
+                if (i in marks) TimeMark(times.mark(e.at, minute * 60_000))
+                if (e.task != null) TaskCard(app, e.task, openTask) else Said(e, face = { SpeakerFace(e.speakerId, agents) }, named = assignee == null)
+            }
         }
         Composer(
             placeholder = placeholder,
@@ -280,24 +289,35 @@ private fun Timeline(
     }
 }
 
+/**
+ * What was said in a conversation: yours in an ink bubble; theirs in a quiet grey one beside their face, their name over it
+ * in a room ([named]); what the agents' own system said (someone joined, work handed over), one muted centred line.
+ */
 @Composable
-private fun Said(e: Entry) {
+private fun Said(e: Entry, face: @Composable () -> Unit, named: Boolean) {
     val brand = LocalBrand.current
-    Row(Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s1), horizontalArrangement = if (e.mine) Arrangement.End else Arrangement.Start) {
-        if (e.mine) {
-            Text(
-                e.text,
-                color = brand.onInk,
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.widthIn(max = 320.dp).clip(MaterialTheme.shapes.large).background(brand.ink).padding(horizontal = Space.s3, vertical = Space.s2),
-            )
-        } else {
-            Column(Modifier.widthIn(max = 360.dp)) {
-                e.speaker?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                Markdown(e.text)
-            }
-        }
+    if (e.speakerId == "system") {
+        Text(e.text, Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s1), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        return
     }
+    if (!e.mine) {
+        TheirBubble(face = face, name = if (named) e.speaker else null) { Markdown(e.text) }
+        return
+    }
+    Row(Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s1), horizontalArrangement = Arrangement.End) {
+        Text(
+            e.text,
+            color = brand.onInk,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.widthIn(max = 320.dp).clip(MaterialTheme.shapes.large).background(brand.ink).padding(horizontal = Space.s3, vertical = Space.s2),
+        )
+    }
+}
+
+/** Who said it, beside what they said: your agent's I-beam, or an agent's glass (one since removed, its own still). */
+@Composable
+private fun SpeakerFace(id: String?, agents: List<sh.invincible.bot.core.Agent>) {
+    if (id == "primary") PrimaryMark(28.dp) else AgentMarkView(id ?: "", agents.firstOrNull { it.id == id }?.avatar, 28.dp)
 }
 
 /**
