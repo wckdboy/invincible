@@ -1,4 +1,4 @@
-import { canonical, type ChatMessage, type ChatStreamEvent, type Json, moneyPrices, type Price, priceFor, type Prices, pricesOf, redact, type Usage } from "@invincible/core";
+import { canonical, type ChatMessage, type ChatStreamEvent, handoffPrices, type Json, type Price, priceFor, type Prices, pricesOf, redact, type Usage } from "@invincible/core";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import { type ModelMessage, RefusalError, refusalWords, type ToolCall, type ToolImage, type ToolSpec, ToolsUnsupportedError, type TurnEnd } from "./adapters.ts";
 import { conversationFor } from "./responses.ts";
@@ -63,6 +63,11 @@ export interface ChatRequest {
    * yours, a coding plan's, or priced at nothing) is passed over, saying why.
    */
   paidOnly?: boolean;
+  /**
+   * With `paidOnly`: the work was handed over by a node of your own (core's handoffOnPlans), whose budget counts a coding
+   * plan's model at its list price (handoffPrices), so one you've priced above nothing may give it too.
+   */
+  onPlans?: boolean;
   /**
    * A turn of a run's work loop (a command a reply), whichever role's models answer it: the engineer's, or the
    * planner's once a gate has failed twice in a row. Held to the loop's format checks as the engineer's turns are.
@@ -196,9 +201,11 @@ const aboveNothing = (price: Price | null): boolean => price !== null && (price.
  * Whether a budget counts what this model spends at more than $0: you've priced it (or its provider) above nothing,
  * and it is no coding plan's, whose calls are paid for already (moneyPrices). Work another node handed over runs on
  * such a model alone (`paidOnly`), so that its budget bounds it. One on this machine counts only at a price of yours.
+ * `onPlans`: work a node of your own handed over (core's handoffOnPlans), whose budget counts a coding plan's model at
+ * its list price, your price for it (handoffPrices).
  */
-export function paidFor(store: LedgerStore, ref: string, prices: Prices = pricesOf(store)): boolean {
-  return aboveNothing(priceFor(moneyPrices(prices, PLAN_PROVIDERS), ref));
+export function paidFor(store: LedgerStore, ref: string, prices: Prices = pricesOf(store), onPlans = false): boolean {
+  return aboveNothing(priceFor(handoffPrices(prices, PLAN_PROVIDERS, onPlans), ref));
 }
 
 /** Expand `<provider>/*` wildcards into the first model that provider serves on this node. */
@@ -292,8 +299,9 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
   const someoneFits = candidates.some((ref) => followsFormat(offFormat(ref)) !== false);
   // Your prices, read once for an answer that spends a budget of yours (countable).
   const prices = req.budgeted || req.paidOnly ? pricesOf(ctx.store) : null;
-  // And as money goes, for work another node handed over (paidFor).
-  const money = req.paidOnly && prices ? moneyPrices(prices, PLAN_PROVIDERS) : null;
+  // And as its budget counts them, for work another node handed over (paidFor): money, or, from a node of your own, a
+  // coding plan's models at their list price (handoffPrices).
+  const money = req.paidOnly && prices ? handoffPrices(prices, PLAN_PROVIDERS, req.onPlans === true) : null;
   // How hard it thinks: the level you pinned its role to, whatever its messages say; else what they say, step by step
   // (a run's loop says each turn's: roster.ts STEP_EFFORT), and the role's own for one that says nothing.
   const pinned = pinnedEffort(ctx.store, req.role ?? "planner");

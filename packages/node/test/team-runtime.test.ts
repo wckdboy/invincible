@@ -2,13 +2,14 @@ import { afterEach, expect, setSystemTime, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { costOf, moneyPrices, newNodeIdentity, roundNotice, TeamTaskRecord, type ExecResult, type Prices, type TeamCheckpoint, type Agent, type TeamRoom, type TeamTask, type TeamMessage } from "@invincible/core";
+import { costOf, moneyPrices, newNodeIdentity, pricesOf, roundNotice, TeamTaskRecord, type ExecResult, type Prices, type TeamCheckpoint, type Agent, type TeamRoom, type TeamTask, type TeamMessage } from "@invincible/core";
 import { taskStep, type AvatarExpression } from "@invincible/core/avatar";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { acpDriver, AGENTS, OWN_SIGN_IN, planTaken, type RunEvent } from "@invincible/agents";
 import { HANDED_GATE_SECONDS, HANDED_MARGIN_SECONDS, harnessReadiness, keysLine, progress, TEAM_COMMAND_SECONDS, teamRuntime, type TeamRuntimeDeps, VM_PROBE, vmProbed, withGateway } from "@invincible/agents";
 import type { HandedVm, SeatAnswer, SeatRun, TeamRunContext } from "@invincible/agents";
 import type { TaskAccount } from "@invincible/core";
+import { originOf, paidFor, PLAN_PROVIDERS, preset } from "@invincible/models";
 import { memoryTokenStore, SandboxHost } from "@invincible/sandbox";
 import { fakeDocker } from "./fake-docker.ts";
 import { spawned } from "../../../bench/spawned.ts";
@@ -754,6 +755,65 @@ test("another node's task runs only on a model its budget counts at more than $0
   await none.runtime.executeTask(member, handedTask, { ...none.context, signal: stop.signal, emit }).catch(() => {});
   expect(none.bodies).toHaveLength(0);
   expect(said.some((line) => line.startsWith("Retry · the planner's call failed"))).toBe(true);
+});
+
+/* A grant's budget holds on your plans (the lead's word, 28 November 2026): another node's task from a node of your own
+ * may run on a coding plan's model, its budget counting the plan's calls at their list price, never $0, so it stops when
+ * they reach it as it would on a key; in money it spent nothing, the plan being paid for already. From a node that isn't
+ * yours (ownNode: core's handoffOnPlans), the plan's model is passed over and its lease is for none, as before. */
+test("a grant's budget holds on your plans: a task from a node of yours runs on a plan's model at its list price, and stops at its budget", async () => {
+  // Each call at the plan's list price: 100k tokens in at $1 a million and 10k out at $10 a million, $0.20.
+  const usage = { prompt_tokens: 100_000, completion_tokens: 10_000 };
+  const script = () => [say("1. Make the change."), say("```sh\necho one\n```"), say("```sh\necho two\n```"), say("PASS\nFine.")];
+  const giver = handedTask.givenBy.slice("node:".length);
+  const leases: (readonly string[] | undefined)[] = [];
+  const onPlans = (yours: boolean) => {
+    const at: { store?: LedgerStore } = {};
+    const f = fixture(script(), {
+      // As the server gives them: money (a plan's calls paid for already), your list prices, and paidFor.
+      prices: () => moneyPrices(pricesOf(at.store!), PLAN_PROVIDERS),
+      listPrices: () => pricesOf(at.store!),
+      paid: (ref, plans) => paidFor(at.store!, ref, undefined, plans),
+      ownNode: (id) => yours && id === giver,
+      models: () => [{ provider: "opencode-go", model: "glm-5.3" }],
+      prepare: async (_m, _s, models) => void leases.push(models),
+    }, usage);
+    at.store = f.store;
+    // A coding plan with its key, its model priced at its list price, and every role on it.
+    const go = preset("opencode-go")!;
+    f.vault.set("opencode-go", "sk-FAKE-opencode-go-key-for-tests-0000", { provider: "opencode-go", origin: originOf(go.baseUrl)! });
+    f.store.emit(f.identity, "provider.set", { id: "opencode-go", kind: go.kind, baseUrl: go.baseUrl, secret: "opencode-go" });
+    f.store.emit(f.identity, "price.set", { model: "opencode-go/glm-5.3", price: { input: 1, output: 10 } });
+    for (const role of ["planner", "engineer", "reviewer"]) f.setRoster(role, ["opencode-go/glm-5.3"]);
+    return f;
+  };
+  // (A call no model could answer is asked again later: ended here at its first retry, which would otherwise wait.)
+  const run = async (f: ReturnType<typeof fixture>) => {
+    const stop = new AbortController();
+    const trail: string[] = [];
+    const emit = (line: unknown) => {
+      trail.push(String(line));
+      if (String(line).startsWith("Retry")) setTimeout(() => stop.abort(), 0);
+    };
+    const outcome = await f.runtime.executeTask(member, { ...handedTask, budgetUsd: 0.5 }, { ...f.context, signal: stop.signal, emit }).catch(() => null);
+    return { outcome, trail };
+  };
+  const yours = onPlans(true);
+  const { outcome, trail } = await run(yours);
+  expect(yours.bodies.map((body) => body.model)).toEqual(["glm-5.3", "glm-5.3", "glm-5.3", "glm-5.3"]);
+  expect(trail).toContain("Budget · $0.40 of $0.50 spent: wrapping up");
+  expect(trail).toContain("Budget · spent ($0.60 of $0.50): the work stops");
+  expect(leases).toEqual([["opencode-go/glm-5.3"]]);
+  // In money it spent nothing: the plan's calls are paid for already.
+  expect(outcome?.record?.spent.find((line) => line.role === "planner")).toMatchObject({ model: "opencode-go/glm-5.3", calls: 1 });
+  expect(costOf(outcome!.record!.spent, moneyPrices(pricesOf(yours.store), PLAN_PROVIDERS)).usd).toBe(0);
+  // From a node that isn't yours: the plan's model is passed over, none is called, and its lease is for no model.
+  leases.length = 0;
+  const other = onPlans(false);
+  const off = await run(other);
+  expect(other.bodies).toHaveLength(0);
+  expect(off.trail.some((line) => line.startsWith("Retry · the planner's call failed"))).toBe(true);
+  expect(leases).toEqual([[]]);
 });
 
 test("a coding tool on another node's task never runs on its own sign-in, and is offered only models counted above $0", async () => {

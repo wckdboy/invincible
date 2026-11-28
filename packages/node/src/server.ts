@@ -1,6 +1,7 @@
 import {
   ABOUT_YOU_TAG,
   DESKTOP_FRAMES_TYPE,
+  handoffOnPlans,
   type TeamWorkspace,
   ZONE_HEADER,
   type FabricSettingView,
@@ -2860,7 +2861,9 @@ export function createApp(ctx: AppContext) {
       // What a plan's calls would have cost at API prices, where its tool keeps no count of its own (a task's plan, its usd).
       listPrices: () => pricesOf(ctx.store),
       countable: (ref) => countable(ctx.store, ctx.vault, ref),
-      paid: (ref) => paidFor(ctx.store, ref),
+      paid: (ref, onPlans) => paidFor(ctx.store, ref, undefined, onPlans),
+      // A node of your own (an active full node of this fleet): its hand-offs may run on your plans, at their list price.
+      ownNode: (id) => handoffOnPlans(ctx.store.activeDevice(id)),
       // Its skills for an agent's task, as for a run of its: chosen once from its goal, under the task's own ref.
       skills: (_member, task) => {
         let given: { text: string; brief: string } | null = null;

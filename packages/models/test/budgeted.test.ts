@@ -113,6 +113,21 @@ describe("work another node handed over runs only on a model its budget counts a
     expect(yours[0]).toEqual({ type: "model", ref: "ollama/qwen" });
   });
 
+  test("from a node of your own (onPlans), a coding plan's model priced above nothing answers, at its list price; one you haven't priced, or priced at nothing, is passed over", async () => {
+    const roster = { engineer: ["opencode-go/kimi-k3", "opencode-go/free", "opencode-go/glm-5.3", "own/m"] };
+    const prices = { ...PRICES, "opencode-go/free": { input: 0, output: 0 } };
+    const events = await all(chat({ ...mind(roster, prices), fetch: answering }, { role: "engineer", messages: ask, coding: true, budgeted: true, paidOnly: true, onPlans: true }));
+    expect(events.map((e) => e.type)).toEqual(["fallback", "fallback", "model", "text", "done"]);
+    expect(events.slice(0, 2).map((e) => (e as { from: string }).from)).toEqual(["opencode-go/kimi-k3", "opencode-go/free"]);
+    expect((events[0] as { error: string }).error).toContain("no price");
+    expect((events[1] as { error: string }).error).toContain("priced it at nothing");
+    expect(events[2]).toEqual({ type: "model", ref: "opencode-go/glm-5.3" });
+    // Not from a node of yours: the plan's model is passed over, as ever, and the key's answers.
+    const other = await all(chat({ ...mind(roster, prices), fetch: answering }, { role: "engineer", messages: ask, coding: true, budgeted: true, paidOnly: true }));
+    expect(other.find((e) => e.type === "model")).toEqual({ type: "model", ref: "own/m" });
+    expect(other.some((e) => e.type === "fallback" && e.from === "opencode-go/glm-5.3" && e.error.includes("coding plan"))).toBe(true);
+  });
+
   test("paidFor says the same of a model as the choice does", () => {
     const { store, vault } = mind({}, PRICES);
     expect(paidFor(store, "own/m")).toBe(true);
@@ -123,5 +138,10 @@ describe("work another node handed over runs only on a model its budget counts a
     // One on this machine you've priced is counted at that price.
     const priced = mind({}, { "ollama/*": { input: 0.1, output: 0.2 } });
     expect(paidFor(priced.store, "ollama/qwen")).toBe(true);
+    // On your plans (a node of your own's hand-off), a plan's model priced above nothing is counted at that price.
+    expect(paidFor(store, "opencode-go/glm-5.3", undefined, true)).toBe(true);
+    expect(paidFor(store, "opencode-go/deepseek-v4-pro", undefined, true)).toBe(false);
+    expect(paidFor(store, "own/m", undefined, true)).toBe(true);
+    expect(paidFor(store, "own/free", undefined, true)).toBe(false);
   });
 });

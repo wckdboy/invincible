@@ -6,6 +6,7 @@ import { domain, isNodeId, type NodeIdentity, verifyDeviceSignature } from "./id
 import { ed25519OfDidKey, QAMP_TOOLS, QampDid } from "./qamp.ts";
 import { MAX_PROPOSED_GATES, MAX_RUN_GATES } from "./runs.ts";
 import type { Scope } from "./scopes.ts";
+import { moneyPrices, type Prices } from "./spend.ts";
 import { AgentId, TeamTaskProof } from "./team.ts";
 import { TEAM_LIMITS } from "./team-limits.ts";
 
@@ -231,6 +232,26 @@ export function handoffUnder(terms: HandoffTerms | null, ask: { agent: string | 
 
 /** What a hand-off with this budget counts against its grant's day. */
 export const handoffCounts = (budgetUsd: number): number => Math.max(budgetUsd, HANDOFF_MIN_USD);
+
+/**
+ * Whether a hand-off's work may run on your coding plans (the lead's word, 28 November 2026): only one handed over by a
+ * node of your own, an active full node of this fleet (`giver`: its device as the log holds it, null once it isn't
+ * active), whose work is yours, as your plans serve your nodes' own agents. A node with a limited part in the fleet, or
+ * one revoked, never: its work's budget counts money alone (handoffPrices), so it runs on no plan.
+ */
+export const handoffOnPlans = (giver: { role: string } | null): boolean => giver?.role === "full";
+
+/**
+ * The prices a hand-off's budget is counted at. On your plans (handoffOnPlans): yours as you set them, a coding plan's
+ * models at their list price (your price for each, as `invincible price` lists it), never $0, so the budget bounds a
+ * plan's use as tightly as a key's and real money can't pass it; a plan's model you haven't priced can't be counted, so
+ * the work passes it over. Otherwise money (moneyPrices), a plan's calls counting as nothing, so the work never runs on
+ * one. Its work runs only on a model these count at more than $0 (`paidOnly`). What it spent stays money: a plan's
+ * calls cost nothing more.
+ */
+export function handoffPrices(prices: Prices, plans: readonly string[], onPlans: boolean): Prices {
+  return onPlans ? prices : moneyPrices(prices, plans);
+}
 
 /** You, granting one node hand-offs to another's agents (each by its name or id): its terms, given once for the pair. */
 export const HandoffGrantInput = z.strictObject({

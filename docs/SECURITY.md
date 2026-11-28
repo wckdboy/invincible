@@ -875,15 +875,23 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       responses, batches or vector stores, is reached with your key, nor named by its id in a call's body (R5-5): R4-3,
       `packages/models/test/gateway-lease.test.ts`; the lease carries neither the keys of yours its agent may use nor
       its agent's repository), never on a coding tool's own sign-in (a seat) or an ACP agent, so what they spend is
-      counted. Every call on that lease is counted, whether or not its answer says its usage (the fourth re-review's
-      I-l, `gateway-lease.test.ts`): a streamed OpenAI-style call is asked to say it, and one whose answer says none all
-      the same counts at the most it could have been, every byte sent and answered a token. A call cut before its answer
-      ends, by its client or the network, is counted as it ends (the fifth re-review's R5-2): each byte sent an input
-      token, and the most output it allowed itself (its `max_tokens`, for each answer it asked for: chat's `n`), or what
-      was said or answered if more. A call whose provider had said its usage as its last word when its client went (a
-      usage chunk with no choices left, a Responses completion, Anthropic's output at its stop) is counted as it said:
-      what it bills. A client that goes once its answer is generated is read on for that word for at most 5 seconds and
-      64 KiB, never one that goes in the middle of an answer (`gateway-lease.test.ts`, `gateway-usage.test.ts`).
+      counted. From a node of your own (an active full node of this fleet: core's `handoffOnPlans`), a coding plan's
+      model may do it too, its calls counted against the budget at their list price, your price for each, never at $0
+      (`handoffPrices`; the lead's word, 28 November 2026). That is stricter than $0, so the budget bounds a plan's use
+      as it does a key's and no real money passes it; a plan's model you haven't priced is passed over, having no list
+      price (`packages/node/test/team-runtime.test.ts`, "a grant's budget holds on your plans";
+      `packages/core/test/fabric.test.ts`; `packages/models/test/budgeted.test.ts`). From any other node (a limited one,
+      or one no longer active) a plan's calls count as nothing, so its work runs on no plan: your plans serve your own
+      nodes' work alone. Every call on that lease is counted, whether or not its answer says its usage (the fourth
+      re-review's I-l, `gateway-lease.test.ts`): a streamed OpenAI-style call is asked to say it, and one whose answer
+      says none all the same counts at the most it could have been, every byte sent and answered a token. A call cut
+      before its answer ends, by its client or the network, is counted as it ends (the fifth re-review's R5-2): each
+      byte sent an input token, and the most output it allowed itself (its `max_tokens`, for each answer it asked for:
+      chat's `n`), or what was said or answered if more. A call whose provider had said its usage as its last word when
+      its client went (a usage chunk with no choices left, a Responses completion, Anthropic's output at its stop) is
+      counted as it said: what it bills. A client that goes once its answer is generated is read on for that word for at
+      most 5 seconds and 64 KiB, never one that goes in the middle of an answer (`gateway-lease.test.ts`,
+      `gateway-usage.test.ts`).
       What its budget can't count is taken out of a call where the call means the same without it (the fifth
       re-review's R5-4, `heldToCount`): the providers' own tools, billed per use or run by another model (OpenAI's
       built-ins; Anthropic's server tools, with code execution's container, the MCP connector's servers,

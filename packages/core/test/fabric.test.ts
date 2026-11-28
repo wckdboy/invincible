@@ -5,11 +5,15 @@ import {
   CborError,
   cborDecode,
   cborEncode,
+  costOf,
   didKeyOfEd25519,
   goalDigest,
+  handoffOnPlans,
+  handoffPrices,
   handoffUnder,
   newNodeIdentity,
   onTailnetOrLoopback,
+  priceFor,
   type ProofStatement,
   proofRefusal,
   qampAddressDid,
@@ -313,6 +317,46 @@ describe("your grant for hand-offs: what a node takes at once, and what waits fo
     expect(readHandoffTerms({ tools: ["shell"], budgetUsdPerDay: 5 })).toBeNull();
     expect(readHandoffTerms({ budgetUsdPerDay: 5 })).toBeNull();
     expect(handoffUnder(readHandoffTerms({ tools: [], budgetUsdPerDay: 5 })!, { agent: null, tools: ["fleet"], budgetUsd: 1 }, 0)).toEqual({ beyond: "your grant gives its runs none of its tools, not fleet" });
+  });
+});
+
+/*
+ * A hand-off from a node of your own may run on your coding plans, its budget counting their calls at their list price
+ * (the lead's word, 28 November 2026): never as $0, so the budget bounds a plan's use as it does a key's, and no real
+ * money can pass it. Off for any node that isn't yours: its budget counts money, a plan's calls as nothing, so its work
+ * never runs on one.
+ */
+describe("a hand-off from a node of your own may run on your coding plans, counted at their list price", () => {
+  const prices = { "zplan/glm": { input: 1.4, output: 4.4 }, "zplan/free": { input: 0, output: 0 }, "byok/m": { input: 1, output: 4 } };
+  // Three calls: 300k tokens in, 30k out.
+  const line = (model: string) => ({ role: "engineer", model, calls: 3, unknown: 0, input: 300_000, output: 30_000, cached: 0, reasoning: 0 });
+
+  test("only an active full node of this fleet is yours: a limited one, a client, or one no longer active never is", () => {
+    expect(handoffOnPlans({ role: "full" })).toBe(true);
+    expect(handoffOnPlans({ role: "limited" })).toBe(false);
+    expect(handoffOnPlans({ role: "client" })).toBe(false);
+    expect(handoffOnPlans(null)).toBe(false);
+  });
+
+  test("on your plans its budget counts a plan's calls at their list price; from any other node, as nothing", () => {
+    expect(costOf([line("zplan/glm")], handoffPrices(prices, ["zplan"], true)).usd).toBeCloseTo(0.552, 9);
+    expect(costOf([line("zplan/glm")], handoffPrices(prices, ["zplan"], false)).usd).toBe(0);
+    // A key of yours is money either way.
+    expect(costOf([line("byok/m")], handoffPrices(prices, ["zplan"], true)).usd).toBeCloseTo(0.42, 9);
+    expect(costOf([line("byok/m")], handoffPrices(prices, ["zplan"], false)).usd).toBeCloseTo(0.42, 9);
+    // A plan's model you haven't priced has no list price: the budget can't count it, so the work passes it over.
+    expect(priceFor(handoffPrices(prices, ["zplan"], true), "zplan/kimi")).toBeNull();
+  });
+
+  test("a grant's budget holds: the hand-offs it takes in a day have budgets that fit it, and on a plan each is counted at list price", () => {
+    const grant = readHandoffTerms({ tools: [], budgetUsdPerDay: 1 })!;
+    // Three hand-offs asking $0.40 each: two fit the day, the third waits for you.
+    expect(handoffUnder(grant, { agent: null, tools: [], budgetUsd: 0.4 }, 0)).toEqual({ budgetUsd: 0.4 });
+    expect(handoffUnder(grant, { agent: null, tools: [], budgetUsd: 0.4 }, 0.4)).toEqual({ budgetUsd: 0.4 });
+    expect(handoffUnder(grant, { agent: null, tools: [], budgetUsd: 0.4 }, 0.8)).toEqual({ beyond: "it would pass your grant's $1 a day ($0.80 given in the last 24 hours)" });
+    // Its three calls on the plan come to $0.55 at list price: past a $0.40 budget, so its run stops there. At $0 they
+    // never would.
+    expect(costOf([line("zplan/glm")], handoffPrices(prices, ["zplan"], true)).usd).toBeGreaterThan(0.4);
   });
 });
 

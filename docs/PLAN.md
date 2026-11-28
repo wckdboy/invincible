@@ -89,15 +89,16 @@ own setting says so (`invincible fabric on`), and pinned to Q-AMP 0.3.0, after 0
   - The target's id goes into the signing input. It is a contract change, with fixtures for the old form and the new.
 - ✅ The pin: Q-AMP 0.3.0, after 0.2.0, the first release with the sidecar (`scripts/qamp-pin.sh`).
 - 🔜 The owner's pair switched on (FABRIC.md, the runbook).
-- 🔜 Coding plans for another node's tasks, bounded by calls or tokens a day (the lead, 28 November 2026). A hand-off
-  runs only on models its budget counts above $0, so that its budget bounds its spend (`handedLease`, `paidFor`).
-  A coding plan's models (OpenCode Go's, Z.ai's, MiMo's) count at $0, their calls paid already, so a hand-off to an
-  agent whose models are all plans calls nothing.
-  - What would let a plan serve one: a bound of its own, a number of calls or tokens a day for each hand-off, counted at
-    the gateway as its lease's, and refused past it, as its dollars are now.
-  - It would also have to share the plan's own windows (its five-hour and monthly allowances, `windows.ts`) with your
-    own work, which comes first.
-  - The plan's terms decide which may serve another node's work at all: unattended use, as the provider list says.
+- ✅ Coding plans for a hand-off from a node of your own, counted at their list price (the lead, 28 November 2026). A
+  hand-off runs only on models its budget counts above $0, so that its budget bounds its spend (`handedLease`,
+  `paidFor`). From a node of your own (an active full node of this fleet: core's `handoffOnPlans`), its budget counts a
+  plan's calls at your price for each model, never at $0 (`handoffPrices`): a bound as tight as a key's, which no real
+  money passes, and its review can be independent again. From any other node, a plan's calls count at $0 as before, so
+  its work runs on no plan.
+  - Still open: a hand-off shares a plan's own windows (its five-hour and monthly allowances, `windows.ts`) with your
+    own work, which should come first. Today only its budget bounds its share.
+  - A plan's terms still decide how it may be used (`allows`, the provider list): the gates that hold them hold for a
+    hand-off as for your own work.
 
 **Exit:** the first answer on a fresh connection, and sync's lag, are measured before and after (the carried grants measured 96 vs
 504 ms first answer). Revocation cuts a key off within one round trip. The fuzz targets run clean.

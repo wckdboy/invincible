@@ -124,19 +124,27 @@ transport keys carries all of it:
      route or by its id in a call's body (the fifth re-review's R5-5), nor a batch made (the fourth re-review's R4-3).
      That lease carries nothing else: not the keys of yours its agent may use, nor its agent's repository, which are its
      agent's own work's. Never on one it counts as nothing, nor on a coding tool's own sign-in in the VM (a seat), nor
-     in an ACP agent of yours. Every call on that lease is counted, whether or not its answer says its usage (the fourth
-     re-review's I-l): a streamed OpenAI-style call is asked to say it (`stream_options.include_usage`), and one whose
-     answer says none all the same is counted at the most it could have been, every byte it sent an input token and
-     every byte it was answered with an output token. A call cut before its answer ends is counted as it ends (the fifth
-     re-review's R5-2): each byte sent an input token, and the most output it allowed itself, for each answer it asked
-     for, or what was answered if more. Not so a call whose provider had said its usage as its last word when its client
-     went (a usage chunk with no choices left, a Responses completion, Anthropic's output at its stop): that is what it
-     bills, and it is counted so. OpenCode reads a stream to its `[DONE]` and goes before the stream ends, and each of
-     its calls had been counted at its most: $0.30 for about $0.02 on 28 November 2026. A call whose client goes once
-     its answer is generated, before its usage comes, is read on for it for a few seconds, never in the middle of an
-     answer, whose provider would go on generating what no one reads. A call still counted at its most is marked so on
-     its record's line (`atMost`, how many such calls), and every surface says its tokens and money as an upper bound:
-     "at most $0.30", or "about" beside a call that reported nothing. Its lines, as its record kept them, are read with
+     in an ACP agent of yours. **A hand-off from a node of your own** (an active full node of this fleet: core's
+     `handoffOnPlans`) may run on your coding plans too (the lead's word, 28 November 2026): its budget counts a plan's
+     calls at their list price, your price for each model as `invincible price` lists it, never at $0 (`handoffPrices`).
+     That is stricter than $0, so the budget bounds a plan's use as it does a key's and no real money can pass it; what
+     the task spent stays money, a plan's calls costing nothing more. It gives a hand-off an independent reviewer where
+     the keyed ones are out (glm-5.3 beside a DeepSeek engineer), so handed work can come back proven. A plan's model
+     you haven't priced has no list price, so the work passes it over. From a node that isn't yours (a limited one, or
+     one no longer active), never: its budget counts money alone, a plan's calls as nothing, so its work runs on no
+     plan. Every call on that lease is counted, whether or not its answer says its usage (the fourth re-review's I-l): a
+     streamed OpenAI-style call is asked to say it (`stream_options.include_usage`), and one whose answer says none all
+     the same is counted at the most it could have been, every byte it sent an input token and every byte it was
+     answered with an output token. A call cut before its answer ends is counted as it ends (the fifth re-review's
+     R5-2): each byte sent an input token, and the most output it allowed itself, for each answer it asked for, or what
+     was answered if more. Not so a call whose provider had said its usage as its last word when its client went (a
+     usage chunk with no choices left, a Responses completion, Anthropic's output at its stop): that is what it bills,
+     and it is counted so. OpenCode reads a stream to its `[DONE]` and goes before the stream ends, and each of its
+     calls had been counted at its most: $0.30 for about $0.02 on 28 November 2026. A call whose client goes once its
+     answer is generated, before its usage comes, is read on for it for a few seconds, never in the middle of an answer,
+     whose provider would go on generating what no one reads. A call still counted at its most is marked so on its
+     record's line (`atMost`, how many such calls), and every surface says its tokens and money as an upper bound: "at
+     most $0.30", or "about" beside a call that reported nothing. Its lines, as its record kept them, are read with
      `invincible agents spent <task>` (`--json`: each as kept) and `inv cost --task <id>`. What its budget can't count
      is taken out of a call where the call means the same without it (R5-4): the providers' own tools, billed per use or
      run by another model, a fallback to another model, and a dearer speed or tier. Codex, which declares OpenAI's web

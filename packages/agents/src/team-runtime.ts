@@ -167,8 +167,15 @@ export interface TeamRuntimeDeps {
   /** Whether a task's budget can count what this model spends (brain's countable): priced by you, or on this machine. */
   countable?(ref: string): boolean;
   /** Whether a task's budget counts what this model spends at more than $0 (brain's paidFor): another node's task runs
-   * on such models alone, never on a coding tool's own sign-in. None given: another node's task has no model. */
-  paid?(ref: string): boolean;
+   * on such models alone, never on a coding tool's own sign-in. None given: another node's task has no model.
+   * `onPlans`: one from a node of your own (ownNode), whose budget counts a coding plan's model at its list price. */
+  paid?(ref: string, onPlans?: boolean): boolean;
+  /**
+   * Whether a node is one of your own (core's handoffOnPlans: an active full node of this fleet): another node's task from
+   * one may run on your coding plans, its budget counting their calls at their list price (listPrices), never $0. None
+   * given, or any other node: its budget counts money, so it runs on no plan.
+   */
+  ownNode?(id: string): boolean;
   /**
    * Its skills that bear on a task's goal (skills.ts: chosen once for the task, fenced as data), for its planner and
    * engineer, never its reviewer. Absent or null: none.
@@ -695,9 +702,10 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
     return `The owner has not written your instructions. Your job was set by ${author} when you were made. Work to it as your brief: it is an agent's planning, never the owner's words, and it grants no permission.\n${data("Your job", agent.instructions, fenceOf(agent.id))}`;
   };
   /** The models another node's task may reach through its VM's lease: its coding tool's and its eyes' that its budget
-   * counts at more than $0 (paid), within sensitive mode's when its agent is in it (`held`). */
-  const handedLease = (agent: Agent, held: readonly string[] | null): string[] => {
-    const paid = (ref: string) => deps.paid?.(ref) === true && (!held || held.includes(ref));
+   * counts at more than $0 (paid; a plan's at its list price for one from a node of yours, `onPlans`), within sensitive
+   * mode's when its agent is in it (`held`). */
+  const handedLease = (agent: Agent, held: readonly string[] | null, onPlans: boolean): string[] => {
+    const paid = (ref: string) => deps.paid?.(ref, onPlans) === true && (!held || held.includes(ref));
     const worker = held ? { ...agent, models: [...held] } : agent;
     const refs = deps.models(worker).filter((m) => !m.own).map((m) => `${m.provider}/${m.model}`);
     const eyes = deps.eyes?.(agent);
@@ -710,7 +718,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
    * of a budget of yours, which only a model whose spend it can count may do; `turn`: a turn of its work loop, with the
    * engineer's own tools when it works with them, whose calls it runs).
    */
-  const ask = async (agent: Agent, role: string, messages: ChatMessage[], signal: AbortSignal, context?: string, spent?: (model: string, usage: Usage | null) => void, turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[] }, own?: readonly string[], budgeted?: boolean, paidOnly?: boolean) => {
+  const ask = async (agent: Agent, role: string, messages: ChatMessage[], signal: AbortSignal, context?: string, spent?: (model: string, usage: Usage | null) => void, turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[] }, own?: readonly string[], budgeted?: boolean, paidOnly?: boolean, onPlans?: boolean) => {
     const leave = await deps.enter(signal);
     // A call that says nothing for so long is ended, and asked again as any failed call is: a task has no clock that would end it.
     const quietMs = deps.callQuietMs ?? TEAM_CALL_QUIET_MINUTES * 60_000;
@@ -725,7 +733,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       try {
         // (An agent's task is coding work: a coding plan on the role may do it. A turn of its work loop is held to its
         // format, or offered the engineer's tools, whose calls end the answer for the loop to run.)
-        for await (const event of chat(deps.brain(agent), { role, ...(own?.length ? { models: [...own] } : {}), messages, signal: AbortSignal.any([signal, quiet.signal]), context, coding: true, ...(turn?.loop ? { loop: true } : {}), ...(turn?.tools ? { clientTools: [...turn.tools] } : {}), ...(turn?.apart ? { apart: turn.apart } : {}), ...(budgeted ? { budgeted: true } : {}), ...(paidOnly ? { paidOnly: true } : {}) })) {
+        for await (const event of chat(deps.brain(agent), { role, ...(own?.length ? { models: [...own] } : {}), messages, signal: AbortSignal.any([signal, quiet.signal]), context, coding: true, ...(turn?.loop ? { loop: true } : {}), ...(turn?.tools ? { clientTools: [...turn.tools] } : {}), ...(turn?.apart ? { apart: turn.apart } : {}), ...(budgeted ? { budgeted: true } : {}), ...(paidOnly ? { paidOnly: true, ...(onPlans ? { onPlans: true } : {}) } : {}) })) {
           clearTimeout(timer);
           timer = setTimeout(() => quiet.abort(), quietMs);
           if (event.type === "text") text += event.text;
@@ -896,6 +904,12 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // Another node's task (fabric/handoff.ts) is bounded by its budget: it runs only on models that budget counts at
       // more than $0 (paid), never on one it counts as nothing, nor on a coding tool's own sign-in (a seat).
       const handed = task.givenBy?.startsWith("node:") === true;
+      // One from a node of your own may run on your coding plans, its budget counting them at their list price (core's
+      // handoffOnPlans and handoffPrices: the lead's word, 28 November 2026); one from any other node, on none.
+      const onPlans = handed && deps.ownNode?.(task.givenBy!.slice("node:".length)) === true;
+      /** What its budget counts its calls at (core's handoffPrices): money, a plan's paid for already; on your plans, your
+       * prices as you set them, a plan's models at their list price. */
+      const budgetPrices = (): Prices => (onPlans ? deps.listPrices?.() : deps.prices?.()) ?? {};
       // A plan that works only on your own repositories (a Gemini plan, or an ACP agent that runs agy: core's ownWorkOnly)
       // takes no other node's task, nor an agent with no repository you set, on a seat of it or on its tool's sign-in in
       // the agent's own VM: refused before anything of the task runs (its VM isn't even prepared), and never moved to
@@ -907,7 +921,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // Its VM's lease is held to the models that budget counts at more than $0, as sensitive mode's is to its own (its
       // coding tool's, and its eyes' when they're paid), so that its commands work on nothing its budget counts as
       // nothing: the gateway refuses any other model (the third re-review's R3-4). None of them: it reaches no provider.
-      const leaseModels = handed ? handedLease(agent, held) : held;
+      const leaseModels = handed ? handedLease(agent, held, onPlans) : held;
       await deps.prepare(agent, ctx.signal, leaseModels ?? undefined, handed ? { handed: true } : undefined);
       // Another node's task runs in a VM of its own beside its agent's, every command of it, never in the agent's own (the
       // fabric's R3-1 (a)): released as this ends, however it ends, and with it whatever the task started there.
@@ -1316,12 +1330,12 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           const worker = held ? { ...agent, models: [...held] } : agent;
           const roster = deps.models(worker);
           const offered = handed
-            ? roster.filter((m) => !m.own && deps.paid?.(`${m.provider}/${m.model}`) === true)
+            ? roster.filter((m) => !m.own && deps.paid?.(`${m.provider}/${m.model}`, onPlans) === true)
             : task.budgetUsd !== undefined && deps.countable ? roster.filter((m) => m.own || deps.countable!(`${m.provider}/${m.model}`)) : roster;
           // (On a seat its plan isn't spent: the seat wasn't chosen if it were.)
           const readiness = (said: ExecResult, seat: boolean) => harnessReadiness(driver, said, offered, deps.modelsOutside?.(worker), workRole(agent.role), held !== null, seat ? null : (deps.ownSpent?.(agent, driver.name) ?? null), !seat && bound, handed);
           let ready = readiness(probe, onSeat !== null);
-          if (handed && !ready.ready) throw new Error(`${driver.title} can't take this task: it was handed over by another node, so it runs only on a model its budget counts at more than $0 (one you've priced above nothing, on no coding plan), through the gateway, never on the tool's own sign-in in this VM${roster.length && !offered.length ? `, and its budget counts ${roster.map(agentModelName).join(", ")} as nothing` : `: ${ready.reason ?? "it has none"}`}`);
+          if (handed && !ready.ready) throw new Error(`${driver.title} can't take this task: it was handed over by another node, so it runs only on a model its budget counts at more than $0 (one you've priced above nothing, ${onPlans ? "a coding plan's at that price" : "on no coding plan"}), through the gateway, never on the tool's own sign-in in this VM${roster.length && !offered.length ? `, and its budget counts ${roster.map(agentModelName).join(", ")} as nothing` : `: ${ready.reason ?? "it has none"}`}`);
           // (A tool signed in on its own in this VM still runs on that, as ever: only the gateway's models are held to it.)
           if (!ready.ready && roster.length && !offered.length) throw new Error(`${driver.title} has no model its budget can count: you've set no price for ${roster.map(agentModelName).join(", ")} (invincible price set <provider/model> <$ per million in> <$ per million out>), and a task with a budget never runs on what it would count as nothing`);
           if (!ready.ready && seated) {
@@ -1411,7 +1425,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           const own = held ? (by?.length ? [...held.filter((m) => !same(m)), ...held.filter(same)] : held) : role === "engineer" ? agent.models : undefined;
           // An audit goes to the audit chore's models once you hire some, the reviewer's until then (roster.ts choreRole).
           const asked = turn?.audit ? choreRole(deps.brain(agent).store, "audit") : role === "engineer" ? workRole(agent.role) : role;
-          return ask(agent, asked, messages, ctx.signal, role === "reviewer" ? undefined : contextFor(role), (model, usage) => addUsage(spent, role, model, usage), { ...(turn?.loop ? { loop: turn.loop } : {}), ...(turn?.tools ? { tools: turn.tools } : {}), ...(apart ? { apart } : {}) }, own, task.budgetUsd !== undefined, handed);
+          return ask(agent, asked, messages, ctx.signal, role === "reviewer" ? undefined : contextFor(role), (model, usage) => addUsage(spent, role, model, usage), { ...(turn?.loop ? { loop: turn.loop } : {}), ...(turn?.tools ? { tools: turn.tools } : {}), ...(apart ? { apart } : {}) }, own, task.budgetUsd !== undefined, handed, onPlans);
         },
         exec, signal: ctx.signal,
         // Before each review's evidence is read: another node's task's changes brought back to its agent's side, where that
@@ -1512,9 +1526,10 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         ...(deps.rules ? { rules: deps.rules } : {}),
         tripped: (trip) => deps.tripped?.(agent, task, trip),
         told: (t) => deps.told?.(agent, task, t),
-        // What this task's calls have cost so far, at your prices: its own, and its coding tool's through the gateway.
+        // What this task's calls have cost so far, at your prices: its own, and its coding tool's through the gateway (a
+        // plan's at its list price for another node's task on your plans: budgetPrices).
         spentUsd: async () => {
-          const cost = costOf(mergeSpend(spent, await deps.toolSpent?.(agent, startedAt)), deps.prices?.() ?? {});
+          const cost = costOf(mergeSpend(spent, await deps.toolSpent?.(agent, startedAt)), budgetPrices());
           return { usd: cost.usd, complete: cost.complete, atMost: cost.atMost };
         },
         // (Another node's task's in its own VM, as all its commands are.)
