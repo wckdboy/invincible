@@ -209,7 +209,7 @@ describe("what is said of a steer", () => {
  * `during(i)` runs as that look is made (a steer said then). Its last look finds it ended of itself. Each look moves the
  * run's clock `minutes`.
  */
-function harness(looks: object[][], reviewer: string[], during: (look: number, held: ReturnType<typeof inbox>) => void = () => {}, minutes = 1, options: { audit?: boolean; repeat?: boolean } = {}) {
+function harness(looks: object[][], reviewer: string[], during: (look: number, held: ReturnType<typeof inbox>) => void = () => {}, minutes = 1, options: { audit?: boolean; repeat?: boolean; cut?: number } = {}) {
   const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false }, check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
   const queues: Record<RunRole, string[]> = { planner: ["1. Write the parser.\nDone when: its test passes."], engineer: [], reviewer: [...reviewer] };
   const events: RunEvent[] = [];
@@ -243,6 +243,8 @@ function harness(looks: object[][], reviewer: string[], during: (look: number, h
           looked += 1;
           now += minutes * 60_000;
           const alive = options.repeat ? at + 1 < looks.length : looked < looks.length;
+          // (cut: at that look its process is gone with no exit code, as one killed or whose VM restarted.)
+          if (options.cut === looked - 1) return ok(JSON.stringify({ alive: false, exit: null, next: looked * 10, lines: [JSON.stringify(lines)] }));
           return ok(JSON.stringify({ alive, exit: alive ? null : 0, next: looked * 10, lines: [JSON.stringify(lines)] }));
         }
         return ok("");
@@ -329,6 +331,35 @@ describe("steers that must still reach the work (the independent review, 27 Nove
     expect(q.prompts[1]).toStartWith(q.prompts[0]!);
     expect(q.prompts[1]).toContain("The owner says, while you work: Use the new schema.");
     expect(q.asked[0]).toContain("1. The owner, at step 2: Use the new schema.");
+  });
+
+  // The second re-check of 28 November 2026, N2: Antigravity keeps no session now, and a run with none ended unverified at
+  // the first "revise" from the reviewer or a gate, and failed when it was cut off. Each is taken up as a steer is: a new
+  // run, told the task's briefing and what came of the last one; the work so far is where it was, in the worktree.
+  test("a coding agent that keeps no session, sent back by the reviewer, gets its revision round: a new run, told its briefing and the reviewer's words", async () => {
+    const q = harness([[tool(1), { type: "text", text: "Written." }]], ["REVISE\nThe parser has no test.", "PASS\nNow it has one."], () => {}, 1, { repeat: true });
+    const outcome = await q.run;
+    expect(outcome.status).toBe("done");
+    expect(q.prompts).toHaveLength(2);
+    expect(q.prompts[1]).toStartWith(q.prompts[0]!);
+    expect(q.prompts[1]).toContain("The parser has no test.");
+  });
+
+  test("one that keeps no session, sent back, is told the steers that came while it was judged in that new run too", async () => {
+    const q = harness([[tool(1), { type: "text", text: "Written." }]], ["REVISE\nThe parser has no test.", "PASS\nNow it has one."], (look, held) => (look === 0 ? held.say({ by: "owner", text: "Use the new schema." }) : undefined), 1, { repeat: true });
+    const outcome = await q.run;
+    expect(outcome.status).toBe("done");
+    expect(q.prompts[q.prompts.length - 1]).toStartWith(q.prompts[0]!);
+    expect(q.prompts.join("\n")).toContain("Use the new schema.");
+  });
+
+  test("one that keeps no session, cut off before it ended, is taken up once in a new run told its briefing; cut off again, it goes on as any failure", async () => {
+    const q = harness([[tool(1)], [tool(2), { type: "text", text: "Written." }]], ["PASS\nIt parses."], () => {}, 1, { repeat: true, cut: 0 });
+    const outcome = await q.run;
+    expect(outcome.status).toBe("done");
+    expect(q.prompts).toHaveLength(2);
+    expect(q.prompts[1]).toStartWith(q.prompts[0]!);
+    expect(q.prompts[1]).toContain("Your last run was cut off before it ended");
   });
 
   test("sent back with its budget spent, the words that came while it was judged are left untaken, for the task to say it ended before they reached it", async () => {

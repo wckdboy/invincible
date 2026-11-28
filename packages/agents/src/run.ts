@@ -1891,7 +1891,12 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       const unheard = run.untold?.length ? sayAgain(run.untold) : "";
       const withUnheard = (text: string) => (unheard ? `${unheard}\n\n${text}` : text);
       if (unheard) carried = [carried, unheard].filter(Boolean).join("\n\n");
-      // Ended by a steer between its tool calls (yours, your agent's or its audit's): taken up in its own session.
+      // What the next run is told: in its own session, the words alone; with none to go on in (a tool that keeps no
+      // session, as Antigravity's now), a new run is told its briefing with them, and the work so far is where it was,
+      // in the workspace (the second re-check of 28 November 2026, N2).
+      const told = (words: string): string => (session ? words : `${briefing}\n\n${words}`);
+      // Ended by a steer between its tool calls (yours, your agent's or its audit's): taken up in its own session. (Only a
+      // run with a session is ended so: steerNow. One with none is told what waited once it ends of itself, below.)
       if (run.status === "steered") {
         prompt = carried = withUnheard(steerPrompt(heard, auditSays.splice(0)));
         heard = [];
@@ -1904,12 +1909,15 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         return await asItStands("Its budget was spent before it said it was done: this is the work as it stands.", `Its budget (${usd(o.budgetUsd!)}) was spent`, { status: "stopped", summary: spentSummary() });
       }
       // Cut off (its process stopped from outside: killed, its VM restarted), not failed by its own word: its own session
-      // is taken up again on the same model, once, the turn it was in taken up by itself where its tool can.
-      if (run.status === "failed" && run.cutOff && session && cutOffs === 0) {
+      // is taken up again on the same model, once, the turn it was in taken up by itself where its tool can; with no
+      // session, a new run on the same model takes it up, once, told its briefing and that the last one was cut off.
+      if (run.status === "failed" && run.cutOff && cutOffs === 0) {
         cutOffs += 1;
-        cutOff = true;
-        emit({ type: "retry", role: "engineer", attempt: 1, error: `${agentModelName(model)}: its run was cut off before it ended, so its own session is taken up again`.slice(0, 300), waitMs: 0 });
-        prompt = `Your last run was cut off before it ended (its process stopped). Continue the run from where you left off.${carried ? `\n\n${carried}` : ""}`;
+        cutOff = session !== null;
+        emit({ type: "retry", role: "engineer", attempt: 1, error: `${agentModelName(model)}: its run was cut off before it ended, so ${session ? "its own session is taken up again" : "a new run takes it up from its briefing"}`.slice(0, 300), waitMs: 0 });
+        prompt = session
+          ? `Your last run was cut off before it ended (its process stopped). Continue the run from where you left off.${carried ? `\n\n${carried}` : ""}`
+          : told(`Your last run was cut off before it ended (its process stopped): what it did is in the workspace as it left it. Continue the run from there.${carried ? `\n\n${carried}` : ""}`);
         continue;
       }
       // A model that fails (an outage, a provider's filter) hands over to the next, which carries on the same session.
@@ -1941,30 +1949,32 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       const waiting = await takeSteers(steps);
       const audits = auditSays.splice(0);
       if (waiting.length || audits.length || (unheard && session)) {
-        const words = waiting.length || audits.length ? withUnheard(steerPrompt(waiting, audits)) : `${unheard} Then end with a short summary and the evidence.`;
-        prompt = carried = session ? words : `${briefing}\n\n${words}`;
+        carried = waiting.length || audits.length ? withUnheard(steerPrompt(waiting, audits)) : `${unheard} Then end with a short summary and the evidence.`;
+        prompt = told(carried);
         continue;
       }
       // The reviewer sees the latest commands; every one of them is in the ledger.
       const verdict = await submit(run.summary || "(the agent ended without a summary)", trail);
       judged = trail.length;
       review = verdict.notes || undefined;
-      // Words that came while it was judged come before its end, as for the engineer's own loop (said in its session).
-      // (Sent back with no session to send it to, or with its budget spent, it isn't taken up again: the reviewer's word
-      // stands, and what came meanwhile is left untaken, so the task says it ended before it reached it.)
-      const over = verdict.verdict !== "pass" && (!session || (await spentNow()));
-      const late = session && !over ? await takeSteers(steps) : [];
+      // Words that came while it was judged come before its end, as for the engineer's own loop (said in its session, or
+      // with none, in a new run told its briefing). (Sent back with its budget spent, it isn't taken up again: the
+      // reviewer's word stands, and what came meanwhile is left untaken, so the task says it ended before it reached it.)
+      const over = verdict.verdict !== "pass" && (await spentNow());
+      const late = !over ? await takeSteers(steps) : [];
       if (verdict.verdict === "pass") {
         if (!late.length) return finish({ status: "done", summary: run.summary, review: verdict.notes || undefined });
-        prompt = carried = `${passedBut(late)} end with a short summary and the evidence: the work is judged again.`;
+        carried = `${passedBut(late)} end with a short summary and the evidence: the work is judged again.`;
+        prompt = told(carried);
         continue;
       }
       // (A steer that came once its revisions were spent gives it one more round.)
       if (over || (revisions >= o.maxRevisions && !late.length)) return finish({ status: "unverified", summary: run.summary, review: verdict.notes });
       if (revisions < o.maxRevisions) revisions += 1;
-      prompt = `${sentBack(verdict, "verify it, then end with a short summary and the evidence.")}${late.length ? `\n\n${steersSaid(late, o.unreviewed)}` : ""}`;
+      const words = `${sentBack(verdict, "verify it, then end with a short summary and the evidence.")}${late.length ? `\n\n${steersSaid(late, o.unreviewed)}` : ""}`;
+      prompt = told(words);
       // (Only a message that carries steers is said again after a model's failure: one without is what it always was.)
-      carried = late.length ? prompt : "";
+      carried = late.length ? words : "";
     }
   };
 

@@ -153,9 +153,9 @@ export const ANTIGRAVITY: AgentDriver = {
   title: "Antigravity",
   // Gemini's API: no model of the gateway's speaks it, so it runs on its Google sign-in alone, never on a roster model.
   kind: "gemini",
-  // (No session of its goes on from one run to the next: a steer ends its run between calls, and the next run, a new
-  // session, is told the task and the steer.)
-  capabilities: { steer: "restart", streams: true, resumes: false, readsWindows: false },
+  // (No session of its goes on from one run to the next, so a steer waits for its run to end, and the next run, a new
+  // session, is told the task's briefing with it, as a revision or a run cut off is: run.ts.)
+  capabilities: { steer: "none", streams: true, resumes: false, readsWindows: false },
   // Whether it starts here and is signed in, asked of agy itself: its initialize, and its authenticate with the sign-in
   // its profile holds, never a model call or the token. (Passed whole: it is asked before any run has written the bridge.)
   check: STATUS,
