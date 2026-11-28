@@ -1,8 +1,9 @@
-import type { ActionView, MemoryView, NoticeView } from "@invincible/core";
+import type { ActionView, ConnectorView, MemoryView, NoticeView } from "@invincible/core";
 import { isNotifyActionId } from "@invincible/core/notify-payload";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { isWaiting } from "../live.ts";
-import { askPlain } from "../lib/asks.ts";
+import { askPlain, connectorLabels } from "../lib/asks.ts";
+import { signal } from "../ui/signal.ts";
 import { hashOf } from "../lib/nav.ts";
 import { noticeFrom } from "../lib/notices.ts";
 import { agentOfCaller } from "../lib/roster.ts";
@@ -86,6 +87,27 @@ function decisionEl(need: Need): HTMLElement {
 /** An approval in a row: who asks (an agent under its task's name) and what, Allow once (confirmed, as the card's), and
  * under its ⋯ Deny and the whole card (its arguments, a standing order, your own words in it). A delete is approved only
  * in its whole card, by typing what it deletes. */
+/**
+ * The connectors' own names, as an ask names its service ("Merge on GitHub"; lib/asks.ts connectorLabels): read from the
+ * node's list once, when an ask first names one, and once more for an ask that names one not in it (added since); kept
+ * in memory for the session. The live stream tells nothing of the connectors, so nothing is read at rest. Unknown, an
+ * ask says its connector's id with a capital.
+ */
+export const knownLabels = signal<ReadonlyMap<string, string>>(new Map());
+const labelsAsked = new Set<string>();
+let labelsReading = false;
+function labelFor(ctx: Ctx, id: string): string | undefined {
+  const known = knownLabels.value.get(id);
+  if (known !== undefined || labelsAsked.has(id) || labelsReading || !ctx.can("mind:read")) return known;
+  labelsAsked.add(id);
+  labelsReading = true;
+  ctx.api
+    .get<{ connectors: ConnectorView[] }>("/api/connectors")
+    .then(({ connectors }) => knownLabels.set(connectorLabels(connectors)), () => {})
+    .finally(() => void (labelsReading = false));
+  return undefined;
+}
+
 function approvalNeed(ctx: Ctx, action: ActionView, row: WorkRow | null): Need {
   const info = CLASS_INFO[action.class as ActionClass];
   const destructive = action.class === "delete";
@@ -98,7 +120,7 @@ function approvalNeed(ctx: Ctx, action: ActionView, row: WorkRow | null): Need {
     who: row ? `${row.agent.name} · ${row.title}` : `${askerName(ctx, action.by)} asks`,
     // (In plain words, "Post to Forge: “…”" (lib/asks.ts askPlain); the call itself, its class, connector, tool and target,
     // is in its whole card, a tap away.)
-    what: askPlain(action),
+    what: askPlain(action, labelFor(ctx, action.connector)),
     answer: admin ? { label: destructive ? "Review…" : "Allow once", run: (trigger, problem) => (destructive ? whole() : void approveAction(ctx, action, trigger, problem)) } : null,
     rest: admin
       ? [
@@ -237,6 +259,8 @@ export function needsVersion(ctx: Ctx): string {
     l.loopDrafts.value.map((d) => d.id),
     l.connectorRequests.value.map((c) => c.id),
     l.aboutYou.value.map((m) => m.id),
+    // (An ask's words change as its connector's own name is read.)
+    [...knownLabels.value],
   ]);
 }
 
@@ -387,7 +411,7 @@ export const needsView: View = (root, ctx, { scope, opts }) => {
       pageBody(pickedNote, reach.el, lists, ctx.can("mind:read") ? history : null),
     ),
   );
-  for (const source of [...workSources(ctx), ctx.live.pairings, ctx.live.secretRequests, ctx.live.loopDrafts, ctx.live.connectorRequests, ctx.live.aboutYou, ctx.live.screenSessions, ctx.live.questions, ctx.live.notices, ctx.live.inboxLoaded] as { subscribe(listener: () => void): () => void }[]) scope.add(source.subscribe(draw));
+  for (const source of [...workSources(ctx), knownLabels, ctx.live.pairings, ctx.live.secretRequests, ctx.live.loopDrafts, ctx.live.connectorRequests, ctx.live.aboutYou, ctx.live.screenSessions, ctx.live.questions, ctx.live.notices, ctx.live.inboxLoaded] as { subscribe(listener: () => void): () => void }[]) scope.add(source.subscribe(draw));
   draw();
   void ctx.live.refreshInbox();
   // Each part is read again as the node's live stream says it changed (live.ts); while that stream is down, the whole

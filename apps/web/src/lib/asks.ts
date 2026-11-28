@@ -1,4 +1,4 @@
-import type { ActionView } from "@invincible/core";
+import type { ActionView, ConnectorView } from "@invincible/core";
 
 /*
  * An approval in plain words, as its ask says it in a chat (I10's phone-gaps, the lead's word of 28 November 2026): "Post
@@ -28,6 +28,14 @@ function firstWords(args: Readonly<Record<string, unknown>>): string | null {
     return characters.length > SHOWN ? `${characters.slice(0, SHOWN - 1).join("").trimEnd()}…` : line;
   }
   return null;
+}
+
+/**
+ * The connectors' own names by their ids, from the node's list (GET /api/connectors), as an ask names its service: each
+ * as written, its spaces at either end aside; a blank one is none (its id with a capital, then).
+ */
+export function connectorLabels(connectors: readonly Pick<ConnectorView, "id" | "label">[]): Map<string, string> {
+  return new Map(connectors.map((c): [string, string] => [c.id, c.label.trim()]).filter(([, label]) => label));
 }
 
 /**

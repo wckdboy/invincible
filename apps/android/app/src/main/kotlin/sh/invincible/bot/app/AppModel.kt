@@ -287,6 +287,33 @@ class AppModel(context: Context) {
     /** An approval opened from its notification's Approve…: its card first in the Inbox. */
     val approvalAsked = MutableStateFlow<String?>(null)
 
+    /**
+     * The connectors' own names, as an ask names its service ("Merge on GitHub"; Asks.labels, the PWA's connectorLabels):
+     * read from the node's list once, when an ask first names one, and once more for an ask that names one not in it
+     * (added since); kept for the session. The live stream tells nothing of the connectors, so nothing is read at rest.
+     * Unknown, an ask says its connector's id with a capital.
+     */
+    private val _connectorLabels = MutableStateFlow<Map<String, String>>(emptyMap())
+    val connectorLabels: StateFlow<Map<String, String>> = _connectorLabels.asStateFlow()
+    private val labelsAsked = HashSet<String>()
+    @Volatile private var labelsReading = false
+
+    /** Its connector named, for an ask that names [id]: its own name read once, if it isn't known yet (connectorLabels). */
+    fun knowConnector(id: String) {
+        if (_connectorLabels.value.containsKey(id) || id in labelsAsked || labelsReading || !can("mind:read")) return
+        val c = client ?: return
+        labelsAsked += id
+        labelsReading = true
+        launch {
+            try {
+                _connectorLabels.value = sh.invincible.bot.core.Asks.labels(c.get("/api/connectors")["connectors"].list)
+            } catch (_: NodeError) {
+            } finally {
+                labelsReading = false
+            }
+        }
+    }
+
     /** A task whose notification's Ship it… was pressed: its ship is asked as its page opens. */
     val shipAsked = MutableStateFlow<String?>(null)
 

@@ -6231,7 +6231,65 @@
         "label": "  ",
         "words": "Upload to Drive: “notes.md”"
       }
-    ]
+    ],
+    "listed": {
+      "connectors": [
+        {
+          "id": "github",
+          "label": "GitHub"
+        },
+        {
+          "id": "forge",
+          "label": "  "
+        },
+        {
+          "id": "ha",
+          "label": " Home Assistant "
+        }
+      ],
+      "labels": {
+        "github": "GitHub",
+        "ha": "Home Assistant"
+      },
+      "asks": [
+        {
+          "ask": {
+            "connector": "github",
+            "tool": "merge",
+            "args": {}
+          },
+          "words": "Merge on GitHub"
+        },
+        {
+          "ask": {
+            "connector": "forge",
+            "tool": "post",
+            "args": {
+              "text": "Hi"
+            }
+          },
+          "words": "Post to Forge: “Hi”"
+        },
+        {
+          "ask": {
+            "connector": "ha",
+            "tool": "call_service",
+            "args": {
+              "name": "Kitchen lights"
+            }
+          },
+          "words": "Call service on Home Assistant: “Kitchen lights”"
+        },
+        {
+          "ask": {
+            "connector": "s3",
+            "tool": "bucket.delete",
+            "args": {}
+          },
+          "words": "Bucket delete on S3"
+        }
+      ]
+    }
   },
   "proofLines": [
     {

@@ -88,6 +88,9 @@ private class Decision(val key: String, val lead: Lead, val who: String, val wha
 fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (String) -> Unit, openAll: () -> Unit, watch: (String) -> Unit, openConnectors: () -> Unit = {}, page: Boolean = false, chat: String? = null, flow: Boolean = false) {
     val inbox by app.inbox.collectAsState()
     val table by app.table.collectAsState()
+    // (Each ask's service by its connector's own name, read once where one is named: AppModel.knowConnector.)
+    val labels by app.connectorLabels.collectAsState()
+    LaunchedEffect(inbox.actions) { for (id in inbox.actions.mapNotNull { it["connector"].string }.distinct()) app.knowConnector(id) }
     val count by app.needsYou.collectAsState()
     val brand = LocalBrand.current
     val scope = rememberCoroutineScope()
@@ -131,7 +134,7 @@ fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (Stri
             if (row != null) "${row.agentName} · ${row.title}" else "${asker(a["by"].string ?: "")} asks",
             // (In plain words, "Post to Forge: “…”" (Asks.plain, the PWA's askPlain); the call itself, its class, connector,
             // tool and target, is in its whole card, behind More.)
-            sh.invincible.bot.core.Asks.plain(a["connector"].string ?: "", a["tool"].string ?: "", a["args"]),
+            sh.invincible.bot.core.Asks.plain(a["connector"].string ?: "", a["tool"].string ?: "", a["args"], labels[a["connector"].string]),
             // A delete is answered only in its whole card; anything else asks once before it is sent.
             answer = Answer(if (kind == "delete") "Review…" else "Allow once") { if (kind == "delete") card(a) else confirming = a },
             rest = listOf(Answer("Deny", danger = true) { act(key) { app.decide(a["id"].string!!, false) } }, Answer("More") { card(a) }),

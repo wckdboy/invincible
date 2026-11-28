@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { askPlain } from "./asks.ts";
+import { askPlain, connectorLabels } from "./asks.ts";
 
 describe("an approval in plain words, as its ask says it in a chat (the lead's word, 28 November 2026)", () => {
   test("what it would do, to or on which service, and the first words it would send, in quotes", () => {
@@ -26,5 +26,15 @@ describe("an approval in plain words, as its ask says it in a chat (the lead's w
   test("what sends takes \"to\": post, send, publish, upload, push, write, comment, reply, message, email, share", () => {
     expect(askPlain({ connector: "mail", tool: "send_email", args: { subject: "The 0.4 notes", body: "Attached." } }, "Mail")).toBe("Send email to Mail: “The 0.4 notes”");
     expect(askPlain({ connector: "drive", tool: "upload", args: { name: "notes.md" } }, "Drive")).toBe("Upload to Drive: “notes.md”");
+  });
+});
+
+describe("its service by the connector's own name, read once from the node's list (GET /api/connectors)", () => {
+  test("each connector's label by its id, as written; a blank one, or one not in the list, is its id with a capital", () => {
+    const labels = connectorLabels([{ id: "github", label: "GitHub" }, { id: "forge", label: "  " }, { id: "ha", label: " Home Assistant " }]);
+    expect([...labels]).toEqual([["github", "GitHub"], ["ha", "Home Assistant"]]);
+    expect(askPlain({ connector: "github", tool: "merge", args: {} }, labels.get("github"))).toBe("Merge on GitHub");
+    expect(askPlain({ connector: "forge", tool: "post", args: { text: "Hi" } }, labels.get("forge"))).toBe("Post to Forge: “Hi”");
+    expect(askPlain({ connector: "s3", tool: "bucket.delete", args: {} }, labels.get("s3"))).toBe("Bucket delete on S3");
   });
 });

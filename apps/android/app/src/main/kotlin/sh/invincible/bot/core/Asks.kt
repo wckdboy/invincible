@@ -18,6 +18,13 @@ object Asks {
 
     private fun capital(words: String) = words.replaceFirstChar { it.uppercase() }
 
+    /**
+     * The connectors' own names by their ids, from the node's list (GET /api/connectors), as an ask names its service
+     * (lib/asks.ts connectorLabels): each as written, its spaces at either end aside; a blank one is none.
+     */
+    fun labels(connectors: List<Json>): Map<String, String> =
+        connectors.mapNotNull { c -> c["id"].string?.let { id -> c["label"].string?.trim()?.takeIf { it.isNotEmpty() }?.let { id to it } } }.toMap()
+
     /** The first line of its words, cut on a character (never inside one) at SHOWN; null where it has none. */
     private fun firstWords(args: Json?): String? {
         for (key in WORDS) {

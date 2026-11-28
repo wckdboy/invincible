@@ -18,7 +18,7 @@ import { homePrimaryLine, homeRows, primaryNeeds, rosterRows } from "../../web/s
 import { listLocale, listTime, timeMark } from "../../web/src/lib/time.ts";
 import { ruleSentence, ruleTitle } from "../../web/src/lib/rules.ts";
 import { budgetWords, meterLine, moneyWords, SETTINGS_WORDS, spentWords } from "../../web/src/lib/usage.ts";
-import { askPlain } from "../../web/src/lib/asks.ts";
+import { askPlain, connectorLabels } from "../../web/src/lib/asks.ts";
 import { handoffTerms, handoffTitle } from "../../web/src/lib/grants.ts";
 import { primaryNow, needsFirst, type NowInput } from "../../web/src/lib/now.ts";
 import { groupConversations, timeMarks } from "../../web/src/lib/chats.ts";
@@ -564,6 +564,19 @@ const askVectors = {
       [{ connector: "drive", tool: "upload", args: { name: "notes.md" } }, "  "],
     ] as [{ connector: string; tool: string; args: Record<string, unknown> }, string | null][]
   ).map(([ask, label]) => ({ ask, label, words: askPlain(ask, label) })),
+  // Its service by the connector's own name, from the node's list (GET /api/connectors, read once and kept): each id's
+  // label as written, a blank one none; one not in the list, its id with a capital (lib/asks.ts connectorLabels).
+  listed: (() => {
+    const connectors = [{ id: "github", label: "GitHub" }, { id: "forge", label: "  " }, { id: "ha", label: " Home Assistant " }];
+    const labels = connectorLabels(connectors);
+    const asks = [
+      { connector: "github", tool: "merge", args: {} },
+      { connector: "forge", tool: "post", args: { text: "Hi" } },
+      { connector: "ha", tool: "call_service", args: { name: "Kitchen lights" } },
+      { connector: "s3", tool: "bucket.delete", args: {} },
+    ];
+    return { connectors, labels: Object.fromEntries(labels), asks: asks.map((ask) => ({ ask, words: askPlain(ask, labels.get(ask.connector)) })) };
+  })(),
 };
 
 const permissions = {

@@ -4,7 +4,7 @@ import { setWorkOpen, workOpen } from "../prefs.ts";
 import { arrive, button, count, setCount, skeletonRows } from "../ui/controls.ts";
 import { arrowsThrough, h, keepPlace, replace } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
-import { needsItems, needsVersion } from "./needs.ts";
+import { knownLabels, needsItems, needsVersion } from "./needs.ts";
 import { editAgent, giveToAgents } from "./team-forms.ts";
 import { askProjects, failedNote, foldLine, projectTile, rowsVersion, workNow, workRow, workSources } from "./work-rows.ts";
 
@@ -124,7 +124,7 @@ export const homeView: View = (root, ctx, { scope }) => {
     body.hidden = false;
   }
 
-  for (const source of [...workSources(ctx), ctx.live.inboxCount, ctx.live.inboxLoaded, ctx.live.pairings, ctx.live.secretRequests, ctx.live.questions, ctx.live.notices, ctx.live.loopDrafts, ctx.live.connectorRequests, ctx.live.aboutYou, ctx.live.screenSessions, ctx.live.fleet, ctx.live.teamProblem] as { subscribe(listener: () => void): () => void }[]) scope.add(source.subscribe(() => draw()));
+  for (const source of [...workSources(ctx), knownLabels, ctx.live.inboxCount, ctx.live.inboxLoaded, ctx.live.pairings, ctx.live.secretRequests, ctx.live.questions, ctx.live.notices, ctx.live.loopDrafts, ctx.live.connectorRequests, ctx.live.aboutYou, ctx.live.screenSessions, ctx.live.fleet, ctx.live.teamProblem] as { subscribe(listener: () => void): () => void }[]) scope.add(source.subscribe(() => draw()));
   // "4m" moves on: drawn again each minute (only what changed is).
   scope.interval(() => draw(), 60_000);
   draw();

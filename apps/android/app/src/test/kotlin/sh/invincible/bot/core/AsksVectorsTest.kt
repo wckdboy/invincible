@@ -16,4 +16,16 @@ class AsksVectorsTest {
             assertEquals(c.text(), c["words"].string, Asks.plain(ask["connector"].string!!, ask["tool"].string!!, ask["args"], c["label"].string))
         }
     }
+
+    /** Its service by the connector's own name, from the node's list (GET /api/connectors), as the PWA keeps them. */
+    @Test fun eachConnectorsOwnNameIsKeptAsThePwaKeepsIt() {
+        val listed = v["asks"]["listed"]
+        val labels = Asks.labels(listed["connectors"].list)
+        assertEquals((listed["labels"] as Json.Obj).fields.mapValues { it.value.string }, labels)
+        for (c in listed["asks"].list) {
+            val ask = c["ask"]
+            val id = ask["connector"].string!!
+            assertEquals(id, c["words"].string, Asks.plain(id, ask["tool"].string!!, ask["args"], labels[id]))
+        }
+    }
 }
