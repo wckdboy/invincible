@@ -47,6 +47,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import sh.invincible.bot.app.AppModel
+import sh.invincible.bot.core.Primary
+import sh.invincible.bot.core.Roster
 import sh.invincible.bot.core.Work
 import sh.invincible.bot.core.get
 import sh.invincible.bot.core.string
@@ -89,9 +91,21 @@ fun Root(app: AppModel) {
                 if (o.ship) app.shipAsked.value = o.address.removePrefix("task:")
                 nav.open(o.address)
             }
+            // (No Needs you screen, the lead's defaults of 28 November 2026.) An approval, from its Approve… or a link to it,
+            // opens in the chat it waits in, its card at once; anything else that waits on you, in your agent's chat with
+            // every ask at once (and an approval not read yet there too, among them).
             o.address == "inbox" -> {
                 app.approvalAsked.value = o.approval
-                nav.open("inbox")
+                val agents = app.table.value.snapshot?.agents?.map { it.id } ?: emptyList()
+                val by = o.approval?.let { id -> app.inbox.value.actions.firstOrNull { it["id"].string == id }?.get("by").string }
+                val chat = by?.let { Roster.chatOf(it, agents) }
+                nav.open(
+                    when {
+                        chat == null -> "inbox"
+                        chat == Primary.HANDLE -> "chat"
+                        else -> Nav.agent(chat)
+                    },
+                )
             }
             o.address == "settings" -> nav.open("settings")
             else -> nav.open(Nav.ROOT)
@@ -190,7 +204,8 @@ private fun Page(app: AppModel, nav: Nav, address: String, wide: Boolean, roomy:
         "agent" -> AgentScreen(app, rest, back = back, openTask = { nav.go(Nav.task(it)) }, go = { nav.go(it) })
         "room" -> RoomScreen(app, rest, back = back, openTask = { nav.go(Nav.task(it)) })
         "agents" -> AgentsScreen(app, back = back, openChat = { app.chat.fresh(); nav.go("chat") }, openAgent = { nav.go(Nav.agent(it)) }, openRoom = { nav.go(Nav.room(it)) })
-        "inbox" -> InboxScreen(app, watch = { nav.go("mac:$it") }, back = back, openTask = { nav.go(Nav.task(it)) }, openConnectors = { nav.go("connectors") })
+        // (What Needs you was: your agent's chat, every ask at once over it.)
+        "inbox" -> ChatScreen(app, back = back, roster = null, root = false, openTask = { nav.go(Nav.task(it)) }, give = give, go = { nav.go(it) }, waiting = true)
         "search" -> SearchScreen(app, nav, back = back)
         // (Its list at "settings"; each of its pages one tap deep, at "settings:<page>".)
         "settings" -> SettingsScreen(app, page = rest.ifEmpty { null }, open = { nav.go("settings:$it") }, openKeys = { nav.go("keys") }, openConnectors = { nav.go("connectors") }, back = back)

@@ -54,27 +54,6 @@ import sh.invincible.bot.core.text
 import sh.invincible.bot.core.Primary
 
 /**
- * What needs you, every one, as the iPhone's Needs you and the web's have it (I10's list, Home's own rows in full): each
- * decision with its one answer in place, the rest a long press away, the whole of it a tap (its card, in a sheet, or its
- * task); then what was noticed for you, news counted nowhere (NeedsYou, with `page`). Each answer goes to the node at once,
- * signed by this phone's key; nothing here is answered for you. [watch]: a Mac it is using, by its node.
- */
-@Composable
-fun InboxScreen(app: AppModel, watch: (node: String) -> Unit, back: () -> Unit, openTask: (String) -> Unit, openConnectors: () -> Unit = {}) {
-    val work = rememberWork(app)
-    // An approval opened from its notification's Approve…: its card opens at once (NeedsYou), and is forgotten here after.
-    DisposableEffect(Unit) { onDispose { app.approvalAsked.value = null } }
-    Column(Modifier.fillMaxSize()) {
-        PageBar("Needs you", back)
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            if (work == null) Text("Asking your node…", style = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(Space.margin))
-            else NeedsYou(app, work, openTask = openTask, openAll = {}, watch = watch, openConnectors = openConnectors, page = true)
-            Spacer(Modifier.height(Space.s10))
-        }
-    }
-}
-
-/**
  * A loop it drafted when you asked for one in a chat (the web's loopDraftCard): what it is, when it runs and where, what
  * it runs and what else wakes it (Loops, the web's words), why, and whether it replaces one of yours; then Add loop or
  * Dismiss. It runs nothing until you add it.

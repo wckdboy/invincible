@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +42,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -132,18 +134,22 @@ fun ComposerField(value: String, onValueChange: (String) -> Unit, placeholder: S
     )
 }
 
-/** A disc in the box (Send, Stop): in the ink while it can be pressed (the one filled thing then), quiet otherwise; the same size either way, so nothing moves. */
+/** A disc in the box (Send, Stop): in the ink while it can be pressed (the one filled thing then), quiet otherwise; the
+ * same size either way, so nothing moves. [onLongClick]: what a long press does (Send held while it works: queue), offered
+ * to a screen reader as an action of its own ([longLabel]). */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun ComposerDisc(icon: ImageVector, label: String, ready: Boolean, onClick: () -> Unit) {
+fun ComposerDisc(icon: ImageVector, label: String, ready: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)? = null, longLabel: String? = null) {
     val brand = LocalBrand.current
     Box(
         Modifier
             .sizeIn(minWidth = Space.touch, minHeight = Space.touch)
             .clip(CircleShape)
-            .clickable(enabled = ready, onClick = onClick)
+            .combinedClickable(enabled = ready, onClick = onClick, onLongClick = onLongClick)
             .semantics(mergeDescendants = true) {
                 role = Role.Button
                 contentDescription = label
+                if (onLongClick != null && longLabel != null) customActions = listOf(androidx.compose.ui.semantics.CustomAccessibilityAction(longLabel) { onLongClick(); true })
             },
         contentAlignment = Alignment.Center,
     ) {

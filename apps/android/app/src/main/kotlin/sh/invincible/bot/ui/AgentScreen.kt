@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.Icon
 import androidx.compose.ui.draw.clip
@@ -57,6 +58,7 @@ import sh.invincible.bot.core.NodeError
 import sh.invincible.bot.core.Roster
 import sh.invincible.bot.core.Steps
 import sh.invincible.bot.core.TeamTask
+import sh.invincible.bot.core.TaskWords
 import sh.invincible.bot.core.bool
 import sh.invincible.bot.core.get
 import sh.invincible.bot.core.int
@@ -111,12 +113,12 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
         barTitle = {
             val line = row?.let { Roster.besideChip(it.line, it.state) }?.takeIf { it.isNotBlank() } ?: person?.role
             ChatPill(person?.name ?: id, line = listOfNotNull(row?.state?.words, line).joinToString(", "), open = { about = true }) {
-                AgentMarkView(id, person?.avatar ?: row?.avatar, 24.dp, state = AgentMark.state(row?.state), live = true, knock = table.knocks[id] ?: 0)
+                AgentMarkView(id, person?.avatar ?: row?.avatar, 24.dp, state = AgentMark.state(row?.state), live = true, knock = table.knocks[id] ?: 0, dot = false)
             }
         },
         barAlways = true,
-        // What it asks of you, answered in its own chat: its approvals, the first in place, and how many more.
-        needs = { rememberWork(app)?.let { work -> NeedsYou(app, work, openTask = openTask, openAll = { go("inbox") }, watch = { go("mac:$it") }, openConnectors = { go("connectors") }, chat = id) } },
+        // What it asks of you, answered in its own chat: each approval a message in the flow, its answers under it.
+        needs = { rememberWork(app)?.let { work -> NeedsYou(app, work, openTask = openTask, openAll = { go("chat") }, watch = { go("mac:$it") }, openConnectors = { go("connectors") }, chat = id, flow = true) } },
         // Its VM, in its menu, as the iPhone offers it: one without a desktop says so (the node's refusal) and how to get one.
         actions = {
             if (sandbox != null && app.can("sandbox")) {
@@ -273,8 +275,9 @@ private fun Timeline(
                 if (i in marks) TimeMark(times.mark(e.at, minute * 60_000))
                 if (e.task != null) TaskCard(app, e.task, openTask) else Said(e, face = { SpeakerFace(e.speakerId, agents) }, named = assignee == null)
             }
+            // What it asks of you: in the flow after its words, never pinned over the box.
+            needs?.let { asks -> item(key = "asks") { asks() } }
         }
-        needs?.invoke()
         Composer(
             placeholder = placeholder,
             asTask = if (assignee != null) "Give it as a task" else null,
@@ -333,34 +336,36 @@ private fun SpeakerFace(id: String?, agents: List<sh.invincible.bot.core.Agent>)
 }
 
 /**
- * A task as it stands: its title, its state in a word, its latest line; once done, its proof in one line instead
- * (Steps.proofLine, the PWA's: "Proven · 1 of 1 gate passed ›"). Where it offers you something (a proposal's yes or no,
- * verified work to ship, ended work to resume) it is a card with its answer in place, the timeline's action card (the
- * owner's word, 27 November 2026); otherwise a quiet row that opens its thread, Stop under its "…".
+ * A task as a chat's compact row (I10's phone-gaps, the lead's word of 28 November 2026): its title and one grey word for
+ * where it stands (TaskWords.word: working, waiting, done, failed, stopped); a tap opens its thread, where its proof, Stop,
+ * Ship it, Resume and Give again are. A proposal waits on your yes: an ask, its answers in place (Approve, Decline).
  */
 @Composable
 private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
-    val scope = rememberCoroutineScope()
     val status = t["status"].string ?: ""
-    val verified = t["verified"].bool == true
-    val state = when (status) {
-        "running" -> AgentState.WORKING
-        "proposed" -> AgentState.NEEDS
-        "failed" -> AgentState.FAILED
-        "queued" -> AgentState.QUEUED
-        "done" -> if (verified) AgentState.VERIFIED else null
-        else -> null
+    val title = t["title"].string ?: ""
+    val brand = LocalBrand.current
+    if (status != "proposed") {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { t["id"].string?.let(openTask) }
+                .semantics(mergeDescendants = true) { role = Role.Button }
+                .heightIn(min = Space.touch)
+                .padding(horizontal = Space.margin, vertical = Space.s1),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.s2),
+        ) {
+            Text(title, style = Type.body, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            Text(TaskWords.word(status), style = Type.meta, color = brand.quiet)
+        }
+        return
     }
-    // Once it has ended, its verdict as its proof allows (never "Verified" where its gates proved nothing).
-    val said = remember(t) { TeamTask.of(t).let { Steps.verdict(it.status, it.verified, it.error, it.record, Steps.facts(it.record)) } }
-    val word = said?.word ?: when (status) {
-        "done" -> "Done"
-        "proposed" -> "Proposed"
-        "stopped" -> "Stopped"
-        "interrupted" -> "Interrupted"
-        else -> state?.words
-    }
-    val shipped = t["shipped"]
+    // A proposal waits on your yes: an ask, as it would ask it, in a bubble beside whoever proposed it (its own agent, or
+    // another, your agent among them), its answers under it; a tap on it opens its thread.
+    val scope = rememberCoroutineScope()
+    val table by app.table.collectAsState()
+    val agents = table.snapshot?.agents ?: emptyList()
     var problem by remember { mutableStateOf<String?>(null) }
     fun control(action: String) = scope.launch {
         try {
@@ -371,113 +376,25 @@ private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
             problem = e.message
         }
     }
-    val ships = status == "done" && verified && t["changes"] != null && t["fix"] == null && shipped == null
-    // (Done: its proof in one line, said once, in its verdict's ink, the row a tap from the whole of it.)
-    val proof = remember(t) { if (status == "done") Steps.proofLine(TeamTask.of(t)) else null }
-    val offers = status == "proposed" || ships || status == "failed" || status == "stopped" || status == "interrupted"
-    val brand = LocalBrand.current
-    val ink = when {
-        said == null -> state?.tone?.let(brand::of) ?: MaterialTheme.colorScheme.onSurfaceVariant
-        said.verdict == Steps.Verdict.PROVEN -> brand.ink
-        said.verdict.wrong -> brand.danger
-        else -> brand.quiet
-    }
-    if (!offers) {
-        var more by remember { mutableStateOf(false) }
-        val title = t["title"].string ?: ""
-        val progress = t["progress"].string?.takeIf { it.isNotBlank() }
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(MaterialTheme.shapes.medium)
-                .clickable { t["id"].string?.let(openTask) }
-                .semantics(mergeDescendants = true) { role = Role.Button }
-                .padding(start = Space.s2, top = Space.s2, bottom = Space.s2),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-                    Text(title, style = Type.rowTitle.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                    if (proof == null) word?.let { w -> Text(w, style = MaterialTheme.typography.labelMedium, color = ink) }
-                }
-                if (proof != null) {
-                    Text("$proof ›", style = Type.meta, color = ink, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                } else {
-                    progress?.let {
-                        Text(it.lineSequence().first(), style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                    }
-                }
+    val assignee = t["assignee"].string
+    val by = t["proposedBy"].string?.takeIf { it != assignee && it != "owner" && it != "you" }
+    val name = agents.firstOrNull { it.id == assignee }?.name ?: assignee ?: "it"
+    val goal = t["goal"].string?.lineSequence()?.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() && it != title }
+    TheirBubble(
+        face = { SpeakerFace(by ?: assignee, agents) },
+        below = {
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s2), verticalArrangement = Arrangement.spacedBy(Space.s1)) {
+                AnswerPill("Approve", { control("approve") })
+                TextButton(onClick = { control("stop") }) { Text("Decline") }
             }
-            if (status == "queued" || status == "running") {
-                // (Its "…" beside its title: where a line of its latest step is under the title, centred on the whole row
-                // it sat between the two, a line above the step once the title scrolled under the bar.)
-                androidx.compose.foundation.layout.Box(if (progress != null) Modifier.align(Alignment.Top).offset(y = (-12).dp) else Modifier) {
-                    androidx.compose.material3.IconButton(onClick = { more = true }) { Icon(MoreIcon, contentDescription = "More for $title") }
-                    androidx.compose.material3.DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
-                        androidx.compose.material3.DropdownMenuItem(text = { Text("Stop", color = brand.failed) }, onClick = { more = false; control("stop") })
-                    }
-                }
-            }
-        }
-        problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = brand.failed, modifier = Modifier.padding(horizontal = Space.s2)) }
-        return
-    }
-    // Each task a line shorter (I10's 16dae258, as the web's): its title and how it stands on one line; who gave or
-    // proposed it, muted; its latest step, or how it ended and what it kept; its answers each a tap under it. The row
-    // opens its thread.
-    val ended = status == "failed" || status == "stopped" || status == "interrupted"
-    // (Work to ship says its proof, and what it kept.)
-    val line = if (ships && proof != null) TaskLine(listOfNotNull(proof, t["changes"]["files"].int?.let { "$it file${if (it == 1) "" else "s"} kept" }).joinToString(" · "), false)
-    else taskLine(status, word, t["error"].string, t["progress"].string, t["changes"]["files"].int)
-    val task = remember(t) { sh.invincible.bot.core.TeamTask.of(t) }
-    fun who(id: String): String = when (id) { "primary" -> Primary.name; "owner", "you" -> "you"; else -> id }
-    val by = task.proposedBy?.let { "Proposed by ${who(it)}" } ?: task.givenBy?.let { "Given by ${who(it)}" }
-    val title = t["title"].string ?: ""
-    var shipping by remember { mutableStateOf(false) }
-    var again by remember { mutableStateOf(false) }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.medium)
-            .clickable { t["id"].string?.let(openTask) }
-            .padding(start = Space.s2, top = Space.s2, bottom = Space.s1),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+            problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = brand.failed) }
+        },
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-            Text(title, style = Type.rowTitle.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-            if (!(ships && proof != null)) word?.let { w -> Text(w, style = MaterialTheme.typography.labelMedium, color = ink) }
+        Column(Modifier.clickable { t["id"].string?.let(openTask) }.semantics(mergeDescendants = true) { role = Role.Button }, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(if (by != null) "Shall $name start “$title”?" else "Shall I start “$title”?", style = Type.body)
+            goal?.let { Text(it, style = Type.meta, color = brand.quiet, maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
         }
-        by?.let { Text(it, style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
-        line?.let {
-            Text(it.text, style = Type.meta, color = if (it.failed) LocalBrand.current.failed else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-        }
-        val context = androidx.compose.ui.platform.LocalContext.current
-        // Its answers, each a tap.
-        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s2), verticalArrangement = Arrangement.spacedBy(Space.s1), modifier = Modifier.padding(top = Space.s1)) {
-            when {
-                status == "proposed" -> {
-                    AnswerPill("Approve", { control("approve") })
-                    TextButton(onClick = { control("stop") }) { Text("Decline") }
-                }
-                ships -> {
-                    AnswerPill("Ship it…", { shipping = true })
-                    TextButton(onClick = { again = true }) { Text("Give again…") }
-                }
-                ended -> {
-                    AnswerPill("Resume", { control("resume") })
-                    TextButton(onClick = { again = true }) { Text("Give again…") }
-                }
-            }
-            shipped["url"].string?.let { url ->
-                TextButton(onClick = { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) }) {
-                    Text(shipped["pr"].int?.let { "Pull request #$it" } ?: "Its pull request")
-                }
-            }
-        }
-        problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = LocalBrand.current.failed) }
     }
-    if (shipping) ShipDialog(app, t) { shipping = false }
-    if (again) GiveAgainDialog(app, task, opened = openTask) { again = false }
 }
 
 /** A compact task's last line (TaskCard), and whether it is said in red. */
@@ -534,13 +451,14 @@ internal fun ShipDialog(app: AppModel, t: Json, done: () -> Unit) {
 
 /**
  * A box to write in, as your agent's chat's: Grok Bot's pill, growing into the big box as the words wrap, and a round
- * send, or Stop. [asTask] offers the same words as a task instead: a toggle where the pill's + is, its words said to a
- * screen reader, and [taskPlaceholder] in the box while it is on.
+ * send, or Stop. [asTask] offers the same words as a task instead, behind the pill's + (I10's phone-gaps: +, the words,
+ * send): chosen, the + shows it (the task's mark in the ink) and [taskPlaceholder] is in the box.
  */
 @Composable
 fun Composer(placeholder: String, asTask: String?, sending: Boolean, stop: (() -> Unit)? = null, taskPlaceholder: String? = null, onSend: (String, Boolean) -> Unit) {
     var text by remember { mutableStateOf("") }
     var task by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     fun send() {
         if (text.isBlank() || sending) return
@@ -555,9 +473,19 @@ fun Composer(placeholder: String, asTask: String?, sending: Boolean, stop: (() -
             field = { ComposerField(text, { text = it }, if (task && taskPlaceholder != null) taskPlaceholder else placeholder, focus, enter = ::send) },
             leading = {
                 if (asTask != null) {
-                    androidx.compose.material3.IconToggleButton(checked = task, onCheckedChange = { task = it }, modifier = Modifier.semantics { contentDescription = asTask }) {
-                        Box(Modifier.size(32.dp).clip(CircleShape).background(if (task) brand.ink else Color.Transparent), contentAlignment = Alignment.Center) {
-                            Icon(LayersIcon, null, Modifier.size(20.dp), tint = if (task) brand.paper else MaterialTheme.colorScheme.onSurfaceVariant)
+                    Box {
+                        androidx.compose.material3.IconButton(onClick = { menu = true }, modifier = Modifier.semantics { contentDescription = if (task) "$asTask: chosen" else "More ways to send" }) {
+                            Box(Modifier.size(32.dp).clip(CircleShape).background(if (task) brand.ink else Color.Transparent), contentAlignment = Alignment.Center) {
+                                Icon(if (task) LayersIcon else PlusIcon, null, Modifier.size(20.dp), tint = if (task) brand.paper else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(asTask) },
+                                leadingIcon = { Icon(LayersIcon, null) },
+                                trailingIcon = { if (task) Icon(CheckIcon, contentDescription = "Chosen") },
+                                onClick = { menu = false; task = !task },
+                            )
                         }
                     }
                 }

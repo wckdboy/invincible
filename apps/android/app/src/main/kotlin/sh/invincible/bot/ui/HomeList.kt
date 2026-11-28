@@ -46,7 +46,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -66,9 +65,10 @@ import java.time.ZoneId
  * agents, and a settings menu"; I10's page as the lead approved it): a list, as a messaging app's. Its bar: Settings (the
  * gear), "Invincible", and + (a new chat with your agent, or a new agent). Pulled down, a search of agents and chats. Your
  * agent pinned first; then every agent and room by what it last did, the latest first (Roster.homeRows: the PWA's
- * lib/roster.ts homeRows, held to the vectors): its face and how it stands, its name, its latest line, when (as a chat
- * app says it: ListTime), and how much waits on you. A row opens its chat. On a tablet the same list is the sidebar,
- * beside the chat open.
+ * lib/roster.ts homeRows, held to the vectors): its face, its name, its line in plain words (RosterRow.plain), when (as a
+ * chat app says it: ListTime), and an ink dot where something waits on you or is new (I10's phone-gaps, the lead's word of
+ * 28 November 2026: no count, no colour, no state dot; the face breathes while it works and knocks while it waits). A row
+ * opens its chat. On a tablet the same list is the sidebar, beside the chat open.
  */
 
 /**
@@ -125,9 +125,9 @@ fun HomeList(app: AppModel, open: (String) -> Unit, settings: () -> Unit, curren
                         title = chatTitle,
                     ),
                     time = null,
-                    // (What waits on you that is no agent's: an agent's own asks are counted on its row.)
-                    count = table.primaryNeeds,
-                    needs = table.primary.tone == "warn",
+                    // (What waits on you that is no agent's, or an answer of its you haven't read: its dot. An agent's own asks
+                    // mark its own row.)
+                    mark = if (table.primaryNeeds > 0) "Needs you" else if (table.unread.isNotEmpty()) "New" else null,
                     selected = marked == "chat",
                     face = { PrimaryMark(44.dp) },
                 ) {
@@ -139,19 +139,17 @@ fun HomeList(app: AppModel, open: (String) -> Unit, settings: () -> Unit, curren
             items(table.home, key = { it.key }) { row ->
                 HomeRowView(
                     name = row.row.name,
-                    line = row.row.line,
+                    line = row.row.plain,
                     // (None said where none is known: an agent kept on the phone before its making was.)
                     time = row.at.takeIf { it > 0 }?.let { times.of(it, now) },
-                    count = row.count,
-                    needs = row.row.needs,
-                    failed = row.row.state == AgentState.FAILED,
+                    mark = if (row.count > 0 || row.row.needs) "Needs you" else if (row.row.unread) "New" else null,
                     state = row.row.state,
                     selected = marked == (if (row.row.kind == "agent") Nav.agent(row.row.id) else Nav.room(row.row.id)),
                     face = {
                         if (row.row.kind == "agent") {
                             // (Working breathes, by its glow's layer; waiting on you knocks three times as something new waits on
                             // it, by its own layer's turn, then rests: the render thread's alone; the rest are still.)
-                            AgentMarkView(row.row.id, row.row.avatar, 44.dp, state = AgentMark.state(row.row.state), live = true, knock = table.knocks[row.row.id] ?: 0)
+                            AgentMarkView(row.row.id, row.row.avatar, 44.dp, state = AgentMark.state(row.row.state), live = true, knock = table.knocks[row.row.id] ?: 0, dot = false)
                         } else {
                             RoomFace()
                         }
@@ -232,19 +230,18 @@ internal fun RoomFace(size: Dp = 44.dp) {
 }
 
 /**
- * A row, as a messaging app's: its face, its name, its latest line (in ink while it needs you, red once it failed), and at
- * its end when that was, and how much waits on you in an ink capsule. At least 72 dp tall.
+ * A row, as a messaging app's: its face, its name, its line in the quiet ink (never a colour, never bold), and at its end
+ * when that was, and a small ink dot where something waits on you or is new ([mark], its words to a screen reader; never
+ * a number). At least 72 dp tall.
  */
 @Composable
 private fun HomeRowView(
     name: String,
     line: String,
     time: String?,
-    count: Int,
-    needs: Boolean,
+    mark: String?,
     selected: Boolean,
     face: @Composable () -> Unit,
-    failed: Boolean = false,
     state: AgentState? = null,
     onClick: () -> Unit,
 ) {
@@ -256,7 +253,7 @@ private fun HomeRowView(
             .clickable(onClick = onClick)
             .clearAndSetSemantics {
                 role = Role.Button
-                contentDescription = listOfNotNull(name, state?.words, line.takeIf { it.isNotEmpty() }, count.takeIf { it > 0 }?.let { "$it waiting" }, time).distinct().joinToString(", ")
+                contentDescription = listOfNotNull(name, state?.words, line.takeIf { it.isNotEmpty() }, mark, time).distinct().joinToString(", ")
                 if (selected) this.selected = true
             }
             .heightIn(min = 72.dp)
@@ -267,22 +264,13 @@ private fun HomeRowView(
         Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { face() }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(name, style = Type.title.copy(fontSize = 17.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (line.isNotEmpty()) {
-                val tone = when {
-                    failed -> brand.failed
-                    needs -> brand.ink
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                }
-                Text(line, style = Type.body, color = tone, fontWeight = if (needs) FontWeight.SemiBold else null, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+            if (line.isNotEmpty()) Text(line, style = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Column(Modifier.widthIn(min = 28.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(Space.s1)) {
-            if (time != null) Text(time, style = Type.meta, color = brand.quiet, maxLines = 1)
-            if (count > 0) {
-                Box(Modifier.clip(CircleShape).background(brand.ink).heightIn(min = 20.dp).widthIn(min = 20.dp).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
-                    Text("$count", style = Type.word.copy(fontSize = 12.sp), color = brand.onInk)
-                }
-            }
+        Column(Modifier.widthIn(min = 28.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(Space.s2)) {
+            // (Its line kept where no time is said, your agent's pinned row: its dot sits level with every other.)
+            Text(time ?: "", style = Type.meta, color = brand.quiet, maxLines = 1)
+            // (Where it sits whether or not it shows, so a row never moves as its dot comes and goes.)
+            Box(Modifier.size(10.dp).clip(CircleShape).background(if (mark != null) brand.ink else Color.Transparent))
         }
     }
 }

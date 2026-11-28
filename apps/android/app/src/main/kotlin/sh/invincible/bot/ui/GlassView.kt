@@ -69,9 +69,10 @@ import kotlin.math.sqrt
 
 /** An agent's glass: its shape in its ramp, its glow, and its state's dot where its state is known (null: no dot);
  * [live] where it is the one in focus (its agent's own page), which alone breathes. Decorative beside its name; named
- * ([description]) where it stands alone. */
+ * ([description]) where it stands alone. [dot]: false where a phone's list or a chat's pill shows it (phone-gaps: the
+ * face alone, its state in how it moves; the row's ink dot says what waits on you). */
 @Composable
-fun GlassMark(glass: Glass, size: Dp, state: Glass.State? = null, description: String? = null, live: Boolean = false, knock: Knock? = null) {
+fun GlassMark(glass: Glass, size: Dp, state: Glass.State? = null, description: String? = null, live: Boolean = false, knock: Knock? = null, dot: Boolean = true) {
     val dark = LocalBrand.current.paper.luminance() < 0.5f
     val box = with(LocalDensity.current) { size.roundToPx() }
     val picture = remember(glass, size, box, dark) { GlassPictures.picture(glass.shape, glass.color, size.value, box, dark) }
@@ -79,6 +80,8 @@ fun GlassMark(glass: Glass, size: Dp, state: Glass.State? = null, description: S
     val breath = breathing(glassBreathes(state, live, motion))
     val nudges = glassNudges(state, live, motion)
     val nudge = nudging(knock, nudges)
+    // (Its state still moves it; it is drawn as a dot only where one is asked for.)
+    val dotted = if (dot) state else null
     val named = if (description != null) Modifier.clearAndSetSemantics { contentDescription = description } else Modifier.clearAndSetSemantics { }
     val ramp = Glass.RAMPS[glass.color]
     // (Only a glass that may nudge has a layer of its own to turn.)
@@ -96,10 +99,10 @@ fun GlassMark(glass: Glass, size: Dp, state: Glass.State? = null, description: S
                 },
             ) {
                 val box = this.size.minDimension / (1 + 2 * GLOW_PAD)
-                translate(GLOW_PAD * box, GLOW_PAD * box) { drawGlow(ramp, size.value, dark, state, box) }
+                translate(GLOW_PAD * box, GLOW_PAD * box) { drawGlow(ramp, size.value, dark, dotted, box) }
             }
         }
-        Canvas(Modifier.matchParentSize()) { drawPicture(picture, size.value, dark, state, this.size.minDimension) }
+        Canvas(Modifier.matchParentSize()) { drawPicture(picture, size.value, dark, dotted, this.size.minDimension) }
     }
 }
 

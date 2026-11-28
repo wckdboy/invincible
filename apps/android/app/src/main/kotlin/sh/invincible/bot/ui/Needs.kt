@@ -85,7 +85,7 @@ private class Decision(val key: String, val lead: Lead, val who: String, val wha
  * and opens at once the approval its notification's Approve… asked to see (as the iPhone's Needs you does).
  */
 @Composable
-fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (String) -> Unit, openAll: () -> Unit, watch: (String) -> Unit, openConnectors: () -> Unit = {}, page: Boolean = false, chat: String? = null) {
+fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (String) -> Unit, openAll: () -> Unit, watch: (String) -> Unit, openConnectors: () -> Unit = {}, page: Boolean = false, chat: String? = null, flow: Boolean = false) {
     val inbox by app.inbox.collectAsState()
     val table by app.table.collectAsState()
     val count by app.needsYou.collectAsState()
@@ -229,10 +229,14 @@ fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (Stri
             val see = { sheet = "A fact about you" to @Composable { Fact(f, keep = { words -> act(key) { app.keepFact(id, words) }; sheet = null }, drop = { act(key) { app.dropFact(id) }; sheet = null }) } }
             news += Decision(key, Lead.Icon(EditIcon), "${Primary.name} noticed about you", (f["text"].string ?: "").lineSequence().first(), answer = Answer("Keep") { act(key) { app.keepFact(id) } }, rest = listOf(Answer("Drop", danger = true) { act(key) { app.dropFact(id) } }, Answer("In my words", onClick = see)), open = see)
         }
-        // An approval its notification's Approve… asked to see: its card at once, the whole request in front of you.
+    }
+    // An approval its notification's Approve… (or a link to it) asked to see: its card at once, the whole request in front
+    // of you, in the chat it waits in ([flow]) or among them all ([page]).
+    if (page || flow) {
         val asked by app.approvalAsked.collectAsState()
         LaunchedEffect(asked, waiting) {
             val a = asked?.let { id -> waiting.firstOrNull { it["id"].string == id } } ?: return@LaunchedEffect
+            if (flow && chatOf(a) != chat) return@LaunchedEffect
             app.approvalAsked.value = null
             card(a)
         }
@@ -243,6 +247,13 @@ fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (Stri
     // there, its first answered in place, and how many more (the Inbox has them all); in your agent's, where nothing waits,
     // what was noticed for you, a tap from reading it.
     val here = if (chat != null) decisions.filter { it.chat == chat } else decisions
+    // In a chat's flow (the phone pass, I10's phone-gaps, the lead's defaults of 28 November 2026): each ask that waits
+    // there a message of its own, its answers under it, a tap the whole of it; nothing pinned over the box, no count, and
+    // every ask at once behind ••• in your agent's chat.
+    if (flow) Column(Modifier.fillMaxWidth()) {
+        said?.let { Text(it, style = Type.meta, color = brand.danger, modifier = Modifier.padding(horizontal = Space.margin, vertical = Space.s1)) }
+        for (d in here) key(d.key) { AskMessage(d, d.key in busy) }
+    } else {
     val noticed = if (chat == Primary.HANDLE) inbox.notices.size + inbox.facts.size else 0
     if (chat != null && here.isEmpty() && noticed == 0) return
     if (!page && chat == null && decisions.isEmpty()) return
@@ -273,9 +284,8 @@ fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (Stri
         if (page) {
             said?.let { Text(it, style = Type.meta, color = brand.danger, modifier = Modifier.padding(horizontal = Space.margin)) }
             if (decisions.isEmpty() && news.isEmpty()) Text("Nothing needs you.", style = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(Space.margin))
-            // (Decisions: the page is called Needs you already.)
+            // (No head, nor a count: the sheet's title, Waiting on you, says what these are.)
             if (decisions.isNotEmpty()) {
-                SectionHead("Decisions", count.takeIf { it > 0 } ?: decisions.size, tone = brand.needs)
                 Rows(decisions, busy)
                 Hairline(inset = Space.margin)
                 PageNote("Nothing leaves until you approve it. Unanswered, it's a no.")
@@ -309,6 +319,7 @@ fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (Stri
         }
         Hairline(inset = Space.margin)
     }
+    }
     confirming?.let { a ->
         AlertDialog(
             onDismissRequest = { confirming = null },
@@ -324,6 +335,41 @@ fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (Stri
                 Text(title, style = Type.title, modifier = Modifier.padding(horizontal = Space.margin, vertical = Space.s2).semantics { heading() }, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 body()
             }
+        }
+    }
+}
+
+/**
+ * An ask in its chat's flow, as Grok Bot's (I10's phone-gaps): a message of its own beside who asks (its agent's face; your
+ * agent's I-beam for what is no agent's), who and what in a quiet grey bubble (a tap opens the whole of it), and its
+ * answers under it, each a tap: its one answer as a grey pill, the rest in words (Deny in red).
+ */
+@Composable
+private fun AskMessage(d: Decision, busy: Boolean) {
+    val brand = LocalBrand.current
+    TheirBubble(
+        face = {
+            when (val lead = d.lead) {
+                is Lead.Agent -> AgentMarkView(lead.row.agent, lead.row.avatar, 28.dp, dot = false)
+                is Lead.Icon -> PrimaryMark(28.dp)
+            }
+        },
+        below = {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s2), verticalArrangement = Arrangement.spacedBy(Space.s1)) {
+                d.answer?.let { a -> AnswerPill(a.label, a.onClick, enabled = !busy) }
+                for (r in d.rest) TextButton(onClick = r.onClick, enabled = !busy) { Text(r.label, color = if (r.danger) brand.danger else brand.ink) }
+            }
+        },
+    ) {
+        Column(Modifier.clickable(onClick = d.open).semantics(mergeDescendants = true) { role = androidx.compose.ui.semantics.Role.Button }, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(d.who, style = Type.meta, color = brand.quiet, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                androidx.compose.ui.text.buildAnnotatedString {
+                    d.code?.let { withStyle(androidx.compose.ui.text.SpanStyle(fontFamily = Type.mono.fontFamily)) { append(it) }; if (d.what.isNotEmpty()) append(" · ") }
+                    append(d.what)
+                },
+                style = Type.body,
+            )
         }
     }
 }

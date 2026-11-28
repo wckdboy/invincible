@@ -6,6 +6,11 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -60,12 +65,15 @@ import sh.invincible.bot.core.Primary
 import androidx.compose.ui.text.withStyle
 
 /**
- * The primary's chat: its face and what it's doing at the top, the conversation, and a box to write in. Its answer comes in
- * as it writes it, with the steps it takes on the way under it; Stop asks the node to stop it, and leaving never does.
- * A fresh chat opens with what happened while you were away, from the node's own record (no model writes it).
+ * The primary's chat, as Grok Bot's (I10's phone-gaps, the lead's defaults of 28 November 2026): its bar, the conversation,
+ * and the pill to write in, with nothing pinned between them. Its answer comes in as it writes it, the step it is at one
+ * muted line under it; what waits on you here is a message of its own with its answers; what it gave its agents from here,
+ * a row each; what you queued, a line. Send steers while it works, a long press on it queues, and with nothing written
+ * Stop stands in its place. A fresh chat opens with what happened while you were away, from the node's own record (no
+ * model writes it). [waiting]: it opens with every ask at once (••• › Waiting on you), as a link to them does.
  */
 @Composable
-fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, root: Boolean = false, openTask: (String) -> Unit = {}, give: (() -> Unit)? = null, go: (String) -> Unit = {}) {
+fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, root: Boolean = false, openTask: (String) -> Unit = {}, give: (() -> Unit)? = null, go: (String) -> Unit = {}, waiting: Boolean = false) {
     val chat = app.chat
     val bubbles by chat.bubbles.collectAsState()
     val live by chat.live.collectAsState()
@@ -76,6 +84,18 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
     val problem by chat.problem.collectAsState()
     val table by app.table.collectAsState()
     var listing by remember { mutableStateOf(false) }
+    // Every ask at once (••• › Waiting on you, or a link to them), and what you queued behind the chat (••• › Queued
+    // messages, or its line in the flow), each in a sheet over the chat.
+    var waitingShown by rememberSaveable { mutableStateOf(waiting) }
+    var queueShown by remember { mutableStateOf(false) }
+    val queue by chat.queue.collectAsState()
+    val held by chat.held.collectAsState()
+    val steering by chat.steering.collectAsState()
+    val notice by chat.notice.collectAsState()
+    val aside by chat.aside.collectAsState()
+    var underwayAsked by remember { mutableStateOf(0) }
+    val underway = rememberUnderway(app, live, underwayAsked)
+    val scope = rememberCoroutineScope()
     var away by remember { mutableStateOf<List<Json>>(emptyList()) }
     // A suggestion pressed: handed to the message box (counted, so the same one pressed again is handed again).
     var offered by remember { mutableStateOf<Pair<Int, String>?>(null) }
@@ -91,6 +111,9 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
     // Its answer is followed as it comes, unless you've scrolled up to read: then it stays where you are.
     val following = remember { androidx.compose.runtime.derivedStateOf { !list.canScrollForward || list.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it >= list.layoutInfo.totalItemsCount - 2 } == true } }
     LaunchedEffect(bubbles.size) { if (bubbles.isNotEmpty()) list.toEnd() }
+    // (What comes after the words, an ask or a row of work, is followed as they are: read from the list's own count, so a
+    // scroll redraws nothing here.)
+    LaunchedEffect(list) { androidx.compose.runtime.snapshotFlow { list.layoutInfo.totalItemsCount }.collect { if (it > 0 && following.value) list.toEnd() } }
     LaunchedEffect(bubbles.lastOrNull()?.text?.length) { if (bubbles.isNotEmpty() && following.value) list.toEnd() }
     // (A block is drawn only once its fence closes, after the last words came: the end moves once more as it finishes.)
     LaunchedEffect(live) { if (!live && bubbles.isNotEmpty() && following.value) list.toEnd() }
@@ -134,6 +157,9 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
                 androidx.compose.material3.DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
                     androidx.compose.material3.DropdownMenuItem(text = { Text("New chat") }, enabled = !live, onClick = { options = false; chat.fresh() })
                     androidx.compose.material3.DropdownMenuItem(text = { Text("All chats") }, onClick = { options = false; listing = true })
+                    // (No Needs you screen: each ask is in its own chat, and here every one at once.)
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Waiting on you") }, onClick = { options = false; waitingShown = true })
+                    if (queue.isNotEmpty()) androidx.compose.material3.DropdownMenuItem(text = { Text("Queued messages") }, onClick = { options = false; queueShown = true })
                     if (computer != null && app.can("sandbox")) {
                         androidx.compose.material3.DropdownMenuItem(text = { Text("Its screen") }, onClick = { options = false; watching = true })
                         androidx.compose.material3.DropdownMenuItem(text = { Text("Its terminal") }, onClick = { options = false; inTerminal = true })
@@ -183,24 +209,132 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
                 if (i in marks) b.at?.let { TimeMark(times.mark(it, minute * 60_000)) }
                 Message(b, if (i == bubbles.lastIndex && !live) { choice -> chat.send(choice) } else null)
             }
+            // Your words on their way into its turn (a steer): your bubbles, as they went, until it takes them.
+            items(steering) { words -> MyBubble(words, pending = true) }
+            // What waits on you here that is no agent's (a device asking to join, a key, a service's question, a loop it
+            // drafted, a connector asked for, an approval no agent of yours asked for): each a message, its answers under it.
+            item(key = "asks") { rememberWork(app)?.let { work -> NeedsYou(app, work, openTask = openTask, openAll = { waitingShown = true }, watch = { go("mac:$it") }, openConnectors = { go("connectors") }, chat = Primary.HANDLE, flow = true) } }
+            // What is under way from here: each task it gave an agent, a row and a word (a tap opens it, Stop is there); each
+            // look it set itself, a line with Cancel.
+            items(underway.tasks, key = { "u:${it.id}" }) { task -> UnderwayRow(task, table.rows.firstOrNull { it.kind == "agent" && it.id == task.assignee }?.avatar, openTask) }
+            items(underway.looks, key = { "l:${it.id}" }) { look ->
+                LookLine(look) { scope.launch { runCatching { app.client?.post("/api/looks/cancel", Json.obj("id" to look.id)) }; underwayAsked++ } }
+            }
+            // What you queued behind the chat, in a line a tap from it; what became of something you sent.
+            if (queue.isNotEmpty()) item(key = "queued") { QueueLine(queue.size, held, live) { queueShown = true } }
+            notice?.let { (title, detail) -> item(key = "notice") { NoticeLine(title, detail, chat::dismissNotice) } }
             problem?.let { p -> item { Problem(p) } }
         }
-        // What waits on you that is no agent's (a device asking to join, a key, a service's question, a loop it drafted, a
-        // connector asked for, an approval no agent of yours asked for): its first answered here, and how many more.
-        rememberWork(app)?.let { work -> NeedsYou(app, work, openTask = openTask, openAll = { go("inbox") }, watch = { go("mac:$it") }, openConnectors = { go("connectors") }, chat = Primary.HANDLE) }
-        // What is under way in this chat: its agents' tasks given here (Stop on each), its looks that wait (Cancel).
-        UnderwayBar(app, live, openTask)
         ChatComposer(app, live, offered = offered)
     }
+    if (waitingShown) WaitingSheet(app, openTask = openTask, go = go) { waitingShown = false }
+    if (queueShown) QueueSheet(app) { queueShown = false }
+    aside?.let { a -> AsideSheet(app, a, working = live) }
 }
 
 /**
- * Above a chat's message box, what is under way there (your word, 24 November 2026, after OpenMausBot's hand-off rows):
- * each task it gave an agent from this chat that hasn't ended, its agent's face and how it stands, opened with a tap and
- * stopped with its own Stop; and each look it set itself here, when it comes and what at, called off with Cancel. Asked
- * of the node every few seconds while a task is under way or it is answering, just after a look of its comes due (so it
- * goes from here as it takes it), else every half minute.
+ * What is under way in a chat (your word, 24 November 2026, after OpenMausBot's hand-off rows; in the flow since the phone
+ * pass): each task it gave an agent from this chat that hasn't ended, and each look it set itself here. Asked as the chat
+ * opens and as the live stream says the team or the chats moved ([asked]: bumped to ask again, a look called off); on its
+ * own time while the stream is down.
  */
+@Composable
+private fun rememberUnderway(app: AppModel, live: Boolean, asked: Int): Underway {
+    val conversation by app.chat.conversation.collectAsState()
+    val online by app.online.collectAsState()
+    var shown by remember { mutableStateOf(Underway()) }
+    suspend fun ask(): Boolean {
+        val id = conversation ?: return false
+        val got = runCatching { app.client?.post("/api/conversations/underway", Json.obj("id" to id)) }.getOrNull() ?: return false
+        shown = Underway.of(got)
+        return true
+    }
+    LaunchedEffect(conversation, asked) {
+        if (conversation == null) shown = Underway() else ask()
+    }
+    FollowTopics(app, listOf("team", "turns"), conversation, everyMs = null, gapMs = 2_000) { ask() }
+    LaunchedEffect(conversation, live, online) {
+        if (online != false || conversation == null) return@LaunchedEffect
+        while (true) {
+            delay(UnderwayWords.nextAskMs(shown, live))
+            ask()
+        }
+    }
+    return shown
+}
+
+/** A task it gave an agent from here, as a chat's compact row: the agent's face, the title, one grey word. A tap opens it. */
+@Composable
+private fun UnderwayRow(task: sh.invincible.bot.core.UnderwayTask, avatar: Json?, openTask: (String) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { openTask(task.id) }
+            .semantics(mergeDescendants = true) { role = androidx.compose.ui.semantics.Role.Button }
+            .heightIn(min = Space.touch)
+            .padding(horizontal = Space.margin, vertical = Space.s1),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.s2),
+    ) {
+        AgentMarkView(task.assignee, avatar, 28.dp, description = task.name, dot = false)
+        Text(task.title, style = Type.body, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        Text(sh.invincible.bot.core.TaskWords.word(task.status), style = Type.meta, color = LocalBrand.current.quiet)
+    }
+}
+
+/** A look it set itself here, one muted line: when it comes and what at, and Cancel. */
+@Composable
+private fun LookLine(look: sh.invincible.bot.core.UnderwayLook, cancel: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = Space.margin), horizontalArrangement = Arrangement.spacedBy(Space.s1, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
+        Icon(ClockIcon, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(UnderwayWords.look(look), Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TextButton(onClick = cancel, modifier = Modifier.semantics { contentDescription = "It won't look again then" }) { Text("Cancel") }
+    }
+}
+
+/** What you queued behind the chat, in a muted line: how many; a tap opens them (Send now, Edit, Remove). */
+@Composable
+private fun QueueLine(count: Int, held: String?, live: Boolean, open: () -> Unit) {
+    val brand = LocalBrand.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = open)
+            .semantics(mergeDescendants = true) { role = androidx.compose.ui.semantics.Role.Button }
+            .heightIn(min = Space.touch)
+            .padding(horizontal = Space.margin),
+        horizontalArrangement = Arrangement.spacedBy(Space.s1, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(sh.invincible.bot.core.Composer.queueHead(count, held, live).first, style = Type.meta, color = brand.quiet)
+        Icon(ChevronIcon, null, Modifier.size(14.dp), tint = brand.quiet)
+    }
+}
+
+/** What became of something you sent (it didn't reach it, it was queued instead), one muted line, and OK. */
+@Composable
+private fun NoticeLine(title: String, detail: String, dismiss: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = Space.margin), horizontalArrangement = Arrangement.spacedBy(Space.s1, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
+        Text(listOf(title, detail).filter { it.isNotEmpty() }.joinToString(": "), Modifier.weight(1f, fill = false), style = Type.meta, color = LocalBrand.current.quiet, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        TextButton(onClick = dismiss) { Text("OK") }
+    }
+}
+
+/** Every ask at once, in a sheet over your agent's chat (••• › Waiting on you; a link to them): what Needs you was. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun WaitingSheet(app: AppModel, openTask: (String) -> Unit, go: (String) -> Unit, close: () -> Unit) {
+    // (An approval opened from its notification's Approve…: its card opens at once, and is forgotten here after.)
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { app.approvalAsked.value = null } }
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = close, sheetState = rememberFullSheet(), containerColor = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.fillMaxWidth().verticalScroll(androidx.compose.foundation.rememberScrollState()).navigationBarsPadding().padding(bottom = Space.s4)) {
+            Text("Waiting on you", style = Type.title, modifier = Modifier.padding(horizontal = Space.margin, vertical = Space.s2).semantics { heading() })
+            val work = rememberWork(app)
+            if (work == null) Text("Asking your node…", style = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(Space.margin))
+            else NeedsYou(app, work, openTask = { close(); openTask(it) }, openAll = {}, watch = { close(); go("mac:$it") }, openConnectors = { close(); go("connectors") }, page = true)
+        }
+    }
+}
 /**
  * A phone's way to the roster from the chat it opens on (the iPhone's, as Messages' back counts what is unread): a back
  * arrow, with how many things need you beside it. A swipe from the left edge opens the roster too.
@@ -223,61 +357,6 @@ private fun RosterBack(needs: Int, open: () -> Unit) {
     ) {
         Icon(BackIcon, contentDescription = null)
         if (needs > 0) Text("$needs", style = Type.word)
-    }
-}
-
-@Composable
-private fun UnderwayBar(app: AppModel, live: Boolean, openTask: (String) -> Unit) {
-    val conversation by app.chat.conversation.collectAsState()
-    val table by app.table.collectAsState()
-    val online by app.online.collectAsState()
-    var shown by remember { mutableStateOf(Underway()) }
-    var asked by remember { mutableStateOf(0) }
-    val scope = rememberCoroutineScope()
-    suspend fun ask(): Boolean {
-        val id = conversation ?: return false
-        val got = runCatching { app.client?.post("/api/conversations/underway", Json.obj("id" to id)) }.getOrNull() ?: return false
-        shown = Underway.of(got)
-        return true
-    }
-    // Asked as the chat opens (and when a look is called off here); then as the live stream says the team or the chats
-    // moved (a task moved on, a look set, taken or come due), as the web's under way is: nothing on a timer while the
-    // stream is open.
-    LaunchedEffect(conversation, asked) {
-        if (conversation == null) shown = Underway() else ask()
-    }
-    FollowTopics(app, listOf("team", "turns"), conversation, everyMs = null, gapMs = 2_000) { ask() }
-    // While the stream is down: on its own time, as before there was a stream.
-    LaunchedEffect(conversation, live, online) {
-        if (online != false || conversation == null) return@LaunchedEffect
-        while (true) {
-            delay(UnderwayWords.nextAskMs(shown, live))
-            ask()
-        }
-    }
-    if (shown.isEmpty) return
-    Panel(Modifier.padding(horizontal = Space.margin, vertical = Space.s1).semantics { contentDescription = "Under way in this chat" }) {
-        for (task in shown.tasks) {
-            val row = table.rows.firstOrNull { it.kind == "agent" && it.id == task.assignee }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-                Row(Modifier.weight(1f).clickable { openTask(task.id) }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-                    AgentMarkView(task.assignee, row?.avatar, 28.dp, description = task.name)
-                    Column(Modifier.weight(1f)) {
-                        Text("${task.name} · ${UnderwayWords.state(task)}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(task.title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-                TextButton(onClick = { scope.launch { runCatching { app.client?.post("/api/team/control", Json.obj("task" to task.id, "action" to "stop")) }; asked++ } }, modifier = Modifier.semantics { contentDescription = "Stop ${task.name}'s work on this" }) { Text("Stop") }
-            }
-        }
-        for (look in shown.looks) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-                // In the column the agents' faces take (28 dp), as the iPhone's and the web's rows have it.
-                Icon(ClockIcon, null, Modifier.padding(horizontal = 4.dp).size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(UnderwayWords.look(look), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick = { scope.launch { runCatching { app.client?.post("/api/looks/cancel", Json.obj("id" to look.id)) }; asked++ } }, modifier = Modifier.semantics { contentDescription = "It won't look again then" }) { Text("Cancel") }
-            }
-        }
     }
 }
 
@@ -362,10 +441,10 @@ internal fun ChatComposer(app: AppModel, live: Boolean, offered: Pair<Int, Strin
             }
         }
         said?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = brand.failed) }
-        QueuePanel(app)
         // Grok Bot's pill (the owner's structure, 28 November 2026): + to attach, the words, Send; it grows into the big box
-        // as the words wrap (the owner's big composer, 27 November 2026). While it answers, Stop; with something written
-        // then, Queue and Steer too, under the words, the box opened so nothing squeezes them. No mic (the owner's word).
+        // as the words wrap (the owner's big composer, 27 November 2026). While it answers, Send steers it and a long press
+        // on Send queues for after this turn (the lead's defaults, 28 November 2026); with nothing written, Stop stands in
+        // Send's place. No mic (the owner's word).
         val focus = remember { androidx.compose.ui.focus.FocusRequester() }
         fun send() {
             val client = app.client ?: return
@@ -390,15 +469,13 @@ internal fun ChatComposer(app: AppModel, live: Boolean, offered: Pair<Int, Strin
         }
         val written = text.isNotBlank()
         val aside = sh.invincible.bot.core.Composer.aside(text) != null
-        val choosing = live && written
         ComposerBox(
             focus = focus,
-            compact = !choosing,
             field = {
                 ComposerField(
                     value = text,
                     onValueChange = { text = it },
-                    placeholder = if (live) sh.invincible.bot.core.Composer.placeholder(app.chat.canQueue) else "Ask ${Primary.name}",
+                    placeholder = "Ask ${Primary.name}",
                     focus = focus,
                     enter = { if (live) steerOrQueue(sh.invincible.bot.core.Composer.Action.STEER) else send() },
                 )
@@ -423,16 +500,19 @@ internal fun ChatComposer(app: AppModel, live: Boolean, offered: Pair<Int, Strin
                 }
             },
             trailing = {
-                if (live) {
-                    // Queue (for after this turn) and Steer (now, at its next safe point), in words, once something is
-                    // written; then Stop.
-                    if (choosing) {
-                        if (app.chat.canQueue && !aside) ComposerChoice("Queue", filled = false, ready = true) { steerOrQueue(sh.invincible.bot.core.Composer.Action.QUEUE) }
-                        ComposerChoice(if (aside) "Ask on the side" else "Steer", filled = true, ready = true) { steerOrQueue(sh.invincible.bot.core.Composer.Action.STEER) }
-                    }
-                    ComposerDisc(StopIcon, "Stop ${Primary.name} answering", ready = true, onClick = app.chat::stop)
-                } else {
-                    ComposerDisc(SendIcon, if (sending) "Sending" else "Send", ready = (written || files.isNotEmpty()) && !sending, onClick = ::send)
+                when {
+                    // (Nothing written while it works: Stop, in Send's place.)
+                    live && !written && files.isEmpty() -> ComposerDisc(StopIcon, "Stop ${Primary.name} answering", ready = true, onClick = app.chat::stop)
+                    // (Written while it works: Send steers it at its next safe point; held, it queues for after this turn.)
+                    live -> ComposerDisc(
+                        SendIcon,
+                        if (aside) "Ask on the side" else "Send: it steers what ${Primary.name} is doing",
+                        ready = true,
+                        onClick = { steerOrQueue(sh.invincible.bot.core.Composer.Action.STEER) },
+                        onLongClick = if (app.chat.canQueue && !aside) ({ steerOrQueue(sh.invincible.bot.core.Composer.Action.QUEUE) }) else null,
+                        longLabel = "Queue it for after this turn",
+                    )
+                    else -> ComposerDisc(SendIcon, if (sending) "Sending" else "Send", ready = (written || files.isNotEmpty()) && !sending, onClick = ::send)
                 }
             },
         )
@@ -440,37 +520,24 @@ internal fun ChatComposer(app: AppModel, live: Boolean, offered: Pair<Int, Strin
 }
 
 /**
- * What waits above the message box while it works (the web's chat-queue.ts, in its words: Composer): what became of
- * something you sent, steers on their way to it, and what you queued behind the chat, each with Send now, Edit and
- * Remove; a held queue says why, with Resume and Discard. And a side question, asked apart, with Bring back.
+ * What you queued behind the chat (the web's chat-queue.ts, in its words: Composer), in a sheet one tap from its line in
+ * the flow or from •••: each with Send now, Edit and Remove; a held queue says why, with Resume and Discard.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun QueuePanel(app: AppModel) {
+private fun QueueSheet(app: AppModel, close: () -> Unit) {
     val chat = app.chat
-    val notice by chat.notice.collectAsState()
-    val steering by chat.steering.collectAsState()
     val queue by chat.queue.collectAsState()
     val held by chat.held.collectAsState()
     val live by chat.live.collectAsState()
-    val aside by chat.aside.collectAsState()
     val brand = LocalBrand.current
     var editing by remember { mutableStateOf<sh.invincible.bot.app.ChatModel.Queued?>(null) }
     var edited by remember { mutableStateOf("") }
-    if (notice != null || steering.isNotEmpty() || queue.isNotEmpty()) {
-        Column(Modifier.fillMaxWidth().padding(vertical = Space.s1), verticalArrangement = Arrangement.spacedBy(Space.s1)) {
-            notice?.let { (title, detail) ->
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-                    Column(Modifier.weight(1f)) {
-                        Text(title, style = Type.word)
-                        if (detail.isNotEmpty()) Text(detail, style = Type.meta, color = brand.quiet)
-                    }
-                    TextButton(onClick = chat::dismissNotice) { Text("OK") }
-                }
-            }
-            if (steering.isNotEmpty()) {
-                Text(sh.invincible.bot.core.Composer.steering(steering.size), style = Type.word)
-                for (t in steering) Text(t, style = Type.meta, color = brand.quiet, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
+    // (Once the last of it has gone, so does the sheet.)
+    LaunchedEffect(queue.isEmpty()) { if (queue.isEmpty()) close() }
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = close, containerColor = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = Space.margin).padding(bottom = Space.s6), verticalArrangement = Arrangement.spacedBy(Space.s1)) {
+            Text("Queued messages", style = Type.title, modifier = Modifier.semantics { heading() })
             if (queue.isNotEmpty()) {
                 val (count, rest) = sh.invincible.bot.core.Composer.queueHead(queue.size, held, live)
                 Text(androidx.compose.ui.text.buildAnnotatedString {
@@ -482,8 +549,8 @@ private fun QueuePanel(app: AppModel) {
                     TextButton(onClick = chat::discardQueue) { Text("Discard", color = brand.danger) }
                 }
                 for (q in queue) {
-                    Column(Modifier.padding(start = Space.s3)) {
-                        Text(q.text + (q.by?.let { " · from $it" } ?: ""), style = Type.meta, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    Column {
+                        Text(q.text + (q.by?.let { " · from $it" } ?: ""), style = Type.body, maxLines = 3, overflow = TextOverflow.Ellipsis)
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.s1)) {
                             TextButton(onClick = { chat.sendQueued(q.id) }) { Text("Send now") }
                             TextButton(onClick = { edited = q.text; editing = q }) { Text("Edit") }
@@ -503,7 +570,6 @@ private fun QueuePanel(app: AppModel) {
             dismissButton = { TextButton(onClick = { editing = null }) { Text("Cancel") } },
         )
     }
-    aside?.let { a -> AsideSheet(app, a, working = live) }
 }
 
 /** Ask on the side (the web's chat-aside.ts): the question, its answer apart from the chat as it comes, and Bring back. */
@@ -558,34 +624,49 @@ private fun Message(b: Bubble, choose: ((String) -> Unit)?) {
         return
     }
     if (b.mine) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s1), horizontalArrangement = Arrangement.End) {
-            Column(Modifier.widthIn(max = 320.dp).clip(MaterialTheme.shapes.large).background(brand.ink).padding(horizontal = Space.s3, vertical = Space.s2)) {
-                if (b.text.isNotEmpty()) Text(b.text, color = brand.onInk, style = MaterialTheme.typography.bodyLarge)
-                for (f in b.files) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s1)) {
-                        Icon(AttachIcon, null, Modifier.size(16.dp), tint = brand.onInk.copy(alpha = 0.8f))
-                        Text(f, color = brand.onInk.copy(alpha = 0.8f), style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
-        }
+        MyBubble(b.text, b.files)
         return
     }
-    // Its answer in a quiet grey bubble, its I-beam beside it; the steps it took over it, and under it what is still to come.
+    // Its answer in a quiet grey bubble, its I-beam beside it; under it, while it works, one muted line: the step it is at.
     TheirBubble(
         face = { PrimaryMark(28.dp) },
-        above = if (b.steps.isEmpty()) null else ({ for (step in b.steps.takeLast(4)) Text("· $step", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }),
         below = {
-            // Work under way is a word beside a live dot in its colour, its light going out, never a spinner.
+            // Work under way is one muted line beside a live dot in the ink, its light going out, never a spinner.
             if (b.streaming) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-                Dot(brand.working, live = true)
-                Text(if (b.text.isEmpty()) "Thinking" else "Writing", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Dot(brand.ink, live = true)
+                Text(b.steps.lastOrNull() ?: if (b.text.isEmpty()) "Thinking" else "Writing", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             b.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = brand.failed) }
             if (b.status == "stopped" && b.error == null) Text("Stopped", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         },
         content = if (b.text.isEmpty()) null else ({ Markdown(b.text, choose = choose) }),
     )
+}
+
+/** Your words in an ink bubble, at the end of the line, with the files they carried; [pending]: a steer on its way into
+ * its turn, fainter until it takes it. */
+@Composable
+private fun MyBubble(text: String, files: List<String> = emptyList(), pending: Boolean = false) {
+    val brand = LocalBrand.current
+    Row(Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s1), horizontalArrangement = Arrangement.End) {
+        Column(
+            Modifier
+                .widthIn(max = 320.dp)
+                .graphicsLayer { alpha = if (pending) 0.6f else 1f }
+                .clip(MaterialTheme.shapes.large)
+                .background(brand.ink)
+                .semantics(mergeDescendants = true) { if (pending) stateDescription = "On its way" }
+                .padding(horizontal = Space.s3, vertical = Space.s2),
+        ) {
+            if (text.isNotEmpty()) Text(text, color = brand.onInk, style = MaterialTheme.typography.bodyLarge)
+            for (f in files) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s1)) {
+                    Icon(AttachIcon, null, Modifier.size(16.dp), tint = brand.onInk.copy(alpha = 0.8f))
+                    Text(f, color = brand.onInk.copy(alpha = 0.8f), style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
 }
 
 /** What you might ask it first (the PWA's welcome's, the iPhone's): a press puts it in the message box, to send or change. */
@@ -598,9 +679,9 @@ private val SUGGESTIONS = listOf(
 
 /**
  * Your kept chats, as the web's "Your chats" (views/chat.ts openHistory): where they are kept; a search, every word of it in
- * a chat's title (ChatList.filter); the chats by day, the latest first (ChatList.groups: Pinned, Today, Yesterday, This
- * week, Earlier), each a chat's row (ChatRow). One opens where it was ([opened]), and its answer still being written goes on
- * there.
+ * a chat's title (ChatList.filter); the chats, the latest first (pinned ones first: ChatList.groups' order), one plain list
+ * with no day's header, since each row says its time (I10's phone-gaps), each a chat's row (ChatRow). One opens where it
+ * was ([opened]), and its answer still being written goes on there.
  */
 @Composable
 internal fun Chats(app: AppModel, close: () -> Unit, opened: () -> Unit) {
@@ -632,17 +713,7 @@ internal fun Chats(app: AppModel, close: () -> Unit, opened: () -> Unit) {
                     modifier = Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s3),
                 )
             }
-            for (g in groups) {
-                item(key = "head:${g.label}") { Text(g.label, style = Type.meta, color = quiet, modifier = Modifier.padding(horizontal = Space.margin).padding(top = Space.s3, bottom = Space.s1)) }
-                item(key = "rows:${g.label}") {
-                    Column(Modifier.fillMaxWidth().padding(horizontal = Space.margin).clip(MaterialTheme.shapes.medium).background(brand.raised)) {
-                        g.items.forEachIndexed { i, c ->
-                            if (i > 0) Hairline(inset = Space.s3)
-                            ChatRow(c, now) { id -> app.chat.open(id); opened() }
-                        }
-                    }
-                }
-            }
+            items(groups.flatMap { it.items }) { c -> ChatRow(c, now) { id -> app.chat.open(id); opened() } }
         }
     }
 }
