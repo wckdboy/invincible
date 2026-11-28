@@ -66,10 +66,15 @@ function watching(response: Response) {
   return { events, shown, done, ended: () => ended };
 }
 
-async function until(what: () => boolean, ms = 5000): Promise<void> {
+/**
+ * Until `what` holds, for `ms` at most. A wait on a screen says what it showed when it ends: on the Mac mini (28 November
+ * 2026) the first one ended at its 5 s without saying what came, where it takes 1.1 s at 2 % of a core, its shell starved
+ * too, so it can't be told from here whether the shell answered late, otherwise, or not at all.
+ */
+async function until(what: () => boolean, ms = 5000, shown?: () => string): Promise<void> {
   const end = Date.now() + ms;
   while (!what()) {
-    if (Date.now() > end) throw new Error("timed out");
+    if (Date.now() > end) throw new Error(shown ? `timed out; the screen showed ${JSON.stringify(shown().slice(-600))}` : "timed out");
     await Bun.sleep(10);
   }
 }
@@ -121,9 +126,9 @@ describe("a terminal in a sandbox, over the node's routes", () => {
     expect(response.headers.get("content-type")).toBe("text/event-stream");
     const screen = watching(response);
     await api("terminalInput", { terminal: terminal.id, data: "echo $((6 * 7)); stty size\n" });
-    await until(() => /42\r?\n25 90/.test(screen.shown()));
+    await until(() => /42\r?\n25 90/.test(screen.shown()), 5000, screen.shown);
     await api("terminalInput", { terminal: terminal.id, size: { cols: 100, rows: 30 }, data: "stty size\n" });
-    await until(() => /30 100/.test(screen.shown()));
+    await until(() => /30 100/.test(screen.shown()), 5000, screen.shown);
     expect((await api<{ terminals: TerminalView[] }>("terminals")).terminals).toEqual([expect.objectContaining({ id: terminal.id, cols: 100, rows: 30, watchers: 1 })]);
 
     expect(await api("closeTerminal", { terminal: terminal.id })).toEqual({ closed: true });
@@ -148,11 +153,11 @@ describe("a terminal in a sandbox, over the node's routes", () => {
     const first = new AbortController();
     const away = watching(await fetch(`http://127.0.0.1:${port}${routes.watchTerminal.path}`, { method: "POST", headers: { authorization: `Bearer ${home.adminToken()}`, "content-type": "application/json" }, body: JSON.stringify({ terminal: terminal.id }), signal: first.signal }));
     await api("terminalInput", { terminal: terminal.id, data: "echo the code is WXYZ-$((1000 + 234))\n" });
-    await until(() => away.shown().includes("WXYZ-1234"));
+    await until(() => away.shown().includes("WXYZ-1234"), 5000, away.shown);
     first.abort();
     await away.done;
     const back = watching(await call("watchTerminal", { terminal: terminal.id }));
-    await until(() => back.shown().includes("WXYZ-1234"));
+    await until(() => back.shown().includes("WXYZ-1234"), 5000, back.shown);
     await api("terminalInput", { terminal: terminal.id, data: "exit 7\n" });
     await back.done;
     expect(back.events.at(-1)).toEqual({ type: "exit", code: 7 });
