@@ -8,7 +8,7 @@ import { setMotion, setSidebarCollapsed, setTheme, sidebarCollapsed } from "./pr
 import type { AnyScope, WhoAmI } from "./types.ts";
 import { button, dot, kbd, retryFailed } from "./ui/controls.ts";
 import { openSheet } from "./ui/dialog.ts";
-import { h, isMac, isTyping, replace, Scope } from "./ui/dom.ts";
+import { h, isMac, isTyping, replace, Scope, LIST_WIDTH, TABLET_WIDTH } from "./ui/dom.ts";
 import { icon } from "./ui/icons.ts";
 import { appMark, agentFace, orb } from "./ui/orb.ts";
 import { agentOfCaller } from "./lib/roster.ts";
@@ -44,7 +44,7 @@ import { modelsView } from "./views/models.ts";
 import { moreView } from "./views/more.ts";
 import { overviewView } from "./views/overview.ts";
 import { openCreateSandbox, sandboxesView } from "./views/sandboxes.ts";
-import { forgetThisBrowser, settingsView } from "./views/settings.ts";
+import { forgetThisBrowser, openSettingsSheet, settingsView } from "./views/settings.ts";
 import { evalsView } from "./views/evals.ts";
 import { teamView } from "./views/team.ts";
 import { homeView } from "./views/home.ts";
@@ -102,6 +102,9 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   const hasWork = visible.some((spec) => spec.id === "home");
   const narrow = matchMedia("(max-width: 767px)");
   const desk = matchMedia("(min-width: 1024px)");
+  // (Where the app is list-first, a phone's and a tablet's; and a tablet's alone: ui/dom.ts LIST_WIDTH, TABLET_WIDTH.)
+  const listFirst = matchMedia(LIST_WIDTH);
+  const tabletWide = matchMedia(TABLET_WIDTH);
   const home = (): Route => homeOf(visible, { narrow: narrow.matches });
 
   let current: Route | null = null;
@@ -382,12 +385,19 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
     const spec = visible.find((r) => r.id === route)!;
     const opts = pending?.route === route ? pending.opts : route === "team" ? teamLocation(location.hash) : route === "task" ? { task: taskOf(location.hash) ?? undefined } : route === "inbox" ? { approval: approvalFromHash(location.hash) ?? undefined } : {};
     pending = null;
-    // A phone has no Needs you screen (the lead's defaults of 28 November 2026): its address opens your agent's chat
-    // with every ask over it, an approval it names its card at once.
-    if (route === "inbox" && narrow.matches) {
+    // A phone and a tablet have no Needs you screen (the lead's defaults of 28 November 2026): its address opens your
+    // agent's chat with every ask over it, an approval it names its card at once.
+    if (route === "inbox" && listFirst.matches) {
       history.replaceState(history.state, "", "#/chat");
       render();
       openWaiting(ctx, "approval" in opts && typeof opts.approval === "string" ? opts.approval : undefined);
+      return;
+    }
+    // A tablet opens Settings as a sheet over the list and the chat (I10's structure), its address too.
+    if (route === "settings" && tabletWide.matches) {
+      history.replaceState(history.state, "", "#/chat");
+      render();
+      openSettingsSheet(ctx);
       return;
     }
     viewScope?.dispose();

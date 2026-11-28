@@ -17,7 +17,7 @@ import type { RoleSpec } from "../types.ts";
 import { badge, button, callout, copyText, dot, empty, skeletonRows, spinner } from "../ui/controls.ts";
 import { composerBox } from "../ui/composer.ts";
 import { confirmAction, openSheet } from "../ui/dialog.ts";
-import { debounce, h, PHONE_WIDTH, replace } from "../ui/dom.ts";
+import { debounce, h, LIST_WIDTH, replace } from "../ui/dom.ts";
 import { orb } from "../ui/orb.ts";
 import { primaryState } from "../lib/agent-state.ts";
 import { orbMoodOfState } from "../lib/orb-motion.ts";
@@ -1043,9 +1043,9 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
   const queueButton = button("Queue", { size: "sm", title: "Keep it on the node and send it when it's done", onClick: () => void deliver({ how: "queue" }) });
   const stopButton = button("Stop", { icon: "stop", iconOnly: true, label: "Stop it", title: "Stop it (Esc)", onClick: () => stopChat() });
   stopButton.classList.add("send");
-  // On a phone (PHONE_WIDTH): no Queue or Steer words. Send steers while it works, a long press on it queues for after
+  // On a phone or a tablet (LIST_WIDTH): no Queue or Steer words. Send steers while it works, a long press on it queues for after
   // this turn, and with nothing written Stop stands in its place (the lead's defaults of 28 November 2026).
-  const phoneWidth = matchMedia(PHONE_WIDTH);
+  const phoneWidth = matchMedia(LIST_WIDTH);
   let heldToQueue = false;
   let holding = 0;
   const letGo = (): void => {

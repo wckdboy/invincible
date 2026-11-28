@@ -119,11 +119,14 @@ export const nextId = (prefix = "g"): string => `${prefix}-${++uid}`;
  * are cleaned up when the view goes away. `signal` aborts pending fetches.
  */
 /**
- * Where a thread is the whole screen and the roster a drawer (the shell's `narrow`): there a phone's rules hold (I10's
- * phone-gaps, the lead's word of 28 November 2026): the list or a chat, nothing pinned between a chat's messages and its
- * box, Send steering while it works.
+ * Where the app is list-first, a phone's or a tablet's (I10's phone-gaps and its structure, the lead's word of 28
+ * November 2026): the list (a phone's drawer, a tablet's sidebar) and a chat, its bar back, the name pill and •••,
+ * nothing pinned between its messages and its box, Send steering while it works. From 1024 px, the desk (T3 Code's).
  */
-export const PHONE_WIDTH = "(max-width: 767px)";
+export const LIST_WIDTH = "(max-width: 1023px)";
+
+/** A tablet's width (768-1023 px): the list is the sidebar, open beside the chat, and Settings opens as a sheet. */
+export const TABLET_WIDTH = "(min-width: 768px) and (max-width: 1023px)";
 
 export class Scope {
   private readonly cleanups: (() => void)[] = [];

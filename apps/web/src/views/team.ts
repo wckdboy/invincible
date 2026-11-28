@@ -19,7 +19,7 @@ import { relativeTime } from "../lib/time.ts";
 import { agentPanelShown, setAgentPanelShown } from "../prefs.ts";
 import { badge, button, callout, dot, empty, errorState, list, listRow, note, section, skeletonRows } from "../ui/controls.ts";
 import { composerBox } from "../ui/composer.ts";
-import { h, isMac, keepPlace, PHONE_WIDTH, prefersReducedMotion, replace, syncChildren } from "../ui/dom.ts";
+import { h, isMac, keepPlace, LIST_WIDTH, prefersReducedMotion, replace, syncChildren } from "../ui/dom.ts";
 import { selector } from "../ui/selector.ts";
 import { icon } from "../ui/icons.ts";
 import { renderMarkdown } from "../ui/markdown.ts";
@@ -77,10 +77,10 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
   let drawnItems = new Map<string, { version: string; el: HTMLElement }>();
 
   const head = h("header", { class: "team-head" });
-  // On a phone (PHONE_WIDTH) an agent's chat is Grok Bot's (I10's phone-gaps): its bar back, its name and one menu (Give
+  // On a phone or a tablet (LIST_WIDTH) an agent's chat is Grok Bot's (I10's phone-gaps): its bar back, its name and one menu (Give
   // a task, its workspace); each task a compact row and one grey word, a proposal its ask with Approve and Decline; its
   // words and yours in bubbles; nothing pinned over the box.
-  const phoneWidth = matchMedia(PHONE_WIDTH);
+  const phoneWidth = matchMedia(LIST_WIDTH);
   const turned = (): void => draw(true);
   phoneWidth.addEventListener("change", turned);
   scope.add(() => phoneWidth.removeEventListener("change", turned));

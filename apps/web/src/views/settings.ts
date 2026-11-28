@@ -1,11 +1,11 @@
-import type { View } from "../context.ts";
+import type { Ctx, View } from "../context.ts";
 import { type GuardianStyle, guardianStyle, setGuardianStyle } from "../ui/glass.ts";
 import { forgetIdentity } from "../identity.ts";
 import { shortId } from "../lib/text.ts";
 import { chatEnter, type ChatEnterPref, type MotionPref, motionPref, setChatEnter, setMotion, setTheme, type ThemePref, themePref } from "../prefs.ts";
 import { button, callout, card, copyText, kv, list, listRow, note, pageHead, section, segmented } from "../ui/controls.ts";
-import { confirmAction } from "../ui/dialog.ts";
-import { h, replace } from "../ui/dom.ts";
+import { confirmAction, openSheet } from "../ui/dialog.ts";
+import { h, replace, Scope } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
 import { appMark } from "../ui/orb.ts";
 import { SCOPE_INFO } from "./fleet.ts";
@@ -32,7 +32,15 @@ export async function forgetThisBrowser(): Promise<void> {
   location.reload();
 }
 
-export const settingsView: View = (root, ctx, { scope }) => {
+/** Settings on a tablet (768-1023 px; I10's structure: "Settings opens as a sheet"), over the list and the chat. */
+export function openSettingsSheet(ctx: Ctx): void {
+  const scope = new Scope();
+  const body = h("div", { class: "settings-sheet" });
+  openSheet({ title: "Settings", body, size: "wide", onClose: () => scope.dispose() });
+  settingsView(body, ctx, { scope, opts: { intent: "sheet" } });
+}
+
+export const settingsView: View = (root, ctx, { scope, opts }) => {
   const theme = segmented<ThemePref>(
     [
       { value: "system", label: "System", icon: "monitor" },
@@ -84,7 +92,8 @@ export const settingsView: View = (root, ctx, { scope }) => {
     h(
       "div",
       { class: "page narrow" },
-      pageHead("Settings", "How your agent looks on this device, and what this device may do."),
+      // (In its sheet, a tablet's, the sheet's title is its head.)
+      opts.intent === "sheet" ? null : pageHead("Settings", "How your agent looks on this device, and what this device may do."),
       section("Appearance", {}, list([row("Theme", "Follows your system unless you choose.", theme.el), row("Motion", "Reduced keeps every change instant.", motion.el), row("Your agent's mark", "Its I-beam, in ink or in pearl glass: from the next page you open.", mark.el)])),
       ctx.can("chat")
         ? section(

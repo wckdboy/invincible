@@ -16,6 +16,8 @@ import { openDirect } from "./team-forms.ts";
 import { placesFor, taskOf } from "../lib/nav.ts";
 import { teamLocation } from "../lib/team.ts";
 import { listTime } from "../lib/time.ts";
+import { TABLET_WIDTH } from "../ui/dom.ts";
+import { openSettingsSheet } from "./settings.ts";
 
 /*
  * The roster (the owner's word of 27 November 2026: "something like t3code on desktop, and openmausbot/grokbot on
@@ -50,12 +52,15 @@ interface Row {
 }
 
 /**
- * [phone]: the drawer as a phone's list (I10's phone-gaps, the lead's word of 28 November 2026): your agent pinned, then
- * every agent and room the latest first, each its face (its glass moves as it stands, no dot on it), its name, its line
- * in plain words (RosterRow.plain), and at its end when, and an ink dot where something waits on you or is new; no
- * Needs you row (each ask is in its own chat), no section's head, no projects; at its foot Settings and everything else.
+ * [look].list: the list, as a phone's drawer and a tablet's sidebar show it (I10's phone-gaps and structure, the lead's
+ * word of 28 November 2026): your agent pinned, then every agent and room the latest first, each its face (its glass
+ * moves as it stands, no dot on it), its name, its line in plain words (RosterRow.plain), and at its end when, and an
+ * ink dot where something waits on you or is new; no Needs you row (each ask is in its own chat), no section's head, no
+ * projects; at its foot Settings and everything else. [look].settings: what Settings does there (a tablet's, its sheet;
+ * else its page).
  */
-export function rosterNav(ctx: Ctx, picked: () => void = () => {}, phone = false): Roster {
+export function rosterNav(ctx: Ctx, picked: () => void = () => {}, look: { list?: boolean; settings?: () => void } = {}): Roster {
+  const phone = look.list === true;
   const stops: (() => void)[] = [];
   const rows = new Map<string, { el: HTMLElement; face: HTMLElement; look: string; text: string }>();
   /** Where the app is, and the row that is (worked out again as the table comes: a room's agent is known only then). */
@@ -211,8 +216,11 @@ export function rosterNav(ctx: Ctx, picked: () => void = () => {}, phone = false
     replace(machine, dot(tone), h("span", { class: "ellipsis tnum" }, fleet && nodes.length > 1 ? `${self} · ${online}/${nodes.length}` : self));
     machine.setAttribute("aria-label", fleet ? `${self}: ${online} of ${nodes.length} machines online` : self);
   };
+  const settingsSheet = look.settings
+    ? h("button", { class: "roster-place", type: "button", title: "Settings", "aria-label": "Settings", onclick: () => look.settings?.() }, icon("settings", { size: 16 }), h("span", { class: "roster-text" }, "Settings"))
+    : null;
   const foot = phone
-    ? h("div", { class: "roster-foot" }, place("settings", "settings", "Settings"), place("more", "more", "Everything else"))
+    ? h("div", { class: "roster-foot" }, settingsSheet ?? place("settings", "settings", "Settings"), place("more", "more", "Everything else"))
     : h("div", { class: "roster-foot" }, place("home", "layers", "Work"), place("settings", "settings", "Settings"), place("more", "more", "Everything else"), machine);
 
   const body = phone ? h("div", { class: "roster-body" }, primarySlot, agents) : h("div", { class: "roster-body" }, needs, primarySlot, agents, rooms, projects);
@@ -277,14 +285,37 @@ export function sidebarNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
   search.classList.add("side-search");
   const mark = h("a", { class: "side-mark", href: "#/chat", title: "Your agent" }, appMark(20), h("span", { class: "wordmark-text" }, "Invincible"));
   const head = h("div", { class: "side-head" }, mark, h("span", { class: "side-keys", "aria-hidden": "true" }, ...kbd(isMac() ? "⌘" : "Ctrl", "K")), search, collapse);
-  const roster = rosterNav(ctx);
+  // A tablet's (768-1023 px) sidebar is the list, open beside the chat, and its Settings a sheet (I10's structure for
+  // tablets); a desk's, the roster as it was. Drawn again as the window crosses either edge.
+  const tablet = matchMedia(TABLET_WIDTH);
+  const make = (): Roster => rosterNav(ctx, () => {}, tablet.matches ? { list: true, settings: () => openSettingsSheet(ctx) } : {});
+  let roster = make();
+  let where: { route: Route; room?: string | null; task?: string | null } | null = null;
   const el = h("aside", { class: "sidebar", "aria-label": "Everything" }, head, roster.el);
-  return { el, at: (where) => roster.at(where), dispose: () => roster.dispose() };
+  const turned = (): void => {
+    const next = make();
+    roster.el.replaceWith(next.el);
+    roster.dispose();
+    roster = next;
+    if (where) roster.at(where);
+  };
+  tablet.addEventListener("change", turned);
+  return {
+    el,
+    at: (now) => {
+      where = now;
+      roster.at(now);
+    },
+    dispose: () => {
+      tablet.removeEventListener("change", turned);
+      roster.dispose();
+    },
+  };
 }
 
 /** A phone's drawer: the roster from the screen's left edge (the menu in a page's header, or a swipe), as a phone's list. */
 export function openRoster(ctx: Ctx): void {
-  const roster = rosterNav(ctx, () => sheet.close(), true);
+  const roster = rosterNav(ctx, () => sheet.close(), { list: true });
   const sheet = openSheet({
     title: "Invincible",
     description: ctx.whoami.nodeName || ctx.whoami.fleetName || undefined,
