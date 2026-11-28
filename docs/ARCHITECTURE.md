@@ -209,6 +209,12 @@ The run loop is carried and renamed (§10), the most proven part of it:
   had shown, nothing changed since: seen in its commands, with no model asked) moves the rest of the work from the
   engineer's models to the planner's, once (`packages/agents/src/run.ts`, `escalate`). Work held to models (an agent's
   own, or sensitive mode's) stays on them.
+  - Each task's record keeps whose models did its work (`routing`: where it began, and why it moved up), and the
+    next task of the same agent begins by it. That is the memory, by kind of task: an agent's own job and repository.
+    - When the last two tasks that began on the engineer's both had to move up, the next begins on the planner's, and
+      says why.
+    - After two in a row begun that way, the next tries the engineer's again, so work the cheaper models can do now
+      goes back to them (`beginOf` in `packages/agents/src/team-runtime.ts`).
 - **Harnesses:**
   - the native tools loop (the default, measured level with OpenCode);
   - Claude Code, Codex and OpenCode through the key gateway (a run uses your keys without seeing them);

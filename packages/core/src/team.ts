@@ -520,6 +520,19 @@ export const TeamTaskPlan = z.strictObject({
 });
 export type TeamTaskPlan = z.infer<typeof TeamTaskPlan>;
 
+/**
+ * Whose models did a task's work (smart routing: the engineer's, cheap; the planner's, the strongest): the role it
+ * `began` on, and why when that was the planner's (its `plan` said the work needs the strongest models, or the agent's
+ * last tasks did: `memory`); and why it `moved` up the ladder, when it did (agents' run.ts EscalationWhy, said again here:
+ * core's tests hold them equal). Read by the next task of the same agent, to begin where its work has been done.
+ */
+export const TeamTaskRouting = z.strictObject({
+  began: z.enum(["engineer", "planner"]),
+  because: z.enum(["plan", "memory"]).optional(),
+  moved: z.enum(["gate", "review", "stall", "rereads"]).optional(),
+});
+export type TeamTaskRouting = z.infer<typeof TeamTaskRouting>;
+
 export const TeamTaskRecord = z.strictObject({
   startedAt: z.number().int().min(0),
   endedAt: z.number().int().min(0),
@@ -531,6 +544,8 @@ export const TeamTaskRecord = z.strictObject({
   proof: TeamTaskProof.optional(),
   /** The plan of yours its coding tool ran on, and what it took of it (absent: none, or a record from before the meter). */
   plan: TeamTaskPlan.optional(),
+  /** Whose models did its work, and whether it moved up (absent: a coding tool's run, or a record from before routing was kept). */
+  routing: TeamTaskRouting.optional(),
 });
 export type TeamTaskRecord = z.infer<typeof TeamTaskRecord>;
 

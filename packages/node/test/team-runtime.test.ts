@@ -306,6 +306,30 @@ test("an agent's work held to models (its own, or sensitive mode's) stays on the
   expect(heard.filter((line) => /^(Escalated|Routed) ·/.test(line))).toEqual([]);
 });
 
+test("an agent whose last two tasks had to move up begins its next on the planner's models, said on its trail and kept with its record", async () => {
+  const past = (id: string): TeamTask => ({ ...task, id, status: "done", verified: true, record: { startedAt: 0, endedAt: 1, ended: "done", commands: 9, revisions: 2, spent: [], routing: { began: "engineer", moved: "gate" } } });
+  const told: string[] = [];
+  const f = fixture([say("1. Make the change.\nDone when: the gate passes.\nEngineer: usual"), say("```sh\necho one\n```"), say("DONE\nDone."), say("PASS\nFine.")], { work: () => [past("task-past00000001"), past("task-past00000002")] });
+  f.setRoster("planner", ["local/plan"]);
+  const outcome = await f.runtime.executeTask(member, task, { ...f.context, emit: (line) => void told.push(line) });
+  expect(outcome.verified).toBe(true);
+  // The plan, then every turn of the work on the planner's model; the review the reviewer's.
+  expect(f.bodies.map((body) => body.model)).toEqual(["plan", "plan", "plan", "fake"]);
+  expect(told.filter((line) => line.startsWith("Routed ·"))).toEqual(["Routed · its agent's last two tasks had to move up to the strongest models, so this one begins on them: the planner's models do the work"]);
+  expect(outcome.record.routing).toEqual({ began: "planner", because: "memory" });
+  // On the engineer's, with nothing to move it: kept as that.
+  const g = fixture([say("1. Make the change.\nDone when: the gate passes.\nEngineer: usual"), say("```sh\necho one\n```"), say("DONE\nDone."), say("PASS\nFine.")]);
+  g.setRoster("planner", ["local/plan"]);
+  expect((await g.runtime.executeTask(member, task, g.context)).record.routing).toEqual({ began: "engineer" });
+  // Pinned to its own models, none of it applies: no memory, and no routing kept.
+  const own: Agent = { ...member, models: ["local/mimo"] };
+  const h = fixture([say("1. Make the change.\nDone when: the gate passes.\nEngineer: usual"), say("```sh\necho one\n```"), say("DONE\nDone."), say("PASS\nFine.")], { agent: () => own, work: () => [past("task-past00000001"), past("task-past00000002")] });
+  h.setRoster("planner", ["local/plan"]);
+  const pinned = await h.runtime.executeTask(own, task, h.context);
+  expect(h.bodies.map((body) => body.model)).toEqual(["plan", "mimo", "mimo", "fake"]);
+  expect(pinned.record.routing).toBeUndefined();
+});
+
 test("the ladder is climbed only to other models: with the planner's first model the work's own, a gate failing twice moves nothing and says nothing moved", async () => {
   const failing = () => {
     let gates = 0;

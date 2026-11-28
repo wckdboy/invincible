@@ -13,6 +13,13 @@ export interface TaskPlanRead {
   usd: number | null;
 }
 
+/** Whose models did a task's work, as this reads it (team.ts TeamTaskRouting has all of this). */
+export interface TaskRoutingRead {
+  began: string;
+  because?: string;
+  moved?: string;
+}
+
 /** A task's record as this reads it (a TeamTaskRecord has all of this). */
 export interface TaskRecordRead {
   startedAt: number;
@@ -22,6 +29,7 @@ export interface TaskRecordRead {
   revisions: number;
   spent: readonly UsageLine[];
   plan?: TaskPlanRead;
+  routing?: TaskRoutingRead;
 }
 
 /** A plan's kind as a sentence names it (seats.ts SeatKind), and whose sign-in it is where it is a tool's own. */
@@ -78,10 +86,31 @@ function money(total: ReturnType<typeof spendTotal>, cost: ReturnType<typeof cos
   return `${cost.complete ? "" : "at least "}${usdLabel(cost.usd)}`;
 }
 
+/** Why work moved up to the planner's models, as a fact says it (agents' run.ts EscalationWhy: team.ts TeamTaskRouting). */
+const MOVED: Readonly<Record<string, string>> = {
+  gate: "the same gate failed twice",
+  review: "the reviewer sent it back twice",
+  stall: "two audits steered it",
+  rereads: "it read the same files again and again",
+};
+
+/**
+ * Whose models did a task's work, when that wasn't the engineer's alone (team.ts TeamTaskRouting): it began on the
+ * planner's, because its plan or its agent's last tasks asked for them; or it moved up to them, and why. None: the
+ * engineer's did it all.
+ */
+export function taskRoutingFacts(routing: TaskRoutingRead): string[] {
+  return [
+    routing.began === "planner" ? `began on the planner's models: ${routing.because === "memory" ? "its agent's last tasks needed them" : "its plan asked for them"}` : "",
+    routing.moved ? `moved up to the planner's models: ${MOVED[routing.moved] ?? routing.moved}` : "",
+  ].filter(Boolean);
+}
+
 /**
  * A task's run in a few facts, in order: how it ended when that isn't "done", how long it took, its commands and
  * how often the work was sent back, its tokens as the providers reported them (its coding tool's on a plan too),
- * money at your prices where every model that answered has one, and the plan its coding tool ran on (taskPlanFacts).
+ * money at your prices where every model that answered has one, the plan its coding tool ran on (taskPlanFacts), and
+ * whose models did the work when the planner's did some of it (taskRoutingFacts).
  */
 export function taskRecordFacts(record: TaskRecordRead, prices: Prices): string[] {
   const total = spendTotal(record.spent);
@@ -94,5 +123,6 @@ export function taskRecordFacts(record: TaskRecordRead, prices: Prices): string[
     !total.calls ? "no model calls" : total.unknown === total.calls ? "tokens unknown" : `${tokensLabel(total.tokens)}${total.complete ? "" : "+"} tokens`,
     money(total, cost),
     ...(record.plan ? taskPlanFacts(record.plan) : []),
+    ...(record.routing ? taskRoutingFacts(record.routing) : []),
   ].filter(Boolean);
 }

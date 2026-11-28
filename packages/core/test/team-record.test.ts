@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SEAT_KINDS, SeatId, taskPlanFacts, taskRecordFacts, TeamTaskPlan, TeamTaskRecord, windowName } from "../src/index.ts";
+import { SEAT_KINDS, SeatId, taskPlanFacts, taskRecordFacts, taskRoutingFacts, TeamTaskPlan, TeamTaskRecord, windowName } from "../src/index.ts";
 
 /* What an agent's task came to, in words: the same at a terminal and in the app, from the record the runner kept. */
 
@@ -67,5 +67,20 @@ describe("a task's record, in words", () => {
   test("a record is counts and times and nothing else: a field too many is refused", () => {
     expect(TeamTaskRecord.safeParse({ startedAt: 0, endedAt: 1, ended: "done", commands: 0, revisions: 0, spent: [], prompt: "words" }).success).toBe(false);
     expect(TeamTaskRecord.safeParse({ startedAt: 0, endedAt: 1, ended: "finished", commands: 0, revisions: 0, spent: [] }).success).toBe(false);
+  });
+
+  test("whose models did its work: kept with its record, said where the planner's did some of it, and nothing else taken", () => {
+    const base = { startedAt: 0, endedAt: 1000, ended: "done", commands: 3, revisions: 2, spent };
+    const moved = TeamTaskRecord.parse({ ...base, routing: { began: "engineer", moved: "review" } });
+    expect(taskRecordFacts(moved, prices).at(-1)).toBe("moved up to the planner's models: the reviewer sent it back twice");
+    const remembered = TeamTaskRecord.parse({ ...base, routing: { began: "planner", because: "memory" } });
+    expect(taskRecordFacts(remembered, prices).at(-1)).toBe("began on the planner's models: its agent's last tasks needed them");
+    expect(taskRoutingFacts({ began: "planner", because: "plan" })).toEqual(["began on the planner's models: its plan asked for them"]);
+    expect(taskRoutingFacts({ began: "engineer", moved: "rereads" })).toEqual(["moved up to the planner's models: it read the same files again and again"]);
+    // The engineer's alone: no fact of it.
+    expect(taskRoutingFacts({ began: "engineer" })).toEqual([]);
+    for (const routing of [{ began: "reviewer" }, { began: "engineer", moved: "boredom" }, { began: "planner", because: "a hunch" }, { began: "engineer", why: "x" }]) {
+      expect([routing, TeamTaskRecord.safeParse({ ...base, routing }).success]).toEqual([routing, false]);
+    }
   });
 });

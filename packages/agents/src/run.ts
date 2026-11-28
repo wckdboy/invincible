@@ -27,7 +27,8 @@ export type RunRole = "planner" | "engineer" | "reviewer";
  * What moved the work up to the planner's models (escalate): the same gate, the review, or the audits, each twice in a
  * row; or the work going round, its files read again REREADS times with nothing changed.
  */
-export type EscalationWhy = "gate" | "review" | "stall" | "rereads";
+export const ESCALATION_WHYS = ["gate", "review", "stall", "rereads"] as const;
+export type EscalationWhy = (typeof ESCALATION_WHYS)[number];
 
 /** Why the work moved up, in words that begin a sentence (every surface says it so: the trail, a device, the terminal). */
 export const escalatedWhy = (event: { why: EscalationWhy }): string =>
@@ -206,6 +207,12 @@ export interface RunOptions {
    * every model that did the work. A coding agent's run keeps its own models. Default off: the engineer keeps the work.
    */
   escalate?: boolean;
+  /**
+   * With escalate, the work begins on the planner's models, its top rung, and `why` is said (routed): its agent's last
+   * tasks needed them (team-runtime's memory, by kind of task). Absent: it begins on the engineer's, unless its plan says
+   * the work needs the strongest.
+   */
+  begin?: { why: string };
   /**
    * Every REMIND_EVERY commands, the run's constraints are said again at the end of what the engineer is told (the
    * goal, the plan's "Done when:", the gates): twenty turns in, the briefing is far behind, and that is where a model
@@ -705,7 +712,7 @@ const digestsOf = (stdout: string): Map<string, string> =>
 /* ---------- prompts ---------- */
 
 /** Options with their defaults applied (a fixed plan and a custom review stay optional). */
-type Resolved = Required<Omit<RunOptions, "plan" | "review" | "agent" | "engram" | "home" | "budgetUsd" | "gateSeconds">> & Pick<RunOptions, "plan" | "review" | "agent" | "engram" | "home" | "budgetUsd" | "gateSeconds">;
+type Resolved = Required<Omit<RunOptions, "plan" | "review" | "agent" | "engram" | "home" | "budgetUsd" | "gateSeconds" | "begin">> & Pick<RunOptions, "plan" | "review" | "agent" | "engram" | "home" | "budgetUsd" | "gateSeconds" | "begin">;
 
 /**
  * Contract first (RunOptions.contract): what the planner is asked for before the engineer begins, when no gate fails
@@ -1274,6 +1281,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     ...(options.agent ? { agent: options.agent } : {}),
     ...(options.budgetUsd !== undefined && options.budgetUsd > 0 ? { budgetUsd: options.budgetUsd } : {}),
     ...(options.gateSeconds !== undefined ? { gateSeconds: Math.max(0, options.gateSeconds) } : {}),
+    ...(options.begin !== undefined ? { begin: options.begin } : {}),
     // (Checked here, before a prompt or a file is made of it.)
     ...(options.engram !== undefined ? { engram: engramProject(options.engram) } : {}),
     ...(options.home !== undefined ? { home: options.home } : {}),
@@ -2010,8 +2018,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     }
     if (gates.length) emit({ type: "gates", gates });
     // Work its plan says is hard starts on the planner's models (escalate's): routed by the step, not only once stuck.
-    const hard = o.escalate && !o.agent && /^\W*Engineer:\W*strong\b/im.test(plan);
-    if (hard) emit({ type: "routed", to: "planner", why: "its plan says the work needs the strongest models" });
+    // And work whose kind needed them before (begin: its agent's last tasks), whatever its plan says.
+    const hard = o.escalate && !o.agent && (/^\W*Engineer:\W*strong\b/im.test(plan) || o.begin !== undefined);
+    if (hard) emit({ type: "routed", to: "planner", why: o.begin && !/^\W*Engineer:\W*strong\b/im.test(plan) ? o.begin.why : "its plan says the work needs the strongest models" });
     // Each gate once as the workspace stands, before anything is paid for: what its passing afterwards can show.
     // The test files the gates name, as they are before any work: those there now are locked (one the work is to write isn't).
     const named = [...new Set(gates.flatMap((g) => testFilesOf(g.command)))];

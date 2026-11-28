@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { desktopArgv, desktopBriefing, hardwareBriefing, LOOKING } from "./desktop-command.ts";
-import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
+import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
@@ -627,6 +627,22 @@ export function progress(event: RunEvent): string {
   }
 }
 
+/** Why a task begins on the planner's models by what its agent's last tasks needed (beginOf): said on its trail. */
+export const BEGIN_BY_MEMORY = "its agent's last two tasks had to move up to the strongest models, so this one begins on them";
+
+/**
+ * Where an agent's next task begins (smart routing's memory, by kind of task: an agent's own tasks, its job and its
+ * repository): its tasks as they stand, the latest first. On the planner's models when the last two that began on the
+ * engineer's both had to move up before they were done; on the engineer's again once the last two began on the planner's
+ * by this memory, so that work the cheaper models can do now goes back to them. Null: on the engineer's, as ever.
+ */
+export function beginOf(tasks: readonly Pick<TeamTask, "id" | "record">[], current: string): { why: string } | null {
+  const routed = tasks.filter((t) => t.id !== current && t.record?.routing).map((t) => t.record!.routing!);
+  if (routed.length >= 2 && routed[0]!.because === "memory" && routed[1]!.because === "memory") return null;
+  const cheap = routed.filter((r) => r.began === "engineer").slice(0, 2);
+  return cheap.length === 2 && cheap.every((r) => r.moved !== undefined) ? { why: BEGIN_BY_MEMORY } : null;
+}
+
 export function teamRuntime(deps: TeamRuntimeDeps) {
   /**
    * A job the owner did not write, as its worker is told it: the primary's own brief (its in your conversation, or a
@@ -1192,9 +1208,12 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // Nor is work whose models the planner's are already, its first the same model: the ladder climbs to other models.
       const rungs = deps.brain(agent).store;
       const escalate = !held && !agent.models?.length && !sameModel(roleModels(rungs, "planner")[0] ?? "", roleModels(rungs, workRole(agent.role))[0] ?? "");
+      // Where it begins, by what this agent's last tasks needed (beginOf), and how its work is routed as it goes: its record keeps it.
+      const begin = escalate && !coding ? beginOf(deps.work?.(agent.id) ?? [], task.id) : null;
+      let routing: TeamTaskRouting = { began: "engineer" };
       // On a seat its tool's commands run in the seat's VM: told so, and not told of a desktop out of their reach.
       const where = onSeat ? ` Your commands run in a VM made for your plan, beside your own VM and sharing its /work${desktop ? ": your own VM's desktop is out of their reach" : ""}.` : screen;
-      const outcome = await runLoop({ goal: task.goal, environment: `Your persistent Linux VM; isolated task workspace ${root}. Other tasks' files must not be modified. Files in /tmp can't be run here: $TMPDIR is a directory of this task's where they can. ${home}/${LEASE_FILE} is your model access, written by your agent for this task: never move, change or delete it.${where}${keysLine(agent.keys, deps.keyAddress)}`, instructions, gates: task.gates, evidence: agent.repository ? repositoryEvidence(base) : [...TASK_FILES_EVIDENCE], maxSteps: Infinity, audit: true, maxRevisions: 2, commandTimeoutSec: TEAM_COMMAND_SECONDS, gatesFirst: true, ...(task.givenBy?.startsWith("node:") ? { gateSeconds: HANDED_GATE_SECONDS } : {}), submitAtLimit: true, escalate, keepReads: true, ...(tools ? { tools: true, plan: "", ...(desktop && !onSeat ? { computer: true } : {}) } : {}), ...(task.budgetUsd !== undefined ? { budgetUsd: task.budgetUsd } : {}), ...(coding ? { agent: coding } : {}), ...(engram ? { engram } : {}), home }, {
+      const outcome = await runLoop({ goal: task.goal, environment: `Your persistent Linux VM; isolated task workspace ${root}. Other tasks' files must not be modified. Files in /tmp can't be run here: $TMPDIR is a directory of this task's where they can. ${home}/${LEASE_FILE} is your model access, written by your agent for this task: never move, change or delete it.${where}${keysLine(agent.keys, deps.keyAddress)}`, instructions, gates: task.gates, evidence: agent.repository ? repositoryEvidence(base) : [...TASK_FILES_EVIDENCE], maxSteps: Infinity, audit: true, maxRevisions: 2, commandTimeoutSec: TEAM_COMMAND_SECONDS, gatesFirst: true, ...(task.givenBy?.startsWith("node:") ? { gateSeconds: HANDED_GATE_SECONDS } : {}), submitAtLimit: true, escalate, ...(begin ? { begin } : {}), keepReads: true, ...(tools ? { tools: true, plan: "", ...(desktop && !onSeat ? { computer: true } : {}) } : {}), ...(task.budgetUsd !== undefined ? { budgetUsd: task.budgetUsd } : {}), ...(coding ? { agent: coding } : {}), ...(engram ? { engram } : {}), home }, {
         // (keepReads: an agent sees whole what it reads, and it stays in view while it is current. The first real outcome's
         // agents, shown 8,000 characters of each, read one file in 26 then 34 commands, and three tasks ended with nothing
         // written: run.ts keepReads. Each command has TEAM_COMMAND_SECONDS: at 120 s, the repository's own tests were cut off.)
@@ -1281,6 +1300,9 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           // What a review judged the work against, when the work was steered: its goal and every steer it had taken, in order.
           if (event.type === "steered") steered += 1;
           if (event.type === "review" && steered) ctx.emit(`Judged · against its goal and ${steered} steer${steered === 1 ? "" : "s"}, in order`);
+          // How its work was routed, kept for its record: the next task of this agent's begins by it (beginOf).
+          if (event.type === "routed") routing = { began: "planner", because: begin && event.why === begin.why ? "memory" : "plan" };
+          else if (event.type === "escalated") routing = { ...routing, moved: event.why };
           // What proves it, kept for its record: each gate before the work and in the last round, and the last verdict.
           if (event.type === "baseline") proof.before = event.results.map((g) => g.exitCode);
           else if (event.type === "gated") proof.after = event.results.map((g) => g.exitCode);
@@ -1333,7 +1355,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // (Its coding tool's calls are in what it spent, under the role "tool".)
       const proven = proof.before.length || proof.after.length || proof.review ? { proof: { before: proof.before, after: proof.after, review: proof.review, sameModel: proof.review !== null && saidSameReview } } : {};
       const plan = onPlan ? planTaken(onPlan, spent, sessionUsd, shares, task.record?.plan, deps.listPrices?.()) : null;
-      const record: TeamTaskRecord = { startedAt, endedAt: Date.now(), ended: outcome.status, commands: commandsRun(outcome), revisions: outcome.revisions, spent: mergeSpend(spent, await deps.toolSpent?.(agent, startedAt)), ...proven, ...(plan ? { plan } : {}) };
+      const record: TeamTaskRecord = { startedAt, endedAt: Date.now(), ended: outcome.status, commands: commandsRun(outcome), revisions: outcome.revisions, spent: mergeSpend(spent, await deps.toolSpent?.(agent, startedAt)), ...proven, ...(plan ? { plan } : {}), ...(escalate && !coding ? { routing } : {}) };
       // Another node's task in a repository whose review passed ships the tree its last review's evidence was read on, on
       // its agent's side, and nothing its VM had after (the seventh fabric review's I-b): its changes aren't brought back
       // again, and its agent's worktree is checked to be that tree still. Short of that it isn't verified, and says why.
