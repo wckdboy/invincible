@@ -922,15 +922,22 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
         there as the gates' own user (nobody), each on a copy of that store of its own in their own folder (`/gates`,
         0700). Each has a HOME and temporary folder of its own, `env -i` but a PATH of the VM's read-only folders, and
         of the login profiles only the image's own `/etc/profile`.
-      - Before each copy, every process of the gates' user there is ended by `kill(-1, SIGKILL)` as that user, from an
-        exec of its own, until `/proc` shows none with a thread alive. The kernel signals them all at once and refuses
-        a fork once its parent has the signal, so a chain of forks can't outrun it, and a thread group whose leader
-        thread has exited is ended with the rest.
+      - Before each copy, the round's VM is swept: `kill(-1, SIGKILL)` as the gates' user, from an exec of its own,
+        repeated until `/proc` shows none of that user's processes with a thread alive. The kernel signals them all at
+        once and refuses a fork once its parent has the signal, so a chain of forks can't outrun it, and a thread group
+        whose leader thread has exited is ended with the rest.
         - Before, the ninth re-review's R9-2 and the eleventh's R11-1 came back verified, in Kata and runc. A first
           gate's run of the task's code left a process (one that ended its helper, a zombie-led group, a fork chain)
-          that wrote a later gate's file into its copy.
-        - What that user left in the VM's `/tmp` and `/dev/shm` is removed too. A round whose sweep can't end them fails
-          its gates.
+          that wrote a later gate's file into its copy. Each of those comes back not verified now.
+        - What that user left in the VM's `/tmp` and `/dev/shm` is removed too; its System V IPC objects and POSIX
+          message queues aren't yet. A round whose sweep can't end them fails its gates.
+        - **What doesn't hold yet, in Kata (the twelfth re-review's R12-1, open; the fabric stays off until r13).** The
+          sweep and each gate's helper run as the same user as what a gate leaves. Kata's guest kernel has no Yama,
+          so a process a gate's run of the task's code left can trace the sweep, or a later gate's helper, and turn
+          its `kill` into its own exit. The sweep then says none is left, and that process writes the next gate's file
+          into its copy: the re-review's task came back verified in Kata. In runc the host's Yama refuses the trace,
+          and it comes back not verified. A seccomp filter on `ptrace` wouldn't close it, as `/proc/<pid>/mem` stays
+          open to the same user without Yama. r13 gives each gate and check a user of its own.
       - A check that can't be made sends the work back, never "no change" (R11-2). Before any work it ends the run, as
         nothing could be locked.
       - With no repository, a file the task's VM's user can't read fails the round and says which, rather than being
@@ -946,12 +953,21 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
         - The node fills it before the round's VM is made, in a filler container of its own (no capability, a read-only
           root, its own user, the cache its one writable mount, Docker's default bridge), given the tree's `bun.lock`
           and the `package.json` files it names and nothing else of the tree.
-        - The filler refuses anything but the default registry's packages and the workspace's own, and a key twice,
-          before bun reads them. Bun then checks each tarball against the lockfile's hash as it downloads it, and runs
-          no script.
+        - The filler refuses a lockfile package, or a manifest's dependency, from anything but the default registry or
+          the workspace's own, and a key twice, before bun reads them. Bun then checks each tarball it takes against
+          the lockfile's hash as it downloads it, and runs no script.
         - A gate that needs a package that wasn't filled fails offline, saying why.
-        - The cache holds the registry's tarballs alone (bun keys it by name and version and checks nothing on reading,
-          so the filler's download check is the one), and it is shared by every task's rounds on the node.
+        - **What doesn't hold yet (the twelfth re-review's R12-2, open; the fabric stays off until r13).**
+          - The filler doesn't read the catalogs a manifest's `workspaces` or the lockfile names, and it takes a
+            `catalog:` dependency as the registry's. So bun fetches what such a catalog names, a URL or a git
+            repository (`git+http` runs `git clone`), before its frozen lockfile refuses the change, and keeps it in
+            the cache.
+          - It fetches from Docker's default bridge: from anything the host can reach, another container there (on
+            Ultra, live services), the tailnet as the host, the LAN, a metadata address.
+          - So the cache isn't the registry's tarballs alone. What a catalog fetched there is shared by every task's
+            rounds on the node, and a later gate can read it back to the giver.
+          - r13 fills from the lockfile's packages alone, with every catalog field checked, on a network whose only way
+            out is a proxy to the registry.
         - The filler runs bun on the tree's lockfile and manifests: a flaw in bun's reading of them would be the
           filler's to contain, and the cache is its one writable mount.
       - A gate whose command runs the task's code runs it as the gates' user, for that run alone.
@@ -982,9 +998,10 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       In the VM (Linux) the helper is the command's subreaper while it lives. What a gate starts ends with the gate;
       what its other commands leave running, its coding tool's included, is listed and ended with the task however it
       ends (R3-5). A command that ends or stops its own helper, or a process that double-forks out of it, escapes that
-      bound, but not the task's VM (R3-1, closed), and reaches none of its gates, which run in a VM of each round's own
-      (R11-1, above). What a gate leaves running, a zombie-led thread group among it, is ended before the next gate's
-      copy.
+      bound, but not the task's VM (R3-1, closed): its gates run in a VM of each round's own, which nothing of the task's
+      VM reaches (R11-1, above). What a gate's run of the task's code leaves running there, a zombie-led thread group
+      among it, is ended before the next gate's copy, except that in Kata it can trace the sweep and stop it (R12-1,
+      above, open).
     - The runner stops it at its call's deadline or after 24 hours, whichever comes first. A stop that can't be
       written (the node stopping, or a write that fails) ends its call all the same, answered as failed (the third
       re-review's R3-2). A task you take up again by its id is held to 24 hours from then (R3-6).

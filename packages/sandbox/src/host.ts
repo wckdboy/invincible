@@ -2670,8 +2670,8 @@ export class SandboxHost {
    * The node's install cache filled for a round of another node's task's gates (install-cache.ts), before its VM is made:
    * a filler container of the node's own from the task's VM's image, given `manifests` (a gzipped tar of the tree's bun.lock and
    * the package.json files it names) on its input and nothing else of the tree. No capability, a read-only root, its own
-   * user, the cache its one writable mount, Docker's default bridge to reach the registry, removed as it ends (and at its
-   * deadline). Exit 0: what bun.lock names from the registry is in the cache; else why not. A Linux host's alone.
+   * user, the cache its one writable mount, Docker's default bridge (it reaches what the host does: R12-2), removed as
+   * it ends (and at its deadline). Exit 0: what bun.lock names is in the cache; else why not. A Linux host's alone.
    */
   async fillCache(of: string, manifests: Uint8Array, timeoutSec = 600): Promise<ExecResult> {
     if (this.apple || !this.opts.installCache) throw new SandboxError("this node has no install cache to fill", 424);

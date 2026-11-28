@@ -5,15 +5,17 @@ import { BUN_LOCK_PY, VM_BUN_CACHE } from "@invincible/core";
  * node's on its host, mounted read-only at VM_BUN_CACHE into each round of another node's task's gates' VM, which has no
  * network; no VM writes it. The node fills it as each round begins, before the round's VM is made, in a filler container
  * of its own (FILLER_SCRIPT) from the task's image: no capability, a read-only root, the cache its one writable mount, a
- * user of its own, and Docker's default bridge to reach the registry. It is given the tree's bun.lock and the package.json
- * files it names, and nothing else of the tree (no bunfig.toml, .npmrc or script), checks them (LOCK_CHECK_PY), and runs
- * `bun install --frozen-lockfile --ignore-scripts` on them: bun checks each tarball it downloads against the lockfile's
- * hash, runs no package's script, and fetches from the registry alone. A gate's `bun install --frozen-lockfile` then takes
+ * user of its own, and Docker's default bridge, from which it reaches what the host does. It is given the tree's
+ * bun.lock and the package.json files it names, and nothing else of the tree (no bunfig.toml, .npmrc or script), checks
+ * them (LOCK_CHECK_PY), and runs `bun install --frozen-lockfile --ignore-scripts` on them: bun checks each tarball it
+ * downloads against the lockfile's hash and runs no package's script. A gate's `bun install --frozen-lockfile` then takes
  * from it, offline; one that needs a package that wasn't filled fails, and its gate says why.
  *
- * What the cache holds is the registry's: bun keys it by name and version and checks nothing on reading it, so the one
- * check is the filler's, as it downloads. A lockfile's hash that isn't the registry's tarball's is refused there, so no
- * lockfile can put content of its own under a name and version. Shared by every task's rounds on the node, and safe to.
+ * Not yet the registry's alone (the twelfth fabric re-review's R12-2, open; the fabric stays off until r13): the check
+ * reads no catalog (a manifest's `workspaces` catalogs, the lockfile's), and passes a `catalog:` dependency, so bun
+ * fetches whatever that catalog names, a URL or a git repository, from wherever the default bridge reaches, and keeps it
+ * in the cache, which every task's rounds on the node share. A lockfile's hash that isn't the registry's tarball's is
+ * refused as bun downloads it.
  */
 
 /** The filler's user, where the node runs as root: never root, never a VM's (1000) nor the gates' (65534). */
@@ -21,10 +23,11 @@ export const FILLER_UID = 65533;
 
 /**
  * The filler's check of what it was given, before bun reads it: bun.lock, and each package.json it names as a workspace,
- * read with no key twice (BUN_LOCK_PY), and nothing in them but packages of the default registry at a version of their
- * own, and the workspaces' own. Anything else (another registry, a git, GitHub, tarball, file or link dependency, a
- * patch) is refused, and nothing is filled: bun would fetch it from wherever it names, and the filler reaches what the
- * host does. Exit 0: bun may read them. Python 3.9's, as the Macs that test it have.
+ * read with no key twice (BUN_LOCK_PY), and no lockfile package or manifest dependency but the default registry's at a
+ * version of its own, and the workspaces' own. Another registry, a git, GitHub, tarball, file or link dependency, or a
+ * patch is refused, and nothing is filled: bun would fetch it from wherever it names, and the filler reaches what the
+ * host does. It reads no catalog, and passes a `catalog:` dependency (R12-2, open). Exit 0: bun may read them. Python
+ * 3.9's, as the Macs that test it have.
  */
 export const LOCK_CHECK_PY = String.raw`import json, os, re, sys
 ${BUN_LOCK_PY}
@@ -106,7 +109,7 @@ export const fillerEnv = (path: string): Record<string, string> => ({ PATH: path
 
 /**
  * The filler as Docker runs it, its manifests on its input: `name` its own, from `image` (whose PATH is `path`), as `user`,
- * the cache at `cache` its one writable mount. Docker's default bridge reaches the registry; nothing listens on it.
+ * the cache at `cache` its one writable mount. Docker's default bridge reaches what the host does (R12-2); nothing of it listens there.
  */
 export const fillerArgs = (opts: { name: string; image: string; cache: string; user: string; path: string }): string[] => [
   "run", "--rm", "--interactive", "--name", opts.name, "--network", "bridge", "--user", opts.user,
