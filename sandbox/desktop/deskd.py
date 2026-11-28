@@ -960,6 +960,7 @@ class Tree:
         self.known = {}  # bus name -> the app: its name, its toolkit, its process
         self.refs = {}  # n -> the node said as [n]
         self.numbers = {}  # a node's place on the bus -> its n: it keeps its n from one tree to the next (number)
+        self.showing = {}  # a window -> how many of what can be acted on it showed, at the last tree of it (off_screen)
         self.lock = threading.RLock()
         self.pool = None
 
@@ -1170,6 +1171,20 @@ class Tree:
                     out += [f for f in self._many(one, self.matches(w, roles, states=("visible",))[:limit]) if f]
             return out
 
+    def off_screen(self, app=None, pid=None, title=None):
+        """How many of what can be acted on in the tree's windows (_these) is off the screen: visible, and not showing, as
+        the browser marks its page's nodes above and below its viewport. Counted by the app's own search, one call a
+        window beside the tree's own (actable's, kept in `showing`) and nothing read of each node; find and fill reach
+        them."""
+        with self.lock:
+            n = 0
+            for a, these in self._these(app, pid, title):
+                for w in these:
+                    # (What is on the screen as the tree just found it, where it did: its own search not asked again.)
+                    showing = self.showing.get((w["bus"], w["path"]))
+                    n += max(0, len(self.matches(w, ACTABLE, states=("visible",))) - (len(self.matches(w, ACTABLE)) if showing is None else showing))
+            return n
+
     def actable(self, app=None, pid=None, title=None, limit=400):
         """The nodes a person acts on, on the screen: of the app named, else of the window with the keyboard's focus
         (its process and title, from X), else every app's. Each is given a ref, which `click ref=N` takes."""
@@ -1178,6 +1193,7 @@ class Tree:
             for a, these in self._these(app, pid, title):
                 for w in these:
                     refs = self.matches(w, ACTABLE)
+                    self.showing[(w["bus"], w["path"])] = len(refs)
 
                     def one(ref, a=a, w=w):
                         n = self._try(self.node, ref, a, w)
@@ -2196,7 +2212,8 @@ desktop settle                     wait until the screen is still (150 ms with n
 desktop windows                    the windows on the screen, and which has the keyboard's focus
 desktop focus [window]             the window with the focus; with a name, that window brought forward with it
 desktop tree [app]                 what can be acted on in the window with the focus (or that app), from its
-                                   accessibility tree: each with a ref, its role, its name and where it is
+                                   accessibility tree: each with a ref, its role, its name and where it is; a last
+                                   line counts what is off the screen, which desktop find reaches
 desktop find <role> <name>         where one is: x,y and its ref (desktop find button "Send"); one above or below
                                    the screen is scrolled into view, the page's own way, and said
 desktop click ref=<n> [button]     click a node desktop tree or find gave, where it is at that moment (one the
@@ -2384,6 +2401,10 @@ def cli(desk, argv, cwd="/work", env=None):
                     window = w.get("path")
                     lines.append("%s \"%s\"" % (node["app"]["name"], w.get("name", "")))
                 lines.append("  " + say_node(ref, node, box))
+            # (One line, what is off the screen: find and fill reach it, the page scrolled its own way.)
+            off = desk.tree.off_screen(app=" ".join(args) or None, pid=pid, title=title)
+            if off:
+                lines.append("  \u2026 %d more off the screen (desktop find)" % off)
             return 0, "\n".join(lines) + "\n", ""
         if verb == "find":
             if len(args) < 2:

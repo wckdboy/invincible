@@ -342,6 +342,14 @@ everything but the model.
     try missed City, whose box crossed the screen's bottom edge (793 to 827): on the screen to the tree, its centre
     past it, so the click fell off the screen. A node is now scrolled to when its centre is off the screen too;
   - the trees as before: 981 and 724 tokens.
+  - `desktop click ref=N` on a node the page has scrolled away brings it back the same way: the long form's Full
+    name, after `find` scrolled down to Send, 3 of 3.
+  - A tree now ends with one line counting what is off the screen (`… 29 more off the screen (desktop find)` on the
+    typical page). With it the trees came to 991 tokens (966 in the baseline) and 734 (686): within the 50 they are
+    read to, the settings' with 2 to spare. The count is the page's own search, one call a window beside the tree's:
+    7.0 ms at the median, where the tree's listing took 86.6 (Ultra, the load about 30 on 32 cores from others' work).
+    At that load the tree took 76 ms at 552ceadc, before any of these changes, 80 at 02e56493 with the fields' values,
+    and 89 to 95 with the count: its baseline's 25 ms was taken on a quieter host.
 
 ### hardware: KiCad and FreeCAD on an agent's desktop
 

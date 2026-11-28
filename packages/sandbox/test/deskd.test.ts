@@ -1679,6 +1679,25 @@ print(json.dumps({"before": before, "box": list(box), "scrolled": bool(node.get(
     expect(got.edge[1]).toBeLessThan(800);
   });
 
+  test("desktop tree ends with one line counting what can be acted on off the screen, which desktop find reaches; nothing when there is none", () => {
+    const got = py(`${BUS}
+del NODES["/n6"]
+class Desk:
+    tree = t
+    def focused_app(self): return 300, "Form - Chromium"
+on = d.cli(Desk(), ["tree"])[1]
+NODES["/n13"] = (":1.5", "/d1", "entry", "Comment", VISIBLE | SENSITIVE | EDITABLE, (100, 1200, 300, 24))
+NODES["/n14"] = (":1.5", "/d1", "push button", "Post", VISIBLE | SENSITIVE, (100, 1260, 60, 24))
+off = d.cli(Desk(), ["tree"])[1]
+print(json.dumps({"on": on, "off": off}))`) as { on: string; off: string };
+    expect(got.on).not.toContain("off the screen");
+    const lines = got.off.trimEnd().split("\n");
+    expect(lines.at(-1)).toBe("  … 2 more off the screen (desktop find)");
+    expect(lines.filter((l) => l.includes("off the screen"))).toHaveLength(1);
+    // The rest of the tree as before.
+    expect(got.off.trimEnd().split("\n").slice(0, -1).join("\n")).toBe(got.on.trimEnd());
+  });
+
   test("desktop click ref=N on a node the page has scrolled away brings it back into view its own way, clicks it there, and says so; never a click past the screen's edge", () => {
     const got = py(`${BUS}
 listed = t.actable(pid=300, title="Form - Chromium")
