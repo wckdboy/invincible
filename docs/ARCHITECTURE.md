@@ -336,6 +336,13 @@ The run loop is carried and renamed (§10), the most proven part of it:
     53 ms in runc either way). One given input as it runs (a pipe's receiving side, a stream held open) keeps
     `--interactive`, and holds nothing while it is fed (55 ms beside it in Kata). Apple's `container` (1.7.1, the Mac
     mini) held nothing either way, and is as it was;
+  - **a known limit of Kata's (4.3.1):** what a stream held open (`host.stream`, given input as it runs) prints once its
+    input has ended for half a second or more never comes back, though it exits as it should (Ultra, 28 November 2026:
+    three runs of three printing 5 s after; one printing at 0.2 to 8 s after, of which 0.2 s came back and 0.5 s on
+    didn't; runc gave all of it). None of the node's streams waits for output past its input's end: a seat's sign-in
+    is told what it needs and then cancelled or killed, and a run's output followed is killed; a pipe's receiving side
+    (`pipeArgs`) is no such stream, and its output 1, 3 and 6 s after its input came back in Kata. A stream that ends
+    its input and then waits for an answer must not be written;
   - one per run;
   - a firewall that lets a run reach its node's bridge and nothing it wasn't granted;
   - **their images**, the node's own (the workshop's, the Lab's, the desktop's, the hardware's and the tools': spec.ts's
