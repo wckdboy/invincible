@@ -180,13 +180,12 @@ class FakeDisplay:
             if not down:
                 clicked.set()
             if down:
-                # Click to focus, as the window manager does, in its own time.
+                # Click to focus, as the window manager does, in its own time: counted in deskd's looks at the focus,
+                # never in milliseconds a busy machine stretches past deskd's own wait. The first look after the click
+                # still sees the window before; the next sees the one clicked.
                 under = self.client_at(*self.at, delivering=True)
                 if under and hex(under) != self.focused:
-                    def later():
-                        time.sleep(0.03)
-                        self.focused = hex(under)
-                    threading.Thread(target=later, daemon=True).start()
+                    self.focusing = [hex(under), 1]
             if not down:
                 self.screen.drawn()
         with self.lock:
@@ -234,6 +233,11 @@ class FakeDisplay:
     def active(self):
         self._deliver()
         trace(call="active")
+        if getattr(self, "focusing", None):
+            if self.focusing[1] > 0:
+                self.focusing[1] -= 1
+            else:
+                self.focused, self.focusing = self.focusing[0], None
         return int(self.focused, 16)
 
     def window(self, w):
