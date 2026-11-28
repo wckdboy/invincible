@@ -16,11 +16,13 @@ export const OWN_WORK_ONLY: readonly SeatKind[] = ["google-antigravity"];
 
 /**
  * Whether an agent's work is on such a plan: its harness is that plan's tool (Antigravity), or it is an ACP agent whose
- * command runs that tool, a word of it named agy (`agy acp`, `/opt/agy/bin/agy acp`: the re-check of 28 November 2026,
- * R10). An ACP agent's command is yours alone to set (saveAgent).
+ * command runs that tool, a word of it named agy in any case (`agy acp`, `/opt/agy/bin/agy acp`, `sh -c agy acp`: the
+ * re-check of 28 November 2026, R10, and its second's Info list). An ACP agent's command is yours alone to set
+ * (saveAgent), and plain words alone (TeamAcpCommand: no quotes, no tabs); one that runs agy under another name isn't
+ * seen.
  */
 export function ownWorkOnly(agent: { harness: string; acp?: string | null }): boolean {
-  if (agent.harness === "acp") return !!agent.acp && agent.acp.split(" ").some((word) => word.split("/").at(-1) === "agy");
+  if (agent.harness === "acp") return !!agent.acp && agent.acp.split(" ").some((word) => word.split("/").at(-1)?.toLowerCase() === "agy");
   const kind = agent.harness === "native" ? null : seatKindOf(agent.harness);
   return kind !== null && OWN_WORK_ONLY.includes(kind);
 }

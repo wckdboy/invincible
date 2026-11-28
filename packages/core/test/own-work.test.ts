@@ -15,7 +15,8 @@ describe("work a Gemini plan runs", () => {
     expect(OWN_WORK_ONLY).toEqual(["google-antigravity"]);
     for (const harness of ["antigravity"]) expect([harness, ownWorkOnly({ harness })]).toEqual([harness, true]);
     for (const harness of ["native", "opencode", "hermes", "claude", "codex"]) expect([harness, ownWorkOnly({ harness })]).toEqual([harness, false]);
-    for (const acp of ["agy acp", "/opt/agy/bin/agy acp", "env AGY_CLI_DISABLE_AUTO_UPDATE=true agy acp"]) expect([acp, ownWorkOnly({ harness: "acp", acp })]).toEqual([acp, true]);
+    // (A word of it named agy in any case, and through a shell: an ACP command is plain words, so no quotes or tabs.)
+    for (const acp of ["agy acp", "/opt/agy/bin/agy acp", "env AGY_CLI_DISABLE_AUTO_UPDATE=true agy acp", "AGY acp", "/opt/bin/Agy acp", "sh -c agy acp"]) expect([acp, ownWorkOnly({ harness: "acp", acp })]).toEqual([acp, true]);
     for (const acp of ["goose acp", "gemini --experimental-acp", "agy-wrapper acp", "/opt/agy/bin/goose acp", null, undefined]) expect([acp, ownWorkOnly({ harness: "acp", acp })]).toEqual([acp, false]);
   });
 
