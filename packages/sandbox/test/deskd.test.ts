@@ -192,7 +192,28 @@ describe("deskd's held session (the node's): toolset actions in, answers out", (
     expect(answer).toMatchObject({ ok: true, changed: false, changed_ms: null });
     expect(answer.text).toContain("nothing on the screen changed");
     expect(ms).toBeGreaterThanOrEqual(55);
-    expect(ms).toBeLessThan(1000);
+    // And no longer, on a clock of the test's own that a busy machine can't stretch: on a screen that never changes, the
+    // action waits its grace (60 ms) in its 2 ms looks, and answers. (Read on the real clock, "under a second" got
+    // 1,002 and 1,029 ms at 2 % of a core, 28 November 2026.)
+    const clocked = py(`
+clock = [50.0]
+waited = []
+def sleep(s):
+    waited.append(s)
+    clock[0] += max(s, 1e-6)  # (a real sleep takes some time, however short it is asked to be)
+class Display:
+    def active(self): return 0
+    def sync(self): pass
+class Quiet:
+    def since(self, t): return (False, None)
+    def take(self): return [], []
+desk = d.Desk(pieces=object(), display=Display(), watch=Quiet(), now=lambda: clock[0], sleep=sleep)
+desk.ready = lambda: desk._display
+answer = desk.act("left_click", lambda: "clicked at 10,10")
+print(json.dumps({"changed": answer["changed"], "waited_ms": sum(waited) * 1000}))`) as { changed: boolean; waited_ms: number };
+    expect(clocked.changed).toBe(false);
+    expect(clocked.waited_ms).toBeGreaterThanOrEqual(60);
+    expect(clocked.waited_ms).toBeLessThanOrEqual(62);
   });
 
   test("a window or a dialog that appears is in the next answer, with its title and its application", async () => {
