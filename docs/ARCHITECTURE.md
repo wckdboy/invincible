@@ -209,12 +209,22 @@ The run loop is carried and renamed (§10), the most proven part of it:
   had shown, nothing changed since: seen in its commands, with no model asked) moves the rest of the work from the
   engineer's models to the planner's, once (`packages/agents/src/run.ts`, `escalate`). Work held to models (an agent's
   own, or sensitive mode's) stays on them.
-  - Each task's record keeps whose models did its work (`routing`: where it began, and why it moved up), and the
-    next task of the same agent begins by it. That is the memory, by kind of task: an agent's own job and repository.
-    - When the last two tasks that began on the engineer's both had to move up, the next begins on the planner's, and
-      says why.
-    - After two in a row begun that way, the next tries the engineer's again, so work the cheaper models can do now
-      goes back to them (`beginOf` in `packages/agents/src/team-runtime.ts`).
+  - Each task's record keeps whose models did its work (`routing`: where it began and why, why it moved up, and its
+    kind), and the agent's next task of the same kind begins by it. That is the memory, by kind of task. A task is a fix
+    (of a pull request's checks), desktop work (its VM has a desktop), code (its agent has a repository) or a task, the
+    first that fits (`taskKindOf` in `packages/core/src/routing.ts`).
+    - The next task of a kind begins on the tier that last verified one of that kind: the planner's where that one began
+      on them or moved up to them, else the engineer's. Until one of its kind is verified, it begins on the engineer's,
+      and work begun there that goes round moves up again, as any does.
+    - After two in a row of its kind begun on the planner's by the memory, the next tries the engineer's again, so work
+      the cheaper models can do now goes back to them (`beginFor` and `PROBE_AFTER`, there).
+    - Each kind is remembered apart: a code task that needed the planner's never moves the agent's fixes or its desktop
+      work there. The cheaper models do Computer Use well (C1, 28 November 2026: Qwen 20 of 20, Kimi 19 of 20, GLM 15 of
+      15), so desktop work begins on the engineer's until one of its own needed the planner's.
+    - The run says so when its work begins on the planner's or tries the engineer's again ("Routed · …"), and its record
+      keeps it. `invincible agents routing <id>` says where its next task of each kind begins, and why, by the same rule.
+      In the app it is one quiet line per kind in the agent's details beside its timeline, the why on hover. That panel
+      is never on a phone.
 - **Harnesses:**
   - the native tools loop (the default, measured level with OpenCode);
   - Claude Code, Codex and OpenCode through the key gateway (a run uses your keys without seeing them);

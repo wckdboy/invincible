@@ -124,21 +124,37 @@ again: the count can only be late, never early.
 are a thin base, and the verified ones re-read nothing, so how close right work comes to the threshold isn't known yet.
 Each new finished task's trail is more evidence.
 
-**The memory, by kind of task.** Three agents' tasks run in turn, 12 each, routed as a node does:
+**The memory, by kind of task** (`packages/core/src/routing.ts`). Four agents' tasks run in turn, 12 each, routed as a
+node does:
 - `ada`'s are all ones its worker can do;
 - `bo`'s all need the lead;
-- `cy`'s are any level.
+- `cy`'s are any level;
+- `di`'s are fixes its worker can do and other tasks that need the lead, one and the other. They are drawn from a seed of
+  their own, so the other three's are the tasks they were before `di`'s were added.
 
 Each agent's tasks so far are its memory's, as on a node (`TeamRuntimeDeps.work`), and the same tasks run without it
-(`off`). On 28 November 2026:
+(`off`). The memory as it was before, by agent alone, was run on the same tasks (the tree as it was, `ad1fb050`, with
+this suite's tasks). On 28 November 2026:
 
 | The memory | Verified | $ per verified | Minutes per verified | Moved up | Begun on the lead |
 |---|---|---|---|---|---|
-| off | 35 of 36 | 0.186 | 2.10 | 14 | 0 |
-| on | 35 of 36 | 0.125 | 1.85 | 7 | 7 |
+| off | 47 of 48 | 0.183 | 2.11 | 20 | 0 |
+| by agent (before) | 47 of 48 | 0.147 | 1.94 | 13 | 7 |
+| by kind | 47 of 48 | 0.133 | 1.83 | 8 | 14 |
 
-`bo`'s tasks begin on the lead after two that had to move up, and try the worker every third. `ada`'s never begin on the
-lead (`routing.rule.memory-misroutes`, held at 0).
+A task begins on the tier that last verified one of its kind, and after two of its kind begun on the lead by the memory,
+the next tries the worker (`routing.memory.on.probes`). Agent by agent, in stand-in dollars, before and after:
+- `di`'s other tasks begin on the lead after the first, and its fixes stay on the worker: $2.52 to $1.68. By agent
+  alone, each of its fixes, verified on the worker, broke the run of two that moved up, so all its other tasks began on
+  the worker and moved up.
+- `bo`'s begin on the lead after the first that moved up, not the second: $2.62 to $2.52.
+- `cy`'s cost more, $1.02 to $1.32. Its tasks are any level of one kind, so after one that needed the lead, its next
+  two easy ones began there until the try. This is the price of beginning where the last one was verified.
+- `ada`'s are the same, $0.73. They never begin on the lead, nor do `di`'s fixes (`routing.rule.memory-misroutes`,
+  held at 0).
+
+Run again, every task begins where it did, for the same reason, and ends the same (`routing.memory.replay.differs`,
+held at 0).
 
 **A plan's pace** (`bench/routing/pace.ts`), in virtual time:
 - Eight agents call one plan for ten minutes, each call followed by a command of its own.
