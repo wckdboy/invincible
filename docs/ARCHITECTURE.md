@@ -293,13 +293,17 @@ The run loop is carried and renamed (§10), the most proven part of it:
     agent's own `/work`. Its tool is told the home by the variable its vendor documents (`seatEnv`). The host refuses a
     VM more than the seat takes at once, counted from its own containers' labels, so a restart forgets nothing. Only the
     node's own team service makes one, never the sandbox route, and only on a Linux host with Docker (a Mac's volumes are
-    disk images only one VM may mount). Removing a seat removes its home, never while a VM has it;
+    disk images only one VM may mount). A Gemini seat has a second volume beside it, its sealed sign-in
+    (`invincible-seat-<id>.sealed`, at `/seats/<id>.sealed`: `seatSealed`), writable only in the VM made for its sign-in
+    and read-only in a status check's and a run's. Removing a seat removes its home, and a Gemini seat's sealed sign-in,
+    never while a VM has it;
   - its status is asked of its own tool in such a VM (`askSeat`), with the fleet's salt from the vault; the log is told
     only what changes (`recordSeatStatus`), and a sign-in to another account than the seat's, or to another seat's, is
     refused;
   - signed in on the vendor's own page, by the vendor's own tool in a VM made for the seat (`seat-sign-in.ts`): Codex's
     app server by ChatGPT's device code, Claude Code's `auth login` on a terminal of its own, its page's code relayed
-    to it once (D7), and Antigravity's `agy acp --login`, the code the page after Google's shows relayed to it once. The
+    to it once (D7), and Antigravity's `agy acp --login` in a profile of its own in the VM's memory, the code the page
+    after Google's shows relayed to it once, and agy's sign-in sealed for the seat only once it took. The
     card (its page, and Codex's code) is answered to you and kept nowhere; it shows only an address on the vendor's own
     hosts (`signInUrlOk`: Google's accounts page alone for Antigravity, and agy's own sign-in there, `AGY_SIGN_IN`).
     Ten minutes, then it lapses. Then the tool's own status says how it stands; another account than the seat's is
@@ -308,7 +312,8 @@ The run loop is carried and renamed (§10), the most proven part of it:
     A Mistral plan is a key seat (Vibe's sign-in ends in an API key), and Sign in with ChatGPT is the node's own (to come);
   - Antigravity on a Gemini plan, driven as T3 Code drives agy (the owner's choice, 27 November 2026, accepting that
     Google's Antigravity terms call it a breach that may suspend the account: core's `SEAT_TERMS`): `agy acp` in the
-    seat's own profile (`--gemini-dir`), its client named truthfully, signed in with the profile's sign-in before
+    seat's own profile (`--gemini-dir`), emptied at each start and given the seat's sealed sign-in, whole, never
+    read (agy's own in an agent's own VM is kept as the rest goes), its client named truthfully, signed in with it before
     anything else, its updates and telemetry off, and never an agy older than 1.5.1 (`packages/agents/src/antigravity.ts`).
     Each run is a new agy session, so a steer ends a run between its calls, and a new run, told the task's briefing,
     where the work stands and the steer, carries on (`steer: "anew"`).
