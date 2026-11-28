@@ -228,7 +228,7 @@ describe("a run's settings, and variants of the harness", () => {
   test("moving the work to the planner when a gate fails twice in a row is a switch of its own: off in the baseline, on in the variant named for it", () => {
     expect(VARIANTS.baseline!.escalate).toBe(false);
     expect(parseVariant("escalate")).toEqual({ name: "escalate", options: { ...VARIANTS.baseline!, escalate: true } });
-    expect(describeVariant(VARIANTS.escalate!)).toBe("a gate, the review or the audits saying no twice moves the work to the planner");
+    expect(describeVariant(VARIANTS.escalate!)).toBe("work stuck (a gate, the review or the audits saying no twice, or reading again) moves to the planner");
     for (const [name, options] of Object.entries(VARIANTS)) expect([name, options.escalate]).toEqual([name, name === "escalate"]);
     expect(parseVariant("mine:escalate=on,revisions=3").options).toEqual({ ...VARIANTS.baseline!, escalate: true, revisions: 3 });
     expect(() => parseVariant("mine:escalate=up")).toThrow(/escalate is on or off/);

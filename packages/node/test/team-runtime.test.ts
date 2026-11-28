@@ -2336,6 +2336,7 @@ test("every step a task reports starts with the mark its agent's avatar shows it
     [{ type: "escalated", to: "planner", why: "gate", gate: "bun run check" }, "working"],
     [{ type: "escalated", to: "planner", why: "review" }, "working"],
     [{ type: "escalated", to: "planner", why: "stall" }, "working"],
+    [{ type: "escalated", to: "planner", why: "rereads" }, "working"],
     // A command your tripwire stopped: the agent is at its work all the same (or its task has ended).
     [{ type: "tripped", step: 4, command: "rm -f bun.lock", rule: "no-locks", does: "refuse", why: "the word `bun.lock` matches `*.lock`" }, "working"],
   ];
@@ -2346,6 +2347,7 @@ test("an escalation says on the trail why the work moved, and to whose models", 
   expect(progress({ type: "escalated", to: "planner", why: "gate", gate: "bun run check" })).toBe("Escalated · the same gate failed twice in a row: the planner's models take the work\n$ bun run check");
   expect(progress({ type: "escalated", to: "planner", why: "review" })).toBe("Escalated · the reviewer sent it back twice in a row: the planner's models take the work");
   expect(progress({ type: "escalated", to: "planner", why: "stall" })).toBe("Escalated · two audits in a row steered it: the planner's models take the work");
+  expect(progress({ type: "escalated", to: "planner", why: "rereads" })).toBe("Escalated · it read the same files again and again, nothing changed: the planner's models take the work");
 });
 
 test("a tripwire is said in words on a task's timeline: which rule, what it did, why, and the command it stopped", () => {

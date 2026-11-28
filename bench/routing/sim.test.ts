@@ -20,13 +20,14 @@ describe("the routing suite's stand-ins", () => {
     expect(tasks.every((t) => t.level >= 1 && t.level <= 4 && /^task-[a-z0-9_-]{12}$/.test(t.id))).toBe(true);
   });
 
-  test("routed, the ladder takes what the worker can't do to the lead: a gate, a review or the audits saying no twice; a 4 needs you", async () => {
+  test("routed, the ladder takes what the worker can't do to the lead: a gate or a review saying no twice, or reading again with nothing changed; a 4 needs you", async () => {
     const r = await runPolicy("routed", EVERY);
     expect(done(r)).toEqual(["gate1", "gate2", "gate3", "review1", "review2", "review3", "stall1", "stall2", "stall3"]);
     const why = (kind: string, level: number) => r.tasks.find((t) => t.task.kind === kind && t.task.level === level)!.escalations;
     expect(why("gate", 3)).toEqual(["Escalated · the same gate failed twice in a row: the planner's models take the work"]);
     expect(why("review", 3)).toEqual(["Escalated · the reviewer sent it back twice in a row: the planner's models take the work"]);
-    expect(why("stall", 3)).toEqual(["Escalated · two audits in a row steered it: the planner's models take the work"]);
+    // Going round is seen in its commands (run.ts REREADS), before the first audit would look.
+    expect(why("stall", 3)).toEqual(["Escalated · it read the same files again and again, nothing changed: the planner's models take the work"]);
     // What the worker can do never moves, and costs the lead nothing but the plan.
     expect(why("gate", 1)).toEqual([]);
     expect(r.tasks.find((t) => t.task.kind === "gate" && t.task.level === 1)!.calls).toEqual({ worker: 3, lead: 1, judge: 1 });

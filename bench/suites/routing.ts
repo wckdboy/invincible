@@ -50,10 +50,11 @@ export const suite: Suite = {
       ctx.quality(`routing.${policy}.minutes-per-done`, per(r.minutes), "min", "lower", { note: "virtual minutes every task took (its calls, commands and gates at the stand-ins' seconds), per verified task" });
       const moved = r.tasks.flatMap((t) => t.escalations);
       ctx.quality(`routing.${policy}.escalations`, moved.length, "", "lower", { note: "times work moved up the ladder: each a failure found late, on the cheap model" });
-      ctx.log(`${policy}: ${r.verified} of ${TASKS} verified, ${r.interventions} need you, $${r.usd.toFixed(2)} and ${r.minutes.toFixed(0)} min in all; moved up ${moved.length} times (${["gate", "reviewer", "audits"].map((why) => `${moved.filter((line) => line.includes(why === "gate" ? "same gate" : why === "reviewer" ? "the reviewer" : "two audits")).length} ${why}`).join(", ")})`);
+      const told = (words: string) => moved.filter((line) => line.includes(words)).length;
+      ctx.log(`${policy}: ${r.verified} of ${TASKS} verified, ${r.interventions} need you, $${r.usd.toFixed(2)} and ${r.minutes.toFixed(0)} min in all; moved up ${moved.length} times (${told("same gate")} gate, ${told("the reviewer")} reviewer, ${told("two audits")} audits, ${told("the same files again")} reading again)`);
     }
     const routed = results.get("routed")!;
-    for (const [why, words] of [["gate", "the same gate failed twice in a row"], ["review", "the reviewer sent it back twice in a row"], ["stall", "two audits in a row steered it"]] as const) {
+    for (const [why, words] of [["gate", "the same gate failed twice in a row"], ["review", "the reviewer sent it back twice in a row"], ["stall", "two audits in a row steered it"], ["rereads", "it read the same files again and again"]] as const) {
       ctx.quality(`routing.routed.escalations.${why}`, routed.tasks.filter((t) => t.escalations.some((line) => line.includes(words))).length, "tasks", "lower", { note: `routed tasks whose work moved up because ${words}` });
     }
     ctx.quality("routing.rule.pinned-moved", results.get("pinned")!.tasks.reduce((sum, t) => sum + t.movedOffPins, 0), "turns", "lower", { note: "turns of a pinned agent's work answered by a model other than its own (the rule: never)" });

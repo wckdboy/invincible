@@ -83,20 +83,27 @@ each task's hidden truth:
   designed on these terms. Whether it helps your own work is the `yours` eval suite's to say, with real models and
   real money (docs/EVALS.md).
 
-On 28 November 2026 (seed 20 261 112), main as it was (c12cefd9) against the escalation ladder's three triggers, with
-pins and rungs kept:
+On 28 November 2026 (seed 20 261 112), main as it was (c12cefd9) against the escalation ladder's triggers, with pins
+and rungs kept:
 
 | Routed | Verified | Interventions per verified | $ per verified | Minutes per verified | Moved up |
 |---|---|---|---|---|---|
 | main: a gate failing twice alone | 21 of 36 | 0.714 | 1.28 | 6.62 | 4 |
 | a gate, the review or the audits saying no twice | 29 of 36 | 0.241 | 1.01 | 4.32 | 18 |
+| and going round seen in the commands (`REREADS`) | 29 of 36 | 0.241 | 0.633 | 3.31 | 18 |
 | the bounds: all on the worker / all on the lead | 18 / 29 | 1 / 0.241 | 1.46 / 0.693 | 7.58 / 3.56 | 0 / 0 |
 
 On main, both rules were broken. A pinned agent's work went to the planner's models on 8 turns (`pinned` was `routed`
-again), and work on the lead "escalated" onto the lead. The ladder now verifies what the lead can do, but under these
-terms all on the lead is still cheaper and faster per verified task. The cost is failure found late: a worker going
-round spends 40 turns before a second audit steers it, and one the reviewer sends back spends three rounds. Finding it
-sooner is the next step.
+again), and work on the lead "escalated" onto the lead.
+
+The ladder's second step verified what the lead can do, but under these terms all on the lead was still cheaper and
+faster per verified task. The cost was failure found late: a worker going round spent 40 turns before a second audit
+steered it.
+
+Seen in its commands instead, the work moves after `REREADS` reads of files it had read, nothing changed since: about a
+third of those turns. Routed is then cheaper and faster per verified task than all on the lead, with the same tasks
+verified. The stand-in that goes round reads its three files in turn, so it is caught as soon as the count allows. How
+soon a real agent going round is caught is what its threshold is checked against: the first real outcome's trail.
 
 ### desktop: an agent's desktop, fast and stable
 

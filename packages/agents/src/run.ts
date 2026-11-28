@@ -23,12 +23,24 @@ import { checksAfter, tellsAfter, type Trip, tripOf } from "./tripwires.ts";
 
 export type RunRole = "planner" | "engineer" | "reviewer";
 
-/** What moved the work up to the planner's models (escalate): the same gate, the review, or the audits, each twice in a row. */
-export type EscalationWhy = "gate" | "review" | "stall";
+/**
+ * What moved the work up to the planner's models (escalate): the same gate, the review, or the audits, each twice in a
+ * row; or the work going round, its files read again REREADS times with nothing changed.
+ */
+export type EscalationWhy = "gate" | "review" | "stall" | "rereads";
 
 /** Why the work moved up, in words that begin a sentence (every surface says it so: the trail, a device, the terminal). */
 export const escalatedWhy = (event: { why: EscalationWhy }): string =>
-  ({ gate: "The same gate failed twice in a row", review: "The reviewer sent it back twice in a row", stall: "Two audits in a row steered it" })[event.why];
+  ({ gate: "The same gate failed twice in a row", review: "The reviewer sent it back twice in a row", stall: "Two audits in a row steered it", rereads: "It read the same files again and again, nothing changed" })[event.why];
+
+/**
+ * Going round, seen without a model's word (escalate): this many of the work's commands, since it last changed anything,
+ * only showed again a file it had shown since then, and the rest of the work is the planner's. A check (its tests, its
+ * typecheck) changes nothing; an edit, or a script that could have, starts the count again. The first real outcome's
+ * agent read two files in 44 of its first 82 commands, writing nothing, while its audits said it was getting closer
+ * (19 November 2026).
+ */
+export const REREADS = 10;
 
 export interface RunDeps {
   /**
@@ -2189,12 +2201,33 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     let failedLast = new Set<string>();
     /** Whether the reviewer sent the last submission back (escalate's: twice in a row moves the work). */
     let sentBackLast = false;
+    /** The files the work has shown since it last changed anything, and how many of its commands since only showed them again. */
+    const shownSince = new Set<string>();
+    let rereads = 0;
     /** The work goes up the ladder, once: the engineer's models to the planner's (escalate). False: it can't, or has. */
     const climb = (event: { why: "gate"; gate: string } | { why: Exclude<EscalationWhy, "gate"> }): boolean => {
       if (!o.escalate || worker !== "engineer") return false;
       worker = "planner";
       emit({ type: "escalated", to: worker, ...event });
       return true;
+    };
+    /**
+     * A command that ran, counted for going round (REREADS): it changed something, and the count starts again; it only
+     * showed files it had shown since, and it is one more. Past REREADS the work goes up (climb), and what its next turn is
+     * told says why: the words to add to it, or none.
+     */
+    const goingRound = (command: string, result: ExecResult): string => {
+      if (changesOf(command) !== "nothing") {
+        shownSince.clear();
+        rereads = 0;
+        return "";
+      }
+      const files = contentsOf(command);
+      if (!files?.length || result.exitCode !== 0) return "";
+      if (files.every((file) => shownSince.has(file))) rereads += 1;
+      for (const file of files) shownSince.add(file);
+      if (rereads < REREADS || !climb({ why: "rereads" })) return "";
+      return `\n\nThe work has read the same files again ${rereads} times since anything changed: what it needs is in view. Decide what to change, and change it, before reading more.`;
     };
     const looped = (command: string, seen: string) =>
       finish({ status: "stopped", summary: `Stopped: the same command failed the same way ${LOOP_STOP} times in a row, so running it again would only spend more.\n$ ${command.split("\n")[0]}\n${clip(seen, 600, 300)}` });
@@ -2345,6 +2378,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         await afterBatch(acting, before, first, first + batch.length - 1);
         // What your rules tell you of: each command of the batch that ran, however it ended.
         for (const [i, command] of batch.entries()) if (results[i]) tell(rules, command, results[i]!.exitCode);
+        const round = batch.map((command, i) => (results[i] ? goingRound(command, results[i]!) : "")).join("");
         const stuck = notes.findIndex((n) => n.stop);
         if (stuck >= 0) return looped(batch[stuck]!, seen[stuck]!);
         // Your checks, once the whole batch has run: each that a command of it called for (one that ran and exited 0), once.
@@ -2362,6 +2396,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
             batch.map((command, i) => `[${i + 1}] $ ${command.split("\n")[0]}${command.includes("\n") ? " …" : ""}\n${seen[i]}${notes[i]!.note}`).join("\n\n") +
             checked +
             (dropped ? `\n\n(${dropped} more command${dropped === 1 ? " was" : "s were"} not run: you are out of commands.)` : "") +
+            round +
             cut +
             (await afterStep()),
         });
@@ -2398,6 +2433,8 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         /** A call failed as it failed before: the next turn is a hard one (the only one that is, with tools). */
         let again = false;
         let nudge = "";
+        /** What going round (REREADS) adds to the next turn's words: why the work moved up, when it did. */
+        let round = "";
         /** Words that came as its calls ran (RunDeps.steers): the calls not yet started aren't run, and the words go with their results. */
         let spoke: RunSteer[] = [];
         let unrun = 0;
@@ -2462,6 +2499,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
           if (same.note) again = true;
           if (result.exitCode === 0) checks.push(...checksAfter(rules, r.said));
           nudge ||= gatesRun(r.said, result);
+          round += goingRound(r.said, result);
           told.push({ command: r.said, exit: result.exitCode });
           // (A command's exit is in what it printed: only a tool that couldn't do what it was asked is an error. A result is
           // at most RESULT_KEPT, as the chat route takes one: a command whose output and errors both ran long is cut again.)
@@ -2498,6 +2536,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
           content: (
             checked +
             nudge +
+            round +
             (more ? `\n\n(Your other ${more} call${more === 1 ? " was" : "s were"} not run: at most ${MAX_CALLS} a turn.)` : "") +
             (outOf ? `\n\n(${outOf} of your calls ${outOf === 1 ? "was" : "were"} not run: you are out of commands.)` : "") +
             (spoke.length ? `\n\n${steersSaid(spoke, o.unreviewed)}` : "") +
@@ -2543,7 +2582,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         if (again.stop) return looped(action.command, seen);
         // Your checks after it, if it ran clean and one matches it.
         const checked = result.exitCode === 0 ? await runChecks(checksAfter(rules, action.command), steps, trail) : "";
-        messages.push({ role: "user", content: `${seen}${checked}${again.note}${gatesRun(action.command, result)}${cut}${await afterStep()}`, effort: failedWork(action.command, result) ? STEP_EFFORT.hard : STEP_EFFORT.routine });
+        messages.push({ role: "user", content: `${seen}${checked}${again.note}${gatesRun(action.command, result)}${goingRound(action.command, result)}${cut}${await afterStep()}`, effort: failedWork(action.command, result) ? STEP_EFFORT.hard : STEP_EFFORT.routine });
         continue;
       }
 

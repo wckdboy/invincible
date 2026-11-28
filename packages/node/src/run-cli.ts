@@ -493,7 +493,7 @@ function printAttempt(attempt: number, event: RunEvent): void {
       console.log(`${tag} ${bold(`${event.model} couldn't answer as ${event.role}`)}: ${event.error.split("\n")[0]}. ${event.answered} answers instead.`);
       return;
     case "escalated":
-      console.log(`${tag} ${bold(`${{ gate: "a gate failed twice", review: "the reviewer sent it back twice", stall: "two audits steered it" }[event.why]}: the ${event.to} takes the work`)}`);
+      console.log(`${tag} ${bold(`${{ gate: "a gate failed twice", review: "the reviewer sent it back twice", stall: "two audits steered it", rereads: "it read the same files again and again" }[event.why]}: the ${event.to} takes the work`)}`);
       return;
     case "routed":
       console.log(`${tag} ${bold(`the ${event.to} does the work`)} ${dim(`(${event.why})`)}`);

@@ -112,6 +112,7 @@ describe("where a run stands, from its events", () => {
     // And why else it moved: the reviewer, or the audits, each twice in a row.
     expect(standingAfter(working, { type: "escalated", to: "planner", why: "review" }).doing).toBe("The reviewer sent it back twice in a row: the planner's models take the work");
     expect(standingAfter(working, { type: "escalated", to: "planner", why: "stall" }).doing).toBe("Two audits in a row steered it: the planner's models take the work");
+    expect(standingAfter(working, { type: "escalated", to: "planner", why: "rereads" }).doing).toBe("It read the same files again and again, nothing changed: the planner's models take the work");
   });
 
   test("a command your tripwire stopped is what it is doing until the next thing happens: which rule, and what it did", () => {

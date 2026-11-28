@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { type ChatMessage, type ExecResult, findSecrets } from "@invincible/core";
 import { evidenceCollector } from "../src/effort.ts";
 import type { AgentDriver, AgentEvent } from "../src/harnesses.ts";
-import { parseProposedGates, type RunEvent, type RunOptions, type RunRole, runLoop } from "../src/run.ts";
+import { parseProposedGates, REREADS, type RunEvent, type RunOptions, type RunRole, runLoop } from "../src/run.ts";
 
 /*
  * Gates: "done means this command passes". After the engineer says DONE every gate runs
@@ -704,3 +704,63 @@ describe("a bound on all of a run's gates together (gateSeconds: a handed task's
     expect(outcome.status).toBe("done");
   });
 });
+
+describe("work going round: the same files read again, nothing changed since (escalate)", () => {
+  /** Reads of two files in turn, from the `from`th. */
+  const reads = (n: number, from = 0) => Array.from({ length: n }, (_, i) => sh(`cat src/${(from + i) % 2 === 0 ? "a" : "b"}.ts`));
+
+  test(`${REREADS} reads of what it had read, nothing changed since, and the next turns are the planner's, without a model's word`, async () => {
+    // Both files read, the tests run (a check changes nothing), then REREADS more reads of the same two.
+    const h = harness({ engineer: [...reads(2), sh("bun test"), ...reads(REREADS)], planner: ["1. Do it.\nDone when: it is done.", sh("sed -i 's/old/new/' src/a.ts"), "DONE\nChanged."] }, { escalate: true });
+    expect((await h.run).status).toBe("done");
+    expect(h.events.filter((e) => e.type === "escalated")).toEqual([{ type: "escalated", to: "planner", why: "rereads" }]);
+    const turns = h.seen.filter((s) => s.turn?.loop);
+    expect(turns.map((s) => s.role)).toEqual([...Array(3 + REREADS).fill("engineer"), "planner", "planner"]);
+    // The turn it moves in is told why, and to change something; the one before isn't.
+    expect(turns[3 + REREADS]!.messages.at(-1)!.content).toContain(`read the same files again ${REREADS} times since anything changed`);
+    expect(turns[2 + REREADS]!.messages.at(-1)!.content).not.toContain("the same files again");
+  });
+
+  test("a change between them starts the count again, and reading files it hadn't read is no reading again", async () => {
+    const changed = harness({ engineer: [...reads(2 + REREADS - 1), sh("sed -i 's/old/new/' src/a.ts"), ...reads(2 + REREADS - 1), "DONE\nChanged."] }, { escalate: true });
+    expect((await changed.run).status).toBe("done");
+    expect(changed.events.some((e) => e.type === "escalated")).toBe(false);
+    const many = harness({ engineer: [...Array.from({ length: 2 * REREADS }, (_, i) => sh(`cat src/f${i}.ts`)), "DONE\nRead."] }, { escalate: true });
+    expect((await many.run).status).toBe("done");
+    expect(many.events.some((e) => e.type === "escalated")).toBe(false);
+  });
+
+  test("without the switch nothing moves: the engineer keeps its work, as ever", async () => {
+    const h = harness({ engineer: [...reads(2 + 2 * REREADS), "DONE\nRead."] }, {});
+    expect((await h.run).status).toBe("done");
+    expect(h.events.some((e) => e.type === "escalated")).toBe(false);
+    expect(h.seen.filter((s) => s.turn?.loop).every((s) => s.role === "engineer")).toBe(true);
+  });
+
+  test("with tools, its reads are counted as its commands are: the read tool's, the same two files again, move it up", async () => {
+    const seen: { role: RunRole; loop: boolean }[] = [];
+    const events: RunEvent[] = [];
+    let ids = 0;
+    const read = (path: string) => ({ text: "", calls: [{ id: `call_${++ids}`, name: "read", input: { path } }] });
+    const script = [read("src/a.ts"), read("src/b.ts"), ...Array.from({ length: REREADS }, (_, i) => read(i % 2 === 0 ? "src/a.ts" : "src/b.ts"))];
+    const outcome = await runLoop(
+      { goal: "make it so", environment: "a test sandbox", plan: "", tools: true, escalate: true },
+      {
+        ask: async (role, _messages, turn) => {
+          seen.push({ role, loop: Boolean(turn?.loop) });
+          if (role === "reviewer") return { text: "PASS\nLooks right.", model: "test/reviewer" };
+          if (role === "planner") return { text: "DONE\nRead and decided.", model: "test/planner" };
+          const next = script.shift();
+          if (!next) throw new Error("the engineer ran out of script");
+          return { text: next.text, model: "test/engineer", calls: next.calls, carry: "{}" };
+        },
+        exec: async () => ({ exitCode: 0, stdout: "1\texport const a = 1;\n", stderr: "", durationMs: 1, truncated: false }),
+        emit: (event) => events.push(event),
+      },
+    );
+    expect(outcome.status).toBe("done");
+    expect(events.filter((e) => e.type === "escalated")).toEqual([{ type: "escalated", to: "planner", why: "rereads" }]);
+    expect(seen.filter((s) => s.loop).map((s) => s.role)).toEqual([...Array(2 + REREADS).fill("engineer"), "planner"]);
+  });
+});
+
