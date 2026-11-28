@@ -211,7 +211,14 @@ export function codeTokenShaped(code: string): string | null {
   if (!VENDOR_CODES.some((shape) => shape.test(code))) return tokenShaped(code);
   if (/sk-ant-/i.test(code)) return "an Anthropic key or token";
   if (SIGNED.test(code)) return "a signed token";
-  return findSecrets(code).find((found) => found.kind !== "high-entropy token")?.kind ?? null;
+  // What follows a shape's own fixed start (Google's "4/0A") is read as if pasted alone too: a key glued to it is a key
+  // still, though the scanner's patterns, which begin at a word's edge, don't see it there (the re-check of 28 November
+  // 2026, R10). (Claude's halves begin at "#", an edge already.)
+  for (const text of [code, code.replace(/^4\/0A/, "")]) {
+    const known = findSecrets(text).find((found) => found.kind !== "high-entropy token");
+    if (known) return known.kind;
+  }
+  return null;
 }
 
 /** What you call a seat: one plain line ("Work Max", "Personal Pro"). */

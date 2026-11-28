@@ -211,6 +211,11 @@ describe("the inputs", () => {
     const refused = [`4/sk-ant-oat01-${fakeRun(5, 40)}`, `4/ghp_${fakeRun(6, 36).replace(/[-_]/g, "F")}`, signed, fakeRun(7, 48)];
     for (const code of refused) expect([code.slice(0, 14), answer(code).success]).toEqual([code.slice(0, 14), false]);
     expect(refused.map(codeTokenShaped)).toEqual(["an Anthropic key or token", "GitHub token", "a signed token", "high-entropy token"]);
+    // A key glued to the shape's own "4/0A" is a key still: the scanner reads what follows it as if pasted alone (the
+    // re-check of 28 November 2026, R10).
+    const glued = [`4/0Aghp_${fakeRun(10, 36).replace(/[-_]/g, "F")}`, `4/0AAIza${fakeRun(11, 35)}`];
+    for (const code of glued) expect([code.slice(0, 10), answer(code).success]).toEqual([code.slice(0, 10), false]);
+    expect(glued.map(codeTokenShaped)).toEqual(["GitHub token", "Google API key"]);
   });
 
   test("the address of the page Google's sign-in lands on may be pasted whole: its code is taken out of it, and only that page's (the review's L1)", () => {
