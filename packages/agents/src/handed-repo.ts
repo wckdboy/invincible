@@ -745,11 +745,12 @@ export const handedDrop = (task: string, nonce: string, keep = HANDED_KEEP): str
 export const handedTree = (root: string, base: string, task: string, keep = HANDED_KEEP): string => heldGit(TREE_SCRIPT, root, base, keep, task);
 export const handedSweep = (root: string, task: string, keep = HANDED_KEEP): string => heldGit(SWEEP_SCRIPT, root, task, keep);
 /**
- * In the task's VM, as a round of its gates begins: the manifests the node's install cache is filled from (sandbox
- * install-cache.ts), and nothing else of the tree: its bun.lock and the package.json of each workspace it names, as the
- * tree `tree` holds them (with no repository, `tree` "": its folder's files, none through a link at its end), a gzipped
- * tar, as base64 on stdout. Nothing at all when the tree has no bun.lock. The filler checks what it is given itself:
- * this only takes it out of the tree.
+ * In the task's VM, as a round of its gates begins: what the node's install cache is filled from (sandbox
+ * install-cache.ts), and nothing else of the tree: its bun.lock alone, as the tree `tree` holds it (with no repository,
+ * `tree` "": its folder's, never through a link), a gzipped tar, as base64 on stdout. Nothing at all when the tree has
+ * none. The filler checks it itself, and fills from its packages alone (the twelfth fabric re-review's R12-2): no
+ * package.json of the tree's reaches it, so no catalog, override or workspace of one does. This only takes it out of the
+ * tree, and says early what can't be read.
  */
 const ROUND_MANIFESTS_SCRIPT = `import base64, io, stat, tarfile
 ${BUN_LOCK_PY}
@@ -772,23 +773,14 @@ lock = blob('bun.lock')
 if lock is None: sys.exit(0)
 if len(lock) > LIMIT: sys.exit('its bun.lock is too big to fill from')
 try:
-    parsed = strict(lock.decode('utf-8'), 'its bun.lock')
+    strict(lock.decode('utf-8'), 'its bun.lock')
 except (Unread, UnicodeDecodeError) as e:
     sys.exit(str(e)[:300] + ', so nothing is filled')
-files = {'bun.lock': lock}
-for path in (parsed.get('workspaces') or {}) if isinstance(parsed, dict) else ():
-    if not isinstance(path, str) or path.startswith('/') or '..' in path.split('/'): sys.exit('its bun.lock names a workspace out of its tree, so nothing is filled')
-    where = path + '/package.json' if path else 'package.json'
-    data = blob(where)
-    if data is None: sys.exit("its bun.lock names a workspace whose package.json isn't there, " + where[:100] + ', so nothing is filled')
-    files[where] = data
-if sum(len(data) for data in files.values()) > LIMIT: sys.exit('its manifests are too big to fill from')
 packed = io.BytesIO()
 with tarfile.open(fileobj=packed, mode='w:gz', format=tarfile.PAX_FORMAT) as out:
-    for name, data in sorted(files.items()):
-        info = tarfile.TarInfo(name)
-        info.size, info.mode = len(data), 0o644
-        out.addfile(info, io.BytesIO(data))
+    info = tarfile.TarInfo('bun.lock')
+    info.size, info.mode = len(lock), 0o644
+    out.addfile(info, io.BytesIO(lock))
 sys.stdout.write(base64.b64encode(packed.getvalue()).decode())`;
 
 /** Where a round's VM keeps the tree its gates run on (ROUND_STORE_SCRIPT): its own /work, its own user's. */
@@ -799,7 +791,7 @@ export const handedRoundTake = (root: string, tree: string): string => {
   if (tree !== "" && !TREE_ID.test(tree)) throw new Error("not a tree");
   return tree ? heldGit(ROUND_PACK_SCRIPT, root, tree) : heldGit(ROUND_TAR_SCRIPT, root);
 };
-/** The manifests the node's install cache is filled from, read in the task's VM (`tree`, its clone's; "" for its folder). */
+/** What the node's install cache is filled from, its bun.lock, read in the task's VM (`tree`, its clone's; "" for its folder). */
 export const handedManifests = (root: string, tree: string): string => {
   if (tree !== "" && !TREE_ID.test(tree)) throw new Error("not a tree");
   return heldGit(ROUND_MANIFESTS_SCRIPT, root, tree);

@@ -33,9 +33,9 @@ type Host = Pick<SandboxHost, "createTaskVm" | "createGateVm" | "sweepGates" | "
 const shell = (command: string): string[] => ["bash", "--noprofile", "--norc", "-c", command];
 
 /**
- * The node's install cache filled for a round of a task's gates (sandbox install-cache.ts): the manifests `fill` prints in
- * the task's VM (a gzipped tar, as base64), given as they are to the node's filler, which unpacks and checks them itself.
- * Null when there are none (the tree has no bun.lock).
+ * The node's install cache filled for a round of a task's gates (sandbox install-cache.ts): what `fill` prints in the
+ * task's VM (its tree's bun.lock, a gzipped tar, as base64), given as it is to the node's filler, which unpacks and checks
+ * it itself. Null when there is none (the tree has no bun.lock).
  */
 async function filled(host: Host, vm: string, fill: string): Promise<HandedRound["cache"]> {
   const began = Date.now();
@@ -149,7 +149,7 @@ export class TaskVms {
       round: async (take, store, fill, timeoutSec, signal): Promise<HandedRound> => {
         if (signal.aborted) throw new Error("its work has stopped");
         await endRound();
-        // Its install cache filled first, from the tree's manifests alone, as the round's VM mounts it as it is made.
+        // Its install cache filled first, from the tree's bun.lock alone, as the round's VM mounts it as it is made.
         const cache = fill && host.hasInstallCache() ? await filled(host, vm, fill) : null;
         if (signal.aborted) throw new Error("its work has stopped");
         const gate = (await host.createGateVm({ task: ask.task, of: vm, beside: ask.vm, run, ttlMinutes: TASK_VM_MINUTES }, signal)).id;

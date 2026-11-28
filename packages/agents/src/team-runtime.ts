@@ -74,7 +74,7 @@ export interface HandedVm {
    * image, with no network and no lease, where nothing of the task's runs, given its tree as `take` prints it in this VM
    * to `store` there (as that VM's own user). Its gates and the node's checks of its work run there, as their own user,
    * each on a copy of that tree of its own. The round before goes as this one is made, and the last with the task. `fill`:
-   * what prints the manifests the node's install cache is filled from first, in this VM (handedManifests), or "".
+   * what prints the bun.lock the node's install cache is filled from first, in this VM (handedManifests), or "".
    */
   round(take: string, store: string, fill: string, timeoutSec: number, signal: AbortSignal): Promise<HandedRound>;
   follow?(offset: number, signal: AbortSignal): Promise<FollowedRun>;
@@ -93,7 +93,7 @@ export interface HandedVm {
 export interface HandedRound {
   /** Its tree's way there: the task's VM's side, and the round's VM's, which prints the tree it holds. */
   taken: HandedPipe;
-  /** The node's install cache, filled for it from the tree's manifests before its VM was made: whether, why not, and how long it took; null, none was asked (no bun.lock, or no cache). */
+  /** The node's install cache, filled for it from the tree's bun.lock before its VM was made: whether, why not, and how long it took; null, none was asked (no bun.lock, or no cache). */
   cache: { filled: boolean; said: string; ms: number } | null;
   /** A command as gate user `uid` (core's VM_GATE_UID_FIRST…), from the gates' folder (core's VM_GATES), in the round's VM. */
   gates(command: string, timeoutSec: number, signal: AbortSignal, uid: number): Promise<ExecResult>;

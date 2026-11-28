@@ -1,8 +1,9 @@
-import { chownSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chownSync, existsSync, mkdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { type ActionClass, COMPUTER_START, type Decision, decide, type ExecResult, isGateUid, isReservedGatewayScope, LEASE_FILE, MAC_VM_OVERHEAD, NOTES_DIR, randomBytes, redact, type SandboxNetwork, type SandboxView, type SeatKind, TeamWorkspaceRun, VM_OVERHEAD, type VmOverhead, WORKSPACE_OWN } from "@invincible/core";
 import { gateSweepArgs, gateUsers } from "./gate.ts";
-import { FILLER_UID, fillerArgs } from "./install-cache.ts";
+import { FILL_PROXY_SOCKET, FILLER_UID, fillerArgs } from "./install-cache.ts";
+import { REGISTRY, type RegistryProxy, registryProxy } from "./registry-proxy.ts";
 import { layoutPath, MOVE_PY, WORK_TREE } from "./layout.ts";
 import {
   CONTAINER_MAJOR,
@@ -2714,33 +2715,59 @@ export class SandboxHost {
 
   /**
    * The node's install cache filled for a round of another node's task's gates (install-cache.ts), before its VM is made:
-   * a filler container of the node's own from the task's VM's image, given `manifests` (a gzipped tar of the tree's bun.lock and
-   * the package.json files it names) on its input and nothing else of the tree. No capability, a read-only root, its own
-   * user, the cache its one writable mount, Docker's default bridge (it reaches what the host does: R12-2), removed as
-   * it ends (and at its deadline). Exit 0: what bun.lock names is in the cache; else why not. A Linux host's alone.
+   * a filler container of the node's own from the task's VM's image, given `manifests` (a gzipped tar of the tree's
+   * bun.lock) on its input and nothing else of the tree. No capability, a read-only root, its own user, the cache its one
+   * writable mount, and no network: its one way out is the node's proxy to the registry (registry-proxy.ts), on a socket
+   * of this fill's own, open while it runs. Removed as it ends (and at its deadline). Exit 0: what bun.lock names of the
+   * registry's is in the cache; else why not. A Linux host's alone.
    */
   async fillCache(of: string, manifests: Uint8Array, timeoutSec = 600): Promise<ExecResult> {
     if (this.apple || !this.opts.installCache) throw new SandboxError("this node has no install cache to fill", 424);
     const view = await this.get(of);
     if (!view || !view.task) throw new SandboxError("a cache is filled for another node's task's VM on this host, and that one is not here", 404);
     const cache = this.cacheFolder();
+    const root = process.getuid?.() === 0;
     const user = process.getuid?.() ? `${process.getuid!()}:${process.getgid!()}` : `${FILLER_UID}:${FILLER_UID}`;
-    const name = containerName(`fill-${hex(randomBytes(5))}`);
-    const args = fillerArgs({ name, image: view.image, cache, user, path: await this.imagePath(view.image) });
-    const started = performance.now();
-    const proc = Bun.spawn([this.bin, ...args], { stdin: new Blob([new Uint8Array(manifests)]), stdout: "pipe", stderr: "pipe" });
-    let late = false;
-    const timer = setTimeout(() => {
-      late = true;
-      proc.kill("SIGKILL");
-    }, timeoutSec * 1000);
-    const [out, err, code] = await Promise.all([readCapped(proc.stdout, MAX_OUTPUT), readCapped(proc.stderr, MAX_OUTPUT), proc.exited]);
-    clearTimeout(timer);
-    // (A client killed leaves its container running: it goes by its own name.)
-    if (late) await this.docker(["rm", "-f", name], 60_000).catch(() => null);
-    const said = late ? `its fill ran out of its ${timeoutSec} s` : redact(err.text.trim()).slice(-600);
-    this.opts.ledger({ class: "modify", resource: "sandbox.install-cache", target: name, verdict: "allow", run: view.run, detail: `the install cache filled for another node's task ${view.task}, from ${view.image}: exit ${late ? 137 : code}` });
-    return { exitCode: late ? 137 : code, stdout: out.text, stderr: said, durationMs: Math.round(performance.now() - started), truncated: out.truncated || err.truncated };
+    const tag = hex(randomBytes(5));
+    const name = containerName(`fill-${tag}`);
+    // Its one way out: the node's proxy, on a socket in a folder of this fill's own beside the cache (a path Docker's
+    // daemon sees as the node does), the filler's user's alone.
+    const way = join(dirname(cache), `fill-${tag}`);
+    const socket = join(way, FILL_PROXY_SOCKET);
+    if (Buffer.byteLength(socket) > 100) throw new SandboxError(`its fill's socket would be too long a path: ${socket}`, 424);
+    mkdirSync(way, { mode: 0o700 });
+    let proxy: RegistryProxy | null = null;
+    try {
+      proxy = await registryProxy(socket);
+      if (root) for (const at of [way, socket]) chownSync(at, FILLER_UID, FILLER_UID);
+      const args = fillerArgs({ name, image: view.image, cache, user, path: await this.imagePath(view.image), proxy: way });
+      const started = performance.now();
+      const proc = Bun.spawn([this.bin, ...args], { stdin: new Blob([new Uint8Array(manifests)]), stdout: "pipe", stderr: "pipe" });
+      let late = false;
+      const timer = setTimeout(() => {
+        late = true;
+        proc.kill("SIGKILL");
+      }, timeoutSec * 1000);
+      const [out, err, code] = await Promise.all([readCapped(proc.stdout, MAX_OUTPUT), readCapped(proc.stderr, MAX_OUTPUT), proc.exited]);
+      clearTimeout(timer);
+      // (A client killed leaves its container running: it goes by its own name.)
+      if (late) await this.docker(["rm", "-f", name], 60_000).catch(() => null);
+      const counts = proxy.close();
+      proxy = null;
+      const said = late ? `its fill ran out of its ${timeoutSec} s` : redact(err.text.trim()).slice(-600);
+      const refused = counts.refused ? `, ${counts.refused} asked of anything else and refused (the first: ${JSON.stringify(counts.first[0] ?? "")})` : "";
+      this.opts.ledger({ class: "modify", resource: "sandbox.install-cache", target: name, verdict: "allow", run: view.run, detail: `the install cache filled for another node's task ${view.task}, from ${view.image}: exit ${late ? 137 : code}; its way out: ${counts.tunnels} tunnels to ${REGISTRY.host}:${REGISTRY.port}${refused}` });
+      return { exitCode: late ? 137 : code, stdout: out.text, stderr: said, durationMs: Math.round(performance.now() - started), truncated: out.truncated || err.truncated };
+    } finally {
+      proxy?.close();
+      for (const remove of [() => unlinkSync(socket), () => rmdirSync(way)]) {
+        try {
+          remove();
+        } catch {
+          // (Already gone, or never made.)
+        }
+      }
+    }
   }
 
   /**
