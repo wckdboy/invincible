@@ -55,12 +55,11 @@ struct HomeList: View {
         let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
         let rows = Home.filter(rows, query: query)
         let chats = searching ? Chats.filter(history.chats ?? [], query: query) : []
-        List {
+        container {
             if ownHead {
                 // Its search, at the top of the list, scrolling away with it.
                 HomeSearchField(text: $query)
-                    .listRowInsets(EdgeInsets(top: Space.s1, leading: Metrics.margin, bottom: Space.s2, trailing: Metrics.margin))
-                    .listRowSeparator(.hidden)
+                    .padding(EdgeInsets(top: Space.s1, leading: Metrics.margin, bottom: Space.s2, trailing: Metrics.margin))
             }
             ForEach(rows) { row in
                 rowButton(row)
@@ -73,15 +72,16 @@ struct HomeList: View {
                     }
                 } header: {
                     Text("Chats").font(.footnote.weight(.semibold)).foregroundStyle(.secondary).textCase(nil)
+                        .padding(ownHead ? EdgeInsets(top: Space.s4, leading: Metrics.margin, bottom: Space.s1, trailing: Metrics.margin) : EdgeInsets())
                 }
             } else if searching && rows.isEmpty && history.chats != nil {
                 Text("Nothing says “\(query)”.").font(.subheadline).foregroundStyle(.secondary).listRowSeparator(.hidden)
+                    .padding(ownHead ? EdgeInsets(top: Space.s2, leading: Metrics.margin, bottom: Space.s2, trailing: Metrics.margin) : EdgeInsets())
             }
             if !searching && (push.reach == .turnOn || push.reach == .settings) {
                 notificationsOff.listRowSeparator(.hidden)
             }
         }
-        .listStyle(.plain)
         .safeAreaInset(edge: .top, spacing: 0) { if saysLink { link } }
         .navigationTitle("Invincible")
         .modifier(HomeBar(own: ownHead, query: $query, settings: settings) { newMenu })
@@ -98,6 +98,20 @@ struct HomeList: View {
         // every element in it.)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home")
+    }
+
+    /// Where the rows are: an iPhone's own stack in a scroll view, rows on the page with nothing around them; an iPad's
+    /// sidebar a List, with its selection and separators. (A scroll's every XCUITest snapshot walked the List's cells, each
+    /// a UIKit container sorted by its place, as well as their SwiftUI nodes: PerfTests.testScrollHome, profiled.)
+    @ViewBuilder private func container<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        if ownHead {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) { content() }
+            }
+            .scrollDismissesKeyboard(.immediately)
+        } else {
+            List { content() }.listStyle(.plain)
+        }
     }
 
     /// + : a new chat with your agent, or a new agent where this device may make one.
@@ -167,9 +181,10 @@ struct HomeList: View {
     /// A row that chooses: marked on a quiet ground while what it chose is on screen beside it, said so to VoiceOver.
     private func mark<Row: View>(_ choice: HomePick, @ViewBuilder _ row: () -> Row) -> some View {
         let here = choice == current
-        return Button { open(choice) } label: { row().contentShape(.rect) }
+        let insets = EdgeInsets(top: Space.s1, leading: Metrics.margin, bottom: Space.s1, trailing: Metrics.margin)
+        return Button { open(choice) } label: { row().padding(ownHead ? insets : EdgeInsets()).contentShape(.rect) }
             .buttonStyle(.plain)
-            .listRowInsets(EdgeInsets(top: Space.s1, leading: Metrics.margin, bottom: Space.s1, trailing: Metrics.margin))
+            .listRowInsets(insets)
             .listRowBackground(RosterMark().opacity(here ? 1 : 0))
             .accessibilityAddTraits(here ? .isSelected : [])
     }
@@ -191,6 +206,7 @@ struct HomeList: View {
             .buttonStyle(.borderless)
             .frame(minHeight: Metrics.touch)
         }
+        .padding(ownHead ? EdgeInsets(top: Space.s1, leading: Metrics.margin, bottom: Space.s1, trailing: Metrics.margin) : EdgeInsets())
         .listRowInsets(EdgeInsets(top: Space.s1, leading: Metrics.margin, bottom: Space.s1, trailing: Metrics.margin))
         .accessibilityIdentifier("home.notifications")
     }
