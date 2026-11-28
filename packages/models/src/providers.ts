@@ -35,6 +35,12 @@ export interface ProviderPreset {
   sees?: readonly string[];
   /** A subscription sold for coding tools, not the vendor's ordinary API (see CodingPlan). */
   plan?: CodingPlan;
+  /**
+   * Calls a minute it takes before it refuses a burst (a 429 that names no allowance), kept by every caller on a node
+   * (bursts.ts Pacer): a call waits its turn rather than be refused. Absent: none measured, and a burst is waited out
+   * after its 429, as ever.
+   */
+  pace?: number;
 }
 
 /**
@@ -174,6 +180,9 @@ export const PRESETS: ProviderPreset[] = [
     // this address and placed 8 of 8 clicks, 11 to 13 px off (27 November 2026, docs/EVALS.md). GLM-5.3 and DeepSeek V4
     // Pro take none.
     sees: ["kimi-k3.1-pro", "kimi-k3", "qwen4-max", "qwen3.8-max"],
+    // Under the burst it refused past about 25 calls a minute (28 November 2026, the desktop bench): one less, kept by
+    // every caller on a node, its agents' runs and its tools' calls together.
+    pace: 24,
     note: "OpenCode Go ($10 a month; Go Plus $40), on your OpenCode Console key at its own address (pay-as-you-go has another). Each model has a monthly allowance, a fifth of it in any five hours and half in a week. DeepSeek's models want Global chosen under Regions in the Console.",
   },
   {

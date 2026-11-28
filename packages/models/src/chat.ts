@@ -5,10 +5,10 @@ import { conversationFor } from "./responses.ts";
 import { isEmbeddingModel } from "./embeddings.ts";
 import { PRIMARY_SYSTEM, runtimeContext, SHOW_GUIDE, TOOL_GUIDE } from "./persona.ts";
 import { isBurst, windowScope, windowsOf } from "./windows.ts";
-import { waitingOutBursts } from "./bursts.ts";
+import { type Pacer, waitingOutBursts } from "./bursts.ts";
 import { refusedKeysOf } from "./refused-keys.ts";
 import { followsFormat, readModelCheck, readsScreens, type ModelCheck } from "@invincible/core";
-import { offeredModels, onPlan, PLAN_PROVIDERS, planOf, providerRecords, QUIET_MS, quietly, resolveProvider, whyNoKey } from "./providers.ts";
+import { offeredModels, onPlan, PLAN_PROVIDERS, planOf, preset, providerRecords, QUIET_MS, quietly, resolveProvider, whyNoKey } from "./providers.ts";
 import { apartMatches, effortFor, parseRef, pinnedEffort, roleModels, rotated } from "./roster.ts";
 
 export interface ModelsContext {
@@ -19,6 +19,8 @@ export interface ModelsContext {
   quietMs?: number;
   /** Waits out a burst before a model's call is asked again (bursts.ts; tests count the waits instead). */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  /** The node's one pacer (bursts.ts Pacer): a provider with a pace is called within it by every caller. Absent: no pace kept. */
+  pacer?: Pacer;
   /**
    * Told of every model call as it ends: the role, the model, and its tokens as the provider reported them
    * (null: it reported nothing). Counts only. Whoever holds the context keeps its own tally with it.
@@ -362,7 +364,7 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
         // And too many calls at once is waited out and asked again (bursts.ts), except on your own machine's runtime.
         fetch: provider.local
           ? quietly(ctx.fetch ?? fetch, ctx.quietMs ?? QUIET_MS.local)
-          : waitingOutBursts(quietly(ctx.fetch ?? fetch, ctx.quietMs ?? QUIET_MS.remote), { provider: parsed.provider, now: () => windowsOf(ctx.store).now(), ...(ctx.sleep ? { sleep: ctx.sleep } : {}) }),
+          : waitingOutBursts(quietly(ctx.fetch ?? fetch, ctx.quietMs ?? QUIET_MS.remote), { provider: parsed.provider, now: () => windowsOf(ctx.store).now(), ...(ctx.sleep ? { sleep: ctx.sleep } : {}), ...(ctx.pacer && preset(parsed.provider)?.pace ? { pace: { pacer: ctx.pacer, perMinute: preset(parsed.provider)!.pace! } } : {}) }),
       });
       for (const texts of handed) fresh.interject(texts, "");
       return fresh;

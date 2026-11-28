@@ -2,9 +2,9 @@ import type { Database } from "bun:sqlite";
 import { randomId, redact, sha256B64u, type Usage } from "@invincible/core";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import { usageReader } from "./gateway-usage.ts";
-import { gatewaySession, keyHeaders, planOf, resolveProvider } from "./providers.ts";
+import { gatewaySession, keyHeaders, planOf, preset, resolveProvider } from "./providers.ts";
 import { refusedKeysOf } from "./refused-keys.ts";
-import { WAITED, waitingOutBursts } from "./bursts.ts";
+import { type Pacer, WAITED, waitingOutBursts } from "./bursts.ts";
 import { clockUtc, retryAfterAt, spanWords, windowScope, windowsOf, type SpentWindow, type SpentWindows } from "./windows.ts";
 
 /*
@@ -161,6 +161,8 @@ export interface GatewayContext {
   onUsage?(call: { label: string; provider: string; model: string; usage: Usage | null }): void;
   /** Waits out a burst before a model call is asked again (bursts.ts; tests count the waits instead). */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  /** The node's one pacer (bursts.ts Pacer), shared with its chat(): a provider with a pace is called within it. Absent: none kept. */
+  pacer?: Pacer;
 }
 
 /** A call's `model`, when it is one a model's name may be, or "unknown". */
@@ -432,7 +434,7 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
   // your own machine, isn't anyone's plan: its refusals are said as they come.)
   const asking =
     request.method === "POST" && !provider.local
-      ? waitingOutBursts(ctx.fetch ?? fetch, { provider: providerId, now: () => windows.now(), ...(ctx.sleep ? { sleep: ctx.sleep } : {}) })
+      ? waitingOutBursts(ctx.fetch ?? fetch, { provider: providerId, now: () => windows.now(), ...(ctx.sleep ? { sleep: ctx.sleep } : {}), ...(ctx.pacer && preset(providerId)?.pace ? { pace: { pacer: ctx.pacer, perMinute: preset(providerId)!.pace! } } : {}) })
       : (ctx.fetch ?? fetch);
   let upstream: Response;
   try {

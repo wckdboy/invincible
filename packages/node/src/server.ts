@@ -140,7 +140,7 @@ import {
   LEASE_FILE,
 } from "@invincible/core";
 import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, chooseAgentModels, endLeftovers, sweepLeftovers, engramFound, checkModel, eyesForVm, clip, type Trip, tellsAfter, tripOf } from "@invincible/agents";
-import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, signInWindowsOf, windowsOf, choreRole, Steering, countable, paidFor, nowLine, PRIMARY_NAME } from "@invincible/models";
+import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, signInWindowsOf, windowsOf, choreRole, Steering, countable, paidFor, nowLine, PRIMARY_NAME, Pacer } from "@invincible/models";
 import { answerPush, answerSync, PairingError, type PairingHost, peerOf, signedFetch, signedPost, type SyncEngine } from "@invincible/link";
 import { type Device, enrollDevice, type HandoffGrantRecord, isFullNode, type LedgerStore, revokeDevice, type SecretInfo, type Vault } from "@invincible/ledger";
 import { DESKTOP_IMAGE, HARDWARE_IMAGE, type LedgerEntryInput, remakeAsk, SandboxError, type SandboxStream, STREAM_LINE_LIMIT, TEAM_LEASE_MINUTES } from "@invincible/sandbox";
@@ -921,10 +921,12 @@ export function createApp(ctx: AppContext) {
     viaFleet({ base, runtimes: localRuntimes, here: ownLocalModels, peers: modelPeers, send: (peer, payload, signal) => signedFetch(ctx.identity, peer, routes.localModelCall.path, payload, signal ? { signal } : { timeoutMs: 30 * 60_000 }) });
   const modelFetch = overFleet(((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init)) as typeof fetch);
 
+  /** This node's one pace for each provider that has one (bursts.ts Pacer): its chats, its agents' runs and its tools' calls through the gateway alike. */
+  const pacer = new Pacer();
   /** The brain, counting what each call cost on this node (counts only); a local model only a peer serves is asked there. */
   const brainFor = (p: Principal) => {
     const who = whoOf(p);
-    return { store: ctx.store, vault: ctx.vault, fetch: modelFetch, spent: (call: { role: string; ref: string; usage: Usage | null }) => ctx.usage.note(who, call.role, call.ref, call.usage) };
+    return { store: ctx.store, vault: ctx.vault, fetch: modelFetch, pacer, spent: (call: { role: string; ref: string; usage: Usage | null }) => ctx.usage.note(who, call.role, call.ref, call.usage) };
   };
   function ownerOnly(p: Principal): void {
     if (!isOwner(p)) throw new HttpError(403, "chats are yours alone");
@@ -5227,7 +5229,7 @@ export function createApp(ctx: AppContext) {
       // run's own chain, which this VM never sees, as it never sees a key: fabric/handoff.ts.)
       if (path.startsWith("/fabric/tool/")) return handleFabricTool(req, { tokens: ctx.tokens, handoffs: ctx.handoffs ?? null });
       if (!path.startsWith("/gw/")) throw new HttpError(404, "not found");
-      return handleGateway(req, { store: ctx.store, vault: ctx.vault, tokens: ctx.tokens, onUsage: toolCalled });
+      return handleGateway(req, { store: ctx.store, vault: ctx.vault, tokens: ctx.tokens, onUsage: toolCalled, pacer });
     }
 
     // Over Q-AMP a node reaches this node's API routes, and nothing else (fabric/service.ts).
@@ -5239,7 +5241,7 @@ export function createApp(ctx: AppContext) {
 
     if (path.startsWith("/gw/")) {
       if (listener !== "loopback") throw new HttpError(404, "not found");
-      return handleGateway(req, { store: ctx.store, vault: ctx.vault, tokens: ctx.tokens, onUsage: toolCalled });
+      return handleGateway(req, { store: ctx.store, vault: ctx.vault, tokens: ctx.tokens, onUsage: toolCalled, pacer });
     }
 
     // A loop's webhook: signed by the loop's own secret, not by a device (hookRequest).

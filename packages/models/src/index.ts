@@ -8,6 +8,7 @@ export * from "./providers.ts";
 export * from "./roster.ts";
 export * from "./refused-keys.ts";
 export * from "./windows.ts";
+export { Pacer } from "./bursts.ts";
 export * from "./responses.ts";
 export * from "./mcp-connectors.ts";
 export * from "./oauth.ts";

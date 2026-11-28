@@ -29,6 +29,30 @@ export interface BurstWait {
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   /** The clock, for a retry-after given as a date. */
   now?: () => number;
+  /** The provider's pace, kept before each call (Pacer): the node's one pacer, and its calls a minute (providers.ts pace). */
+  pace?: { pacer: Pacer; perMinute: number };
+}
+
+const MINUTE_MS = 60_000;
+
+/**
+ * A provider's pace, kept by every caller on a node: one pacer a node, given to chat() and to the gateway alike (a run's
+ * turn and a chat, a tool's call and a look), so several agents on one plan wait their turn rather than meet its burst
+ * and wait that out (28 November 2026: OpenCode Go refused past about 25 calls a minute). A call takes the first moment
+ * it can begin with fewer than its provider's calls a minute begun in the minute before it, and is counted as begun then.
+ */
+export class Pacer {
+  /** Each provider's calls begun (or to begin) within the last minute, in order. */
+  private readonly begun = new Map<string, number[]>();
+
+  /** How long a call to `provider` waits from `at` to begin within `perMinute` calls in any minute (0: at once). */
+  turn(provider: string, perMinute: number, at: number): number {
+    const kept = (this.begun.get(provider) ?? []).filter((t) => t > at - MINUTE_MS);
+    const begin = kept.length >= perMinute ? Math.max(at, kept[kept.length - perMinute]! + MINUTE_MS) : at;
+    kept.push(begin);
+    this.begun.set(provider, kept);
+    return begin - at;
+  }
 }
 
 const sleeping = (ms: number, signal?: AbortSignal) =>
@@ -61,6 +85,9 @@ export const waitingOutBursts = (base: typeof fetch, wait: BurstWait): typeof fe
     const signal = init?.signal ?? undefined;
     let waited = 0;
     for (let asked = 1; ; asked++) {
+      // Its turn within its provider's pace first, where it has one (Pacer): the wait a burst would have cost, taken before.
+      const turn = wait.pace ? wait.pace.pacer.turn(wait.provider, wait.pace.perMinute, now()) : 0;
+      if (turn > 0) await sleep(turn, signal);
       const response = await base(input, init);
       if (response.status !== 429 || !resendable(input, init)) return response;
       const said = await response.text();

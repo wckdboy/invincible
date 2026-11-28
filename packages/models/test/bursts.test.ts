@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { type ChatStreamEvent, newNodeIdentity } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
-import { chat, GatewayTokens, handleGateway, refusedKeysOf, SpentWindows, windowsOf } from "../src/index.ts";
+import { chat, GatewayTokens, handleGateway, Pacer, preset, refusedKeysOf, SpentWindows, windowsOf } from "../src/index.ts";
 
 /*
  * Too many calls at once (28 November 2026): OpenCode Go answers a burst past about 25 calls a minute with 429, "Rate
@@ -21,7 +21,7 @@ const GO = '{"type":"error","error":{"type":"GoUsageLimitError","message":"OpenC
 const GIVEN_UP = `opencode-go is taking too many calls at once: asked 6 times over 60 s, it still answered 429 ("${SAID}"). That's a limit on how fast it's called, not its allowance: ask again in a minute.`;
 
 /** A node and its gateway, its plan's provider a stand-in that answers each call in turn (the last again and again). */
-function gateway(answers: (() => Response)[]) {
+function gateway(answers: (() => Response)[], pacer?: Pacer) {
   const id = "opencode-go";
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
@@ -40,6 +40,7 @@ function gateway(answers: (() => Response)[]) {
     tokens,
     fetch: (async () => answers[Math.min(asked++, answers.length - 1)]!()) as unknown as typeof fetch,
     sleep: async (ms: number) => void slept.push(ms),
+    ...(pacer ? { pacer } : {}),
   };
   let now = Date.UTC(2026, 10, 28, 1, 30);
   windowsOf(store).now = () => now;
@@ -146,7 +147,7 @@ describe("a burst through the gateway: a tool's call, and a look", () => {
 });
 
 /** A node whose run's turns go to its plan's provider itself (chat, no gateway): a stand-in, in turn, as above. */
-function brain(answers: (() => Response)[]) {
+function brain(answers: (() => Response)[], pacer?: Pacer) {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
   foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
@@ -160,7 +161,7 @@ function brain(answers: (() => Response)[]) {
     asked.push(init?.body ? (JSON.parse(String(init.body)) as { model: string }).model : `${init?.method ?? "GET"} without a body`);
     return answers[Math.min(asked.length - 1, answers.length - 1)]!();
   }) as unknown as typeof globalThis.fetch;
-  const ctx = { store, vault, fetch, sleep: async (ms: number) => void slept.push(ms) };
+  const ctx = { store, vault, fetch, sleep: async (ms: number) => void slept.push(ms), ...(pacer ? { pacer } : {}) };
   windowsOf(store).now = () => Date.UTC(2026, 10, 28, 1, 30);
   const turn = async (models: string[]) => {
     const events: ChatStreamEvent[] = [];
@@ -224,5 +225,47 @@ describe("a burst is never a spent window", () => {
     expect(windows.note("a/long", 'a → 429 {"error":{"message":"Too Many Requests"}}', now + 2 * 3_600_000)?.until).toBe(now + 2 * 3_600_000);
     expect(windows.note("a/short", "a → 429 usage limit reached; resets in 30s")?.until).toBe(now + 30_000);
     expect(windows.list().map((w) => w.provider)).toEqual(["a/quota", "a/long", "a/short"]);
+  });
+});
+
+describe("a plan's pace, kept by every caller on a node (Pacer)", () => {
+  test("a call takes the first moment it can begin within the pace: the next waits behind it, a minute after the one it follows", () => {
+    const pacer = new Pacer();
+    // Two a minute: the third and the fourth wait for the first and the second to be a minute old.
+    expect([0, 1_000, 2_000, 3_000].map((at) => pacer.turn("go", 2, at))).toEqual([0, 0, 58_000, 58_000]);
+    // Another provider's calls are its own; and past their minute, those before are forgotten.
+    expect(pacer.turn("other", 2, 3_000)).toBe(0);
+    expect(pacer.turn("go", 2, 200_000)).toBe(0);
+  });
+
+  test("OpenCode Go's: a call or two under the burst it refused (28 November 2026: past about 25 a minute)", () => {
+    expect(preset("opencode-go")?.pace).toBe(24);
+    // A provider whose burst nobody has measured has none: its 429s are waited out, as ever.
+    expect(preset("deepseek")?.pace).toBeUndefined();
+  });
+
+  test("a run's turns on it wait their turn, when the node gives a pacer: the 25th in a minute waits for the first to be a minute old", async () => {
+    const b = brain([streamed], new Pacer());
+    for (let i = 0; i < 25; i++) await b.turn(["opencode-go/glm-5.3"]);
+    expect(b.asked).toHaveLength(25);
+    expect(b.slept).toEqual([60_000]);
+    // Without one (a test, a chore of its own), as ever: no wait.
+    const unpaced = brain([streamed]);
+    for (let i = 0; i < 25; i++) await unpaced.turn(["opencode-go/glm-5.3"]);
+    expect(unpaced.slept).toEqual([]);
+  });
+
+  test("so do a tool's calls through the gateway, on the same pacer: one pace a node, whoever calls", async () => {
+    const pacer = new Pacer();
+    // (The gateway's token here takes 20 calls: the minute's other 4 are a run's own turns.)
+    const g = gateway([answered], pacer);
+    for (let i = 0; i < 20; i++) expect((await g.call()).status).toBe(200);
+    expect(g.slept).toEqual([]);
+    const b = brain([streamed], pacer);
+    for (let i = 0; i < 4; i++) await b.turn(["opencode-go/glm-5.3"]);
+    expect(b.slept).toEqual([]);
+    // The minute's 24 taken between them: the next, whoever calls, waits for the first to be a minute old.
+    await b.turn(["opencode-go/glm-5.3"]);
+    expect(b.slept).toEqual([60_000]);
   });
 });

@@ -6467,6 +6467,7 @@
           "qwen4-max",
           "qwen3.8-max"
         ],
+        "pace": 24,
         "note": "OpenCode Go ($10 a month; Go Plus $40), on your OpenCode Console key at its own address (pay-as-you-go has another). Each model has a monthly allowance, a fifth of it in any five hours and half in a week. DeepSeek's models want Global chosen under Regions in the Console."
       },
       {

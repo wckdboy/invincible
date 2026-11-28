@@ -474,6 +474,10 @@ The models layer, carried (§10):
   - an audit of an agent's running task, a chore of its own (`audit`): on the reviewer's models until you hire some,
     so the reviewer's strongest answer for the review that decides, and a cheaper one can look in every 20 commands.
   - A roster you set is never reordered. Work stuck on the engineer's models goes up to the planner's (§6, escalation);
+- a plan's pace, kept by every caller on a node: a provider whose preset says how many calls a minute it takes before
+  it refuses a burst (OpenCode Go: 24) is called within that by the node's one pacer. Its chats, its agents' runs and
+  its tools' calls through the gateway each wait their turn rather than meet the plan's 429s (`Pacer` in
+  `packages/models/src/bursts.ts`);
 - the gateway that meters every call at your prices;
 - local models across the fleet (MLX and Ollama);
 - sensitive mode, which holds a task to its own models.
