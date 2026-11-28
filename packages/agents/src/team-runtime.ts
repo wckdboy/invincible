@@ -347,6 +347,7 @@ if not os.path.isdir(root) and from_commit:
     open(kept,'w').write(base+' from')
 elif not os.path.isdir(root):
     how = 'fetched'
+    headed = False
     away = unfetched(repo)
     if away:
         how = 'stale'
@@ -358,12 +359,13 @@ elif not os.path.isdir(root):
             got = git(repo,'-c',auth,'fetch','--quiet','--prune',d['INVINCIBLE_REPO_URL'],'+refs/heads/*:refs/remotes/origin/*',timeout=300)
             if got.returncode: how = 'stale'
             # And the repository's own HEAD, its default branch, kept where no earlier work names it: the clone's
-            # origin/HEAD is the VM's, which earlier work may point anywhere, and no fetch rewrites it.
-            elif git(repo,'-c',auth,'fetch','--quiet',d['INVINCIBLE_REPO_URL'],'+HEAD:refs/invincible/fetched-head',timeout=300).returncode:
-                git(repo,'update-ref','-d','refs/invincible/fetched-head')
+            # origin/HEAD is the VM's, which earlier work may point anywhere, and no fetch rewrites it. Read only when this
+            # start's own fetch of it came through: earlier work can leave that ref too, with a lock beside it that keeps
+            # any fetch or delete from writing it (the third re-check's N4b).
+            else: headed = git(repo,'-c',auth,'fetch','--quiet',d['INVINCIBLE_REPO_URL'],'+HEAD:refs/invincible/fetched-head',timeout=300).returncode == 0
         except Exception:
             how = 'stale'
-    if how == 'fetched' and git(repo,'rev-parse','--verify','--quiet','refs/invincible/fetched-head^{commit}').returncode == 0:
+    if how == 'fetched' and headed and git(repo,'rev-parse','--verify','--quiet','refs/invincible/fetched-head^{commit}').returncode == 0:
         start = 'refs/invincible/fetched-head'
     else:
         start = 'origin/HEAD' if git(repo,'rev-parse','--verify','--quiet','origin/HEAD').returncode == 0 else 'HEAD'

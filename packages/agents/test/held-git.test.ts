@@ -383,6 +383,14 @@ describe("the lease's fetch, against a smart-HTTP server", () => {
       v.git("symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
       const none = await v.start("task-none");
       expect([none.status, none.stdout.trim(), existsSync(join(v.work, "tasks/task-none/left.txt"))]).toEqual([0, `${main} fetched`, false]);
+      // The third re-check's N4b: earlier work plants the ref the repository's HEAD is fetched into, at a commit of its
+      // own, with a stale lock beside it, so that fetch can't write it and its delete can't either. Only what this start
+      // fetched is read: none, so it is the clone's own HEAD, said as such.
+      const earlier = v.git("rev-parse", "HEAD").stdout.trim();
+      v.git("update-ref", "refs/invincible/fetched-head", earlier);
+      writeFileSync(join(v.repo, ".git", "refs", "invincible", "fetched-head.lock"), "");
+      const planted = await v.start("task-planted");
+      expect([planted.status, planted.stdout.trim()]).toEqual([0, `${earlier} local`]);
       // A repository whose HEAD names no branch can't say its default: the clone's own HEAD, said as such.
       spawnSync("git", ["-C", served, "--git-dir=repo.git", "symbolic-ref", "HEAD", "refs/heads/nowhere"]);
       const local = await v.start("task-local");
