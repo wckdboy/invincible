@@ -31,6 +31,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -538,28 +539,51 @@ private val SUGGESTIONS = listOf(
     "Place" to "Which of my machines should run a long build, and why?",
 )
 
-/** Your kept chats, the latest first: one opens where it was ([opened]), and its answer still being written goes on there. */
+/**
+ * Your kept chats, as the web's "Your chats" (views/chat.ts openHistory): where they are kept; a search, every word of it in
+ * a chat's title (ChatList.filter); the chats by day, the latest first (ChatList.groups: Pinned, Today, Yesterday, This
+ * week, Earlier), each a chat's row (ChatRow). One opens where it was ([opened]), and its answer still being written goes on
+ * there.
+ */
 @Composable
 internal fun Chats(app: AppModel, close: () -> Unit, opened: () -> Unit) {
     val chats by app.chat.chats.collectAsState()
+    val paired by app.paired.collectAsState()
     LaunchedEffect(Unit) { app.chat.loadChats() }
     val brand = LocalBrand.current
+    val quiet = MaterialTheme.colorScheme.onSurfaceVariant
+    var query by rememberSaveable { mutableStateOf("") }
+    val now = remember(chats) { System.currentTimeMillis() }
+    val groups = sh.invincible.bot.core.ChatList.groups(sh.invincible.bot.core.ChatList.filter(chats, query), now)
     Column(Modifier.fillMaxSize()) {
-        PageBar("Chats", close)
-        LazyColumn(Modifier.weight(1f)) {
-            items(chats, key = { it["id"].string ?: "" }) { c ->
-                val state = c["state"].string
-                Row(
-                    Modifier.fillMaxWidth().clickable { c["id"].string?.let(app.chat::open); opened() }.padding(horizontal = Space.margin, vertical = Space.s3),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Space.s2),
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(c["title"].string ?: "A chat", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        state?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (it == "working") brand.working else MaterialTheme.colorScheme.onSurfaceVariant) }
+        PageBar("Your chats", close)
+        LazyColumn(Modifier.weight(1f), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = Space.s6)) {
+            item(key = "where") {
+                Text(
+                    "Kept privately on ${paired?.nodeName ?: paired?.fleetName ?: "your node"}. Temporary chats aren't kept.",
+                    style = Type.meta,
+                    color = quiet,
+                    modifier = Modifier.padding(horizontal = Space.margin),
+                )
+            }
+            item(key = "search") {
+                androidx.compose.material3.OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text("Search your chats") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s3),
+                )
+            }
+            for (g in groups) {
+                item(key = "head:${g.label}") { Text(g.label, style = Type.meta, color = quiet, modifier = Modifier.padding(horizontal = Space.margin).padding(top = Space.s3, bottom = Space.s1)) }
+                item(key = "rows:${g.label}") {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = Space.margin).clip(MaterialTheme.shapes.medium).background(brand.raised)) {
+                        g.items.forEachIndexed { i, c ->
+                            if (i > 0) Hairline(inset = Space.s3)
+                            ChatRow(c, now) { id -> app.chat.open(id); opened() }
+                        }
                     }
-                    if (c["unread"].bool == true) Dot(brand.done)
-                    if (state == "working") Dot(brand.working, live = true)
                 }
             }
         }

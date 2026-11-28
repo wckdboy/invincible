@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import sh.invincible.bot.core.ChatList
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.RelativeTime
 import sh.invincible.bot.core.bool
@@ -86,7 +87,7 @@ internal fun WelcomeAsks(asks: List<Pair<String, String>>, ask: (String) -> Unit
     }
 }
 
-/** Your recent chats under the welcome: "Recent", four at most, each its title (a dot where an answer in it is new to you) and its line, opening it; then All chats. */
+/** Your recent chats under the welcome: "Recent", four at most, each a chat's row (ChatRow), opening it; then All chats. */
 @Composable
 internal fun RecentChatsList(chats: List<Json>, open: (String) -> Unit, all: () -> Unit) {
     val recent = recentChats(chats)
@@ -99,31 +100,64 @@ internal fun RecentChatsList(chats: List<Json>, open: (String) -> Unit, all: () 
         Column(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(brand.raised)) {
             recent.forEachIndexed { i, c ->
                 if (i > 0) Hairline(inset = Space.s3)
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = Space.touch)
-                        .clickable(role = Role.Button) { c["id"].string?.let(open) }
-                        .padding(horizontal = Space.s3, vertical = Space.s2),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Space.s3),
-                ) {
-                    Box(Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surface), contentAlignment = Alignment.Center) {
-                        Icon(ChatsIcon, null, Modifier.size(16.dp), tint = quiet)
-                    }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            if (c["unread"].bool == true) Dot(brand.done)
-                            Text(c["title"].string ?: "A chat", style = Type.rowTitle.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        recentLine(c, now).takeIf { it.isNotEmpty() }?.let { Text(it, style = Type.meta, color = quiet, maxLines = 1) }
-                    }
-                }
+                ChatRow(c, now, open)
             }
         }
         TextButton(onClick = all, modifier = Modifier.align(Alignment.CenterHorizontally).heightIn(min = Space.touch)) {
             Icon(ClockIcon, null, Modifier.size(16.dp), tint = quiet)
             Text("All chats", style = Type.meta, color = quiet, modifier = Modifier.padding(start = 6.dp))
         }
+    }
+}
+
+/**
+ * A kept chat as a row, as the web's (views/chat.ts chatRow), in the welcome's Recent and in Your chats: its icon; its
+ * title, a dot where an answer in it is new to you; how many messages and when; and its badge where there is something to
+ * say (ChatList.badge: Working with its dot, Needs you, Queued, Stopped, Failed), never the wire's word.
+ */
+@Composable
+internal fun ChatRow(c: Json, now: Long, open: (String) -> Unit) {
+    val brand = LocalBrand.current
+    val quiet = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = Space.touch)
+            .clickable(role = Role.Button) { c["id"].string?.let(open) }
+            .padding(horizontal = Space.s3, vertical = Space.s2),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.s3),
+    ) {
+        Box(Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surface), contentAlignment = Alignment.Center) {
+            Icon(ChatsIcon, null, Modifier.size(16.dp), tint = quiet)
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (c["unread"].bool == true) Dot(brand.done)
+                Text(c["title"].string ?: "A chat", style = Type.rowTitle.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            recentLine(c, now).takeIf { it.isNotEmpty() }?.let { Text(it, style = Type.meta, color = quiet, maxLines = 1) }
+        }
+        ChatList.badge(c)?.let { ChatBadge(it) }
+    }
+}
+
+/** A chat's badge: its state in words in its tone, on a wash of it (as StateChip), a working chat's with its dot. */
+@Composable
+internal fun ChatBadge(badge: ChatList.Badge) {
+    val brand = LocalBrand.current
+    val color = when (badge.tone) {
+        ChatList.Tone.ACCENT -> brand.ink
+        ChatList.Tone.WARN -> brand.needs
+        ChatList.Tone.DANGER -> brand.danger
+        ChatList.Tone.INFO, ChatList.Tone.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Row(
+        Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(50)).background(color.copy(alpha = 0.12f)).padding(horizontal = 8.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        if (badge.live) Dot(color, size = 6)
+        Text(badge.text, style = MaterialTheme.typography.labelMedium, color = color, maxLines = 2)
     }
 }
