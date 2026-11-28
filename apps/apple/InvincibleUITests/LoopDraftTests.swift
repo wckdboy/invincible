@@ -15,8 +15,9 @@ final class LoopDraftTests: XCTestCase {
         try app.openApp(node)
         app.openNeeds()
         XCTAssertTrue(app.descendants(matching: .any)["needs.screen"].waitForExistence(timeout: 10), "Needs you never came")
-        // Below the fixture's other decisions: drawn once it's scrolled to.
-        let row = app.buttons["decision.draft:\(drafted.draft)"]
+        // Below the fixture's other decisions: drawn once it's scrolled to. (In the sheet of every ask: the chat under it
+        // may show the same ask as its first.)
+        let row = app.descendants(matching: .any)["needs.screen"].buttons["decision.draft:\(drafted.draft)"]
         var swipes = 0
         while !row.waitForExistence(timeout: 2), swipes < 8 {
             app.swipeUp()

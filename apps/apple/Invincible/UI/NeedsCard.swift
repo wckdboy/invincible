@@ -2,8 +2,9 @@
 import SwiftUI
 
 /// What needs you in a chat, as its last message (the owner's word of 28 November 2026, Grok Bot's asks answered in
-/// place; the lead's of the same day: no Needs you screen, each ask in its own chat): every decision that waits there,
-/// each with its one answer. Nothing while nothing does. In an agent's chat, that agent's own approvals (its proposals are
+/// place; the lead's of the same day: no Needs you screen, each ask in its own chat): its first decision with its one
+/// answer, and how many more wait there, every ask at once a tap away (the sheet your agent's ••• opens too). Nothing
+/// while nothing does. In an agent's chat, that agent's own approvals (its proposals are
 /// answered on its tasks' rows there); in your agent's, everything that is no agent's: a device asking to join, a key it
 /// asked for, a question, an approval no agent stands for. An approval a link or a notification opens (`approval/<id>`)
 /// is opened here, in its chat, its yes behind Face ID.
@@ -13,17 +14,33 @@ struct NeedsCard: View {
     var agent: String? = nil
     @State private var desk = DecisionDesk()
     @State private var open: ActionView?
+    /// Every ask at once (the rest of this chat's, and every other chat's), from "N more".
+    @State private var all = false
     @Environment(\.openPlace) private var openPlace
 
     var body: some View {
         Group {
             if let work = session.attended {
                 let decisions = Self.mine(desk.decisions(session, work, go: { openPlace?($0) }), agent: agent)
-                if !decisions.isEmpty {
+                if let first = decisions.first {
+                    // Its first ask, answered in place, and how many more wait here, every ask at once a tap away: the
+                    // flow carries one ask, not a pile of them (PerfTests.testScrollChat: every ask in the flow cost a
+                    // scroll's accessibility snapshots 58 ms a second, against 0 with one).
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(decisions, id: \.id) { decision in
-                            if decision.id != decisions.first?.id { Divider() }
-                            DecisionRow(decision: decision, busy: desk.busy.contains(decision.id))
+                        DecisionRow(decision: first, busy: desk.busy.contains(first.id))
+                        if decisions.count > 1 {
+                            Divider()
+                            Button { all = true } label: {
+                                HStack {
+                                    Text("\(decisions.count - 1) more need you").font(.subheadline.weight(.semibold))
+                                    Spacer(minLength: Space.s2)
+                                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                                }
+                                .frame(minHeight: Metrics.touch)
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("chat.needs.more")
                         }
                     }
                     .padding(.horizontal, Space.s4)
@@ -37,6 +54,12 @@ struct NeedsCard: View {
             }
         }
         .sheet(item: $open) { action in ApprovalSheet(session: session, action: action, guarded: true) }
+        .sheet(isPresented: $all) {
+            NavigationStack {
+                InboxView(session: session)
+                    .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Done") { all = false } } }
+            }
+        }
         // An approval its link or its notification's Approve asked to see, when it is this chat's: its card, its yes
         // behind Face ID.
         .task(id: session.approvalToOpen) {
