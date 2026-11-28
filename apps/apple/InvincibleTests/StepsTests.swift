@@ -147,22 +147,26 @@ struct StepsTests {
     }
 
     @Test func whatItCostIsSaidAsThePWASaysIt() {
-        #expect(steps.costs.count == 10)
+        // (Two more since 28 November 2026, money in two decimals however much: "budget $25.00", "$14.40 of $25.00".)
+        #expect(steps.costs.count == 12)
         for item in steps.costs {
             #expect(Steps.costWords(budgetUsd: item.budgetUsd, record: item.record, prices: steps.prices) == item.words, "\(item.words)")
         }
     }
 
     @Test func moneyIsRoundedAsTheWebRoundsIt() {
+        // Always two decimals, as core's moneyLabel says money; a cent's fraction in four.
+        #expect(Spend.moneyLabel(12.3) == "$12.30")
+        #expect(Spend.moneyLabel(240) == "$240.00")
+        #expect(Spend.moneyLabel(0) == "$0.00")
+        #expect(Spend.moneyLabel(0.0042) == "$0.0042")
         // An exact half goes up, as JavaScript's toFixed takes it (printf would take it to even).
-        #expect(Spend.usd(0.125) == "$0.13")
-        #expect(Spend.usd(0.375) == "$0.38")
-        #expect(Spend.usd(10.25) == "$10.3")
-        #expect(Spend.usd(100.5) == "$101")
+        #expect(Spend.moneyLabel(0.125) == "$0.13")
+        #expect(Spend.moneyLabel(0.375) == "$0.38")
+        #expect(Spend.fixed(10.25, 1) == "10.3")
+        #expect(Spend.fixed(100.5, 0) == "101")
         // What isn't exactly a half is rounded as its exact value says: 0.015 is a little under.
-        #expect(Spend.usd(0.015) == "$0.01")
-        #expect(Spend.usd(0.0042) == "$0.0042")
-        #expect(Spend.usd(0) == "$0")
+        #expect(Spend.moneyLabel(0.015) == "$0.01")
     }
 
     @Test func theVerdictFollowsTheProofAsThePWAsDoes() {

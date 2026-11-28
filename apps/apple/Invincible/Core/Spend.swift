@@ -92,12 +92,11 @@ enum Spend {
         return Cost(usd: usd, unpriced: unpriced.sorted(), complete: unknown == 0 && unpriced.isEmpty)
     }
 
-    /// Money in a word: "$0", "$0.0042", "$0.31", "$12.5", "$140" (core's usdLabel).
-    static func usd(_ usd: Double) -> String {
-        if usd == 0 { return "$0" }
-        if usd < 0.01 { return "$\(fixed(usd, 4))" }
-        if usd < 10 { return "$\(fixed(usd, 2))" }
-        return "$\(fixed(usd, usd < 100 ? 1 : 0))"
+    /// Money as every app and the terminal show it (core's moneyLabel, the PWA's moneyWords): always two decimals,
+    /// "$12.30", "$240.00", "$0.00"; a cent's fraction in four, "$0.0042". Rounded on the number's exact value, a true half
+    /// up (`fixed`).
+    static func moneyLabel(_ usd: Double) -> String {
+        usd > 0 && usd < 0.01 ? "$\(fixed(usd, 4))" : "$\(fixed(usd, 2))"
     }
 
     /// JavaScript's toFixed for 0 ≤ x < 10^15: x's exact value to `digits` places, a half going up. printf rounds its exact
