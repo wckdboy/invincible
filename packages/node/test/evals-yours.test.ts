@@ -1,9 +1,16 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { EvalRecord, evalProblem } from "@invincible/core";
 import type { EvalJob } from "../src/eval-cli.ts";
 import { evalCommand, UsageError } from "../src/eval-commands.ts";
 import { attemptCase, chooseCases, commandsFor, type GateRun, hardestFirst, judgeGates, rootOf, yourCases } from "../src/eval-yours.ts";
 import { FIX, GATES, AGENT_ARTIFACT, agentOf, runOf, taskOf, teamOf, widgets, widgetsCase, WIDGETS, YoursStandIn } from "./yours-standin.ts";
+
+// Each eval here makes repositories and sandboxes and runs git and bash in them as processes of its own, so its time is
+// the machine's to give. With 2 % of a core (what each of about 585 runnable tasks gets of 12), "an eval of a case" took
+// up to 58.4 s on the Mac mini and 7.0 s on Ultra, and those past bun's 5 s failed (28 November 2026). The whole suite
+// in eight workers ran one past 5 s twice in 38 runs on the mini. The limit is how long a busy machine may take, never
+// what a test checks.
+setDefaultTimeout(180_000);
 
 /*
  * Evals from your own work: which of your agents' tasks are cases, in what order a run takes them, and an eval of
@@ -389,6 +396,7 @@ describe("the yours suite at the command line", () => {
       node.remove();
       repo.remove();
     }
-    // (Two whole runs of the command, with real git and bash: 2.6 s alone, over five in a loaded full suite.)
-  }, 30_000);
+    // (Two whole runs of the command, with real git and bash: 2.6 s alone, over five in a loaded full suite, 136.5 s on
+    // the Mac mini with 2 % of a core.)
+  }, 420_000);
 });
