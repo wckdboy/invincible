@@ -4115,15 +4115,13 @@ export function createApp(ctx: AppContext) {
           on,
           routes.execSandbox.path,
           { ...rest, ...(run ? { run } : {}) },
-          async () => {
-            const sandbox = await ctx.sandbox!.get(rest.id);
-            outOfReach(sandbox);
-            if (run) {
-              if (!sandbox) throw new HttpError(404, "no such sandbox on this node");
-              if (sandbox.run !== run) throw new HttpError(403, "that sandbox belongs to another run");
-            }
-            return ctx.sandbox!.exec(rest.id, rest.cmd, rest.timeoutSec);
-          },
+          // (Held to whose it is on the look the command itself takes: a look of the route's own before it was a second
+          // listing of every sandbox in every command an agent ran, 41–46 ms on Ultra, more with the workspace helper's sizes.)
+          async () =>
+            ctx.sandbox!.exec(rest.id, rest.cmd, rest.timeoutSec, (sandbox) => {
+              outOfReach(sandbox);
+              if (run && sandbox.run !== run) throw new HttpError(403, "that sandbox belongs to another run");
+            }),
           { sandbox: rest.id },
         ).finally(() => ended?.()),
       );

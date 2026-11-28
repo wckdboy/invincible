@@ -1205,15 +1205,17 @@ export class SandboxHost {
 
   /**
    * This node's sandboxes as Docker lists them, each with its container's own name (an agent's VM set aside as it is made
-   * again is `…-replaced`), or null when Docker couldn't say.
+   * again is `…-replaced`), or null when Docker couldn't say. `usage: false`: without each workspace's size and use as
+   * the helper says them (a view's disk is then its labels' alone), for a command, which doesn't show them.
    */
-  private async inspected(): Promise<{ view: SandboxView; name: string }[] | null> {
-    if (!(await this.available())) return null;
+  private async inspected(opts: { usage?: boolean } = {}): Promise<{ view: SandboxView; name: string }[] | null> {
+    const sizes = () => (opts.usage === false ? Promise.resolve(null) : this.workspaceStats());
     if (this.apple) {
+      if (!(await this.available())) return null;
       const listing = await this.docker(containerListArgs());
       const found = listing.code === 0 ? parseContainers(listing.stdout) : null;
       if (!found) return null;
-      const usage = await this.workspaceStats();
+      const usage = await sizes();
       return found
         .filter((c) => c.labels[LABEL] === "1" && c.labels[`${LABEL}.node`] === this.opts.node)
         .map((c) => toView(c.labels, c.image, c.status, usage, { ...(c.cpus ? { NanoCpus: c.cpus * 1e9 } : {}), ...(c.memoryBytes ? { Memory: c.memoryBytes } : {}) }))
@@ -1221,6 +1223,9 @@ export class SandboxHost {
         .sort((a, b) => b.createdAt - a.createdAt)
         .map((view) => ({ view, name: view.name }));
     }
+    // (Docker's own listing says whether it is there: one it can't answer is Docker not saying, as a `docker info` it
+    // couldn't answer was. That was asked first, before every listing: 22 ms of each on Ultra, twice a command.)
+    if (!this.opts.runner && !Bun.which(this.bin)) return null;
     const listing = await this.docker(["ps", "-aq", "--filter", `label=${LABEL}=1`, "--filter", `label=${LABEL}.node=${this.opts.node}`]);
     if (listing.code !== 0) return null;
     const ids = listing.stdout
@@ -1234,7 +1239,7 @@ export class SandboxHost {
     const ended = inspected.code !== 0 && inspected.stderr.trim().split("\n").every((line) => /no such object/i.test(line));
     if (inspected.code !== 0 && !ended) return null;
     const containers = JSON.parse(inspected.stdout) as { Name?: string; Config: { Labels: Record<string, string>; Image: string }; State: { Status: string }; HostConfig?: { NanoCpus?: number; Memory?: number } }[];
-    const usage = await this.workspaceStats();
+    const usage = await sizes();
     return containers
       .map((c) => {
         const view = toView(c.Config.Labels, c.Config.Image, c.State.Status, usage, c.HostConfig);
@@ -1255,6 +1260,11 @@ export class SandboxHost {
 
   async get(id: string): Promise<SandboxView | null> {
     return (await this.list()).find((s) => s.id === id) ?? null;
+  }
+
+  /** One of this node's sandboxes, as `get` says it, but for a command in it: without its workspace's use. */
+  private async forCommand(id: string): Promise<SandboxView | null> {
+    return (await this.inspected({ usage: false }))?.find((c) => c.view.id === id)?.view ?? null;
   }
 
   /** Owner/controller only. Resume the exact existing VM and give this run bounded model access. */
@@ -2217,10 +2227,15 @@ export class SandboxHost {
     this.streams.delete(id);
   }
 
-  async exec(id: string, cmd: string[], timeoutSec = 600): Promise<ExecResult> {
+  /**
+   * A command in one of this node's sandboxes. `check`: what its caller holds it to (whose run it is, what reaches it),
+   * asked of the same look the command takes, before anything else is said of it; what it throws is the answer, and
+   * nothing runs.
+   */
+  async exec(id: string, cmd: string[], timeoutSec = 600, check?: (sandbox: SandboxView) => void): Promise<ExecResult> {
     this.busy.set(id, (this.busy.get(id) ?? 0) + 1);
     try {
-      return await this.execNow(id, cmd, timeoutSec);
+      return await this.execNow(id, cmd, timeoutSec, check);
     } finally {
       const left = (this.busy.get(id) ?? 1) - 1;
       if (left > 0) this.busy.set(id, left);
@@ -2397,12 +2412,13 @@ export class SandboxHost {
     }
   }
 
-  private async execNow(id: string, cmd: string[], timeoutSec: number): Promise<ExecResult> {
+  private async execNow(id: string, cmd: string[], timeoutSec: number, check?: (sandbox: SandboxView) => void): Promise<ExecResult> {
     // The VM's own `desktop` command alone goes to its held session where it has one: the same command, its answer
     // the same, in milliseconds; while the session is open the VM is running, so no listing comes first.
     const held = cmd[0] === "desktop" && cmd.length > 1 ? this.sessions.get(id) : undefined;
-    const sandbox = held?.session.open ? held.view : await this.get(id);
+    const sandbox = held?.session.open ? held.view : await this.forCommand(id);
     if (!sandbox) throw new SandboxError("no such sandbox on this node", 404);
+    check?.(sandbox);
     if (sandbox.status !== "running") throw new SandboxError(`sandbox is ${sandbox.status}`, 409);
     const started = performance.now();
     let result: Run | null = null;
