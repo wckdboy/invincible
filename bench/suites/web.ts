@@ -8,17 +8,27 @@ import type { Suite } from "../lib.ts";
  * What moves on the PWA's screens once they are there. apps/web/measure/first-load.ts --shifts opens every place (and
  * the primary's, an agent's and a room's timeline) in a headless Chrome paired with a throwaway node that holds the same
  * stand-in fleet every time (agents, a room, tasks running, verified and given up, evals, a kept chat, a key it asked
- * for), as a returning visit opens it, on a laptop's screen and a phone's, and sums every layout shift from its first
- * frame until 3 s after it is usable: the place's cumulative layout shift. Nothing touches the page meanwhile.
+ * for), as a returning visit opens it, on four screens, and sums every layout shift from its first frame until 3 s
+ * after it is usable: the place's cumulative layout shift. Nothing touches the page meanwhile. The screens: a laptop's,
+ * a phone's, a tablet's held upright (820 px: the list beside the chat) and a phone's under a notch (a 47 px top inset,
+ * as an iPhone's home-screen app has): each of the last two caught a bar that grew as an agent came (28 November 2026).
  *
  * The same app and the same stand-in data move the same way every time: a place that holds still reads exactly 0. Each
  * place is a metric, ×10,000 and rounded, and judged to 5 (0.0005, less than anything one can see): a place that starts
  * to move fails the run. One that already moves is judged within 15 % of its score, because its text can wrap otherwise
- * on another platform's fonts. It needs Chrome (CHROME, or Chrome or Chromium where it usually is), and takes a few
- * minutes: most of it is the node's stand-in fleet getting its work done.
+ * on another platform's fonts. It needs Chrome (CHROME, or Chrome or Chromium where it usually is; one that can give a
+ * screen an inset, Emulation.setSafeAreaInsetsOverride), and takes a few minutes: most of it is the node's stand-in
+ * fleet getting its work done, and each place opened on each screen.
  */
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
+/** Each screen as a metric's note says it, by its profile in first-load.ts. */
+const SCREEN: Record<string, string> = {
+  laptop: "a laptop's screen",
+  phone: "a phone's screen",
+  tablet: "a tablet's screen (820 px, held upright)",
+  notched: "a phone's screen under a notch (a 47 px top inset)",
+};
 
 interface Shifted {
   scores: number[];
@@ -28,7 +38,7 @@ interface Shifted {
 
 export const suite: Suite = {
   name: "web",
-  about: "the PWA's places on a laptop and a phone: how far what's on screen moves once it is there (layout shift)",
+  about: "the PWA's places on a laptop, a phone, a tablet and a phone under a notch: how far what's on screen moves once it is there (layout shift)",
   headline: ["web.still"],
   async run(ctx) {
     const dir = mkdtempSync(join(tmpdir(), "invincible-bench-web-"));
@@ -53,11 +63,11 @@ export const suite: Suite = {
           const what = shifted.moved[0] ? `; what moved most: ${shifted.moved[0].what}` : "";
           ctx.quality(`web.${place}.${profile}`, score, "", "lower", {
             resolution: Math.max(5, Math.round(score * 0.15)),
-            note: `${place} on a ${profile}'s screen: its cumulative layout shift ×10,000, from its first frame until 3 s after it is usable (0: nothing moved)${what}`,
+            note: `${place} on ${SCREEN[profile] ?? `a ${profile}'s screen`}: its cumulative layout shift ×10,000, from its first frame until 3 s after it is usable (0: nothing moved)${what}`,
           });
         }
       }
-      ctx.quality("web.still", still, "places", "higher", { note: `of ${watched} (each place on a laptop's screen and a phone's): those where nothing moved once it was on screen` });
+      ctx.quality("web.still", still, "places", "higher", { note: `of ${watched} (each place on a laptop's screen, a phone's, a tablet's and a phone's under a notch): those where nothing moved once it was on screen` });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

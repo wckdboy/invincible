@@ -26,7 +26,8 @@
  *     --widths 390,1280,1600  the screenshots' widths instead (under 640 is a phone held upright)
  *     --gallery <dir> only the gallery's screenshots: no node is started
  *     --shifts      also what moves on screen once it is there: each place (and the primary's, an agent's and a room's
- *                   timeline) opened as a returning visit opens it, on both profiles, watched from its first frame
+ *                   timeline) opened as a returning visit opens it, on each profile (both, and a tablet's and a phone's
+ *                   under a notch: below), watched from its first frame
  *                   until 3 s after it is usable; every layout shift is summed (the place's
  *                   cumulative layout shift), with what moved. --shift-runs n opens each that many times (default 3).
  *     --places a,b  only these places (their names as the report gives them: overview, agent, sheet-add-key…), for
@@ -48,7 +49,9 @@
  *   warm   the service worker holds the shell: every visit after that
  *
  * on two profiles: "laptop" (1280×800, this machine as it is) and "phone" (390×844, the processor
- * slowed 4×, 9 Mbit/s down, 1.5 up and 60 ms a request: an emulation, not a phone).
+ * slowed 4×, 9 Mbit/s down, 1.5 up and 60 ms a request: an emulation, not a phone). What moves (--shifts) is also
+ * watched on two more: "tablet" (820×1180, an iPad held upright, by touch: the list beside the chat) and "notched" (the
+ * phone with a 47 px top inset and a 34 px bottom one, as an iPhone's home-screen app draws under).
  *
  * What it reports, per page:
  *   paint    first contentful paint (the browser's own mark; the boot emblem, before any script)
@@ -282,11 +285,18 @@ const ATTACHING = `(async () => {
   box.value = "Why does this fail?";
   box.dispatchEvent(new Event("input"));
 })()`;
+const PHONE_LINE = { latency: 60, downloadThroughput: 9e6 / 8, uploadThroughput: 1.5e6 / 8 };
 const PROFILES = {
-  laptop: { width: 1280, height: 800, scale: 2, mobile: false, cpu: 1, network: null },
-  phone: { width: 390, height: 844, scale: 3, mobile: true, cpu: 4, network: { latency: 60, downloadThroughput: 9e6 / 8, uploadThroughput: 1.5e6 / 8 } },
+  laptop: { width: 1280, height: 800, scale: 2, mobile: false, cpu: 1, network: null, inset: null },
+  phone: { width: 390, height: 844, scale: 3, mobile: true, cpu: 4, network: PHONE_LINE, inset: null },
+  // (Watched for what moves alone: a tablet held upright, the list beside the chat; and the phone under a notch, whose
+  // inset a bar that holds its place must count, 28 November 2026. Loads and moves keep a laptop and a phone.)
+  tablet: { width: 820, height: 1180, scale: 2, mobile: true, cpu: 1, network: null, inset: null },
+  notched: { width: 390, height: 844, scale: 3, mobile: true, cpu: 4, network: PHONE_LINE, inset: { top: 47, bottom: 34 } },
 } as const;
 type Profile = keyof typeof PROFILES;
+/** The profiles loads and moves are measured on. */
+const LOADED: Profile[] = ["laptop", "phone"];
 
 /*
  * Runs in every page before its own scripts: when the shell arrives, when the page is usable,
@@ -1030,12 +1040,24 @@ try {
   await until("the app after pairing", () => evaluate(`Boolean(document.querySelector(".shell"))`));
 
   // ---------- loading a page ----------
+  let inset = false;
   const setProfile = async (name: Profile): Promise<void> => {
     profile = name;
     const p = PROFILES[name];
     await browser.send("Emulation.setDeviceMetricsOverride", { width: p.width, height: p.height, deviceScaleFactor: p.scale, mobile: p.mobile }, page);
     await browser.send("Emulation.setTouchEmulationEnabled", { enabled: p.mobile }, page);
     await browser.send("Emulation.setCPUThrottlingRate", { rate: p.cpu }, page);
+    // A screen's inset where the profile has one (a notch), and none again after it. A Chrome that can't emulate one
+    // can't measure that profile, and stops saying so.
+    if (p.inset) {
+      await browser.send("Emulation.setSafeAreaInsetsOverride", { insets: p.inset }, page).catch((error: Error) => {
+        throw new Error(`this Chrome can't give a screen an inset (Emulation.setSafeAreaInsetsOverride), which the ${name} profile needs: ${error.message}`);
+      });
+      inset = true;
+    } else if (inset) {
+      await browser.send("Emulation.setSafeAreaInsetsOverride", { insets: {} }, page);
+      inset = false;
+    }
     for (const session of [page, ...workers]) await browser.send("Network.emulateNetworkConditions", line(name), session).catch(() => {});
   };
   const forget = async (): Promise<void> => {
@@ -1147,7 +1169,7 @@ try {
 
   const results: Record<string, { cold: Summary; warm: Summary; work: Record<string, number> }> = {};
   let firstVisit: Wire[] = [];
-  for (const name of Object.keys(PROFILES) as Profile[]) {
+  for (const name of LOADED) {
     await setProfile(name);
     for (const target of PAGES) {
       const cold: Load[] = [];
@@ -1535,7 +1557,7 @@ try {
     })`);
   };
   const moves: Record<string, Spread[]> = {};
-  for (const name of MOVES ? (Object.keys(PROFILES) as Profile[]) : []) {
+  for (const name of MOVES ? LOADED : []) {
     await setProfile(name);
     const times: number[][] = PATH.map(() => []);
     for (let round = 0; round < MOVES; round++) {
