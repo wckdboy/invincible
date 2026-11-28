@@ -1704,7 +1704,13 @@ export class SandboxHost {
     const name = containerName(id);
     const aside = `${name}-replaced`;
     const network = opts.network ?? (sandbox.network === "isolated" ? "gateway" : sandbox.network);
-    const providers = sandboxScopes({ network, providers: opts.providers, search: sandbox.providers.includes(SEARCH_SCOPE) });
+    // On a host whose sandboxes have no networks (sandboxNetworks false: a scratch node beside a live one), made again it
+    // is isolated, whatever was asked, and nothing of the networks is asked: they are the live node's there. Made again by
+    // your remake or by the layout-2 move, it joined invincible-gw, or both when asked online (the eighth review's R8-4).
+    // (A Mac is never a scratch host here: what was asked is what it is made on.)
+    const scratch = this.opts.sandboxNetworks === false && !this.apple;
+    const madeOn = scratch ? "isolated" : network;
+    const providers = sandboxScopes({ network: madeOn, providers: opts.providers, search: sandbox.providers.includes(SEARCH_SCOPE) });
     // With a desktop or the hardware tools from now on, or without, when asked; else the image it has (by its name: as it
     // is built now).
     const image = remadeImage(sandbox.image, opts);
@@ -1752,7 +1758,7 @@ export class SandboxHost {
     if (inLayout2 && workspace?.endsWith(`/${WORK_TREE}`) && !opts.layout) workspace = workspace.slice(0, -WORK_TREE.length - 1);
     const layout = inLayout2 ? { path: await this.imagePath(image) } : undefined;
     if (inLayout2) await this.rootFree(id);
-    await this.ensureNetworks();
+    if (!scratch) await this.ensureNetworks();
 
     this.endSession(id);
     // (Stopped, or nothing of it is set aside, moved or made again: a VM still running on its store would see it change. R5-1.)
@@ -1804,7 +1810,7 @@ export class SandboxHost {
         run,
         node: this.opts.node,
         image,
-        network,
+        network: madeOn,
         cpus: sandbox.cpus,
         memoryGb: sandbox.memoryGb,
         pidsLimit: 1024,
@@ -1844,7 +1850,7 @@ export class SandboxHost {
         verdict: "approved",
         reason: `approved by ${opts.approvedBy.slice(0, 12)}`,
         run,
-        detail: `made again from ${image} as it is now · /work kept · ${network} · ${sandbox.cpus} cpu · ${sandbox.memoryGb} GB${layout ? " · layout 2" : ""}`,
+        detail: `made again from ${image} as it is now · /work kept · ${madeOn} · ${sandbox.cpus} cpu · ${sandbox.memoryGb} GB${layout ? " · layout 2" : ""}`,
       });
     }
     return (await this.get(id))!;

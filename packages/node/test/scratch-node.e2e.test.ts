@@ -101,3 +101,19 @@ test("on a node whose sandboxes have no networks, one asked online is made isola
   expect(agent.workspace).toMatchObject({ network: "isolated", isolation: "vm" });
   expect(joined(agents.asked)).toEqual([["none"]]);
 }, 60_000);
+
+test("on a node whose sandboxes have no networks, an agent's VM made again stays isolated, and so when asked online: none of the networks is asked of", async () => {
+  // (The eighth fabric review's R8-4: made again, by your remake or by the layout-2 move at a prepare, both remakeTeam, it
+  // asked for both networks and joined invincible-gw, or both when asked online: the live node's on a shared host.)
+  const joined = (asked: string[][]) => asked.filter((args) => args[0] === "run").map((args) => args.flatMap((arg, i) => (args[i - 1] === "--network" ? [arg] : [])));
+  const agents = await node("scratch-remake", false);
+  await agents.api("saveAgent", { id: "ada", name: "Ada", role: "engineer" });
+  const made = await agents.api<{ workspace: SandboxView }>("provisionAgent", { id: "ada", desktop: false });
+  expect(made.workspace).toMatchObject({ network: "isolated", isolation: "vm" });
+  for (const ask of [{}, { network: "online" }]) {
+    const before = agents.asked.length;
+    const again = await agents.api<{ workspace: SandboxView }>("remakeAgent", { id: "ada", ...ask });
+    const asked = agents.asked.slice(before);
+    expect({ ask, network: again.workspace.network, isolation: again.workspace.isolation, joined: joined(asked), networks: asked.filter((args) => args[0] === "network").map((args) => args.slice(0, 3).join(" ")) }).toEqual({ ask, network: "isolated", isolation: "vm", joined: [["none"]], networks: [] });
+  }
+}, 60_000);
