@@ -9,7 +9,9 @@ written here. Anything not written here (the text for people, its spacing, its c
 
 `invincible`, the node's own command line, is a separate program and keeps its own commands, output and exit codes.
 The installers put both in place: `curl -fsSL https://invincible.sh | bash` writes `inv` beside `invincible` in your
-`~/.local/bin`, and a server's deploy (`scripts/deploy.sh`) writes `/usr/local/bin/inv`, run as the node's service user.
+`~/.local/bin`, and a server's deploy (`scripts/deploy.sh`) as root writes `/usr/local/bin/inv`, run as the node's
+service user. A deploy as the node's own user (a Mac, or Linux with `systemd --user`) writes both to `~/.local/bin`, as
+the installer does, and says so where that folder isn't on your PATH.
 From a checkout, `bun run inv`.
 
 ## Reaching a node

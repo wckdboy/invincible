@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
@@ -73,6 +73,67 @@ test("the deploy's LaunchAgent gives a Mac node the PATH the installer's and the
   expect(installer?.split(":")).toEqual(expect.arrayContaining(["/opt/homebrew/bin", "/usr/local/bin"]));
   expect(app).toBe(installer);
   expect(pathIn(darwin)).toBe(installer);
+});
+
+// A node deployed as its own user (a Mac's LaunchAgent, Linux's systemd --user) had no command to type: only a root
+// deploy wrote /usr/local/bin's invincible and inv (the mini, 28 November 2026: no invincible on its PATH). The setup
+// writes them where the installer does (scripts/install.sh: ~/.local/bin), each run as the node is.
+/** The setup's install_commands, run alone in a home of its own with a stand-in Bun that says what it was given. */
+function commands(name: string, opts: { path?: string; oldInvLink?: boolean } = {}) {
+  const home = join(root, name);
+  const bin = join(home, ".local/bin");
+  const app = join(home, "invincible/app");
+  const bun = join(home, ".bun/bin/bun");
+  mkdirSync(join(home, ".bun/bin"), { recursive: true });
+  writeFileSync(bun, `#!/bin/sh\nprintf '%s\\n' "keystore=$INVINCIBLE_KEYSTORE" "$@"\n`);
+  chmodSync(bun, 0o755);
+  if (opts.oldInvLink) {
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "invincible"), "#!/bin/sh\necho an older invincible\n");
+    symlinkSync("invincible", join(bin, "inv"));
+  }
+  const fn = /^install_commands\(\) \{\n[\s\S]*?\n\}$/m.exec(readFileSync(script, "utf8"))?.[0];
+  if (!fn) throw new Error("scripts/remote-setup.sh has no install_commands");
+  const run = Bun.spawnSync(["bash", "-c", `set -euo pipefail\n${fn}\ninstall_commands`], {
+    env: { HOME: home, APP: app, BUN: bun, PATH: opts.path ?? "/usr/bin:/bin:/usr/sbin:/sbin" },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  /** One of the commands it wrote, typed over ssh as a Mac runs it: launchd's PATH and nothing else. */
+  const typed = (command: string, ...args: string[]) => Bun.spawnSync([join(bin, command), ...args], { env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" }, stdout: "pipe" }).stdout.toString();
+  return { code: run.exitCode, said: `${run.stdout.toString()}${run.stderr.toString()}`, bin, app, typed };
+}
+
+test("a node deployed as its own user gets the invincible and inv commands where the installer puts them, each run as the node is", () => {
+  const deploy = commands("commands");
+  expect(deploy.code).toBe(0);
+  // Its CLI, on the deployed app (the link a deploy moves, so the next release is the one typed), with the file keystore.
+  expect(deploy.typed("invincible", "agents", "routing")).toBe(`keystore=file\n${deploy.app}/packages/node/src/cli.ts\nagents\nrouting\n`);
+  expect(deploy.typed("inv", "status")).toBe(`keystore=file\n${deploy.app}/packages/node/src/inv/main.ts\nstatus\n`);
+  for (const command of ["invincible", "inv"]) expect(statSync(join(deploy.bin, command)).mode & 0o777).toBe(0o755);
+  // Where ~/.local/bin isn't on the PATH, it says how to put it there, as the installer does; where it is, nothing.
+  expect(deploy.said).toContain(`add ${deploy.bin} to your PATH to type invincible anywhere`);
+  expect(commands("commands-on-path", { path: `${join(root, "commands-on-path/.local/bin")}:/usr/bin:/bin` }).said).toBe("");
+});
+
+test("an inv that was a link to invincible is replaced, never written through: invincible stays the CLI", () => {
+  const deploy = commands("commands-old-link", { oldInvLink: true });
+  expect(deploy.code).toBe(0);
+  expect(lstatSync(join(deploy.bin, "inv")).isSymbolicLink()).toBe(false);
+  expect(deploy.typed("invincible")).toBe(`keystore=file\n${deploy.app}/packages/node/src/cli.ts\n`);
+  expect(deploy.typed("inv")).toBe(`keystore=file\n${deploy.app}/packages/node/src/inv/main.ts\n`);
+});
+
+test("the commands are written for a node deployed as its own user, before its service starts; a root deploy's user phase writes none", () => {
+  const text = readFileSync(script, "utf8");
+  const rootPhaseEnds = text.indexOf("[[ -n ${INVINCIBLE_USER_PHASE:-} ]] && exit 0");
+  const written = text.indexOf("\ninstall_commands\n");
+  const services = text.indexOf("if [[ $(uname) == Linux ]] && command -v systemctl");
+  expect([rootPhaseEnds > 0, written > rootPhaseEnds, services > written]).toEqual([true, true, true]);
+  // (The root phase writes /usr/local/bin's; the service user's home gets none.)
+  const deploy = server("root-user-phase", "pass");
+  expect(deploy.code).toBe(0);
+  expect(existsSync(join(deploy.home, ".local/bin"))).toBe(false);
 });
 
 test("every firewall rule the setup adds has a comment ufw accepts: no apostrophe in it", () => {

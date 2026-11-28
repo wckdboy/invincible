@@ -556,6 +556,23 @@ prune_releases || echo "note: old releases were not pruned" >&2
 [[ -n ${INVINCIBLE_USER_PHASE:-} ]] && exit 0
 
 BUN="$HOME/.bun/bin/bun"
+
+# The invincible and inv commands of a node deployed as its own user (a Mac's LaunchAgent, Linux's systemd --user),
+# where the installer puts them (scripts/install.sh: ~/.local/bin), each run as the node is: the deployed app (the link
+# a deploy moves), its Bun, the file keystore. A root deploy writes /usr/local/bin's in its root phase. A Mac gives a
+# command over ssh only /usr/bin:/bin:/usr/sbin:/sbin, so where ~/.local/bin isn't on the PATH it says so, as the
+# installer does. (An inv that was a link to invincible, until 26 November 2026, is replaced, never written through.)
+install_commands() {
+  local bin=$HOME/.local/bin
+  mkdir -p "$bin"
+  printf '#!/bin/sh\n# Invincible (scripts/remote-setup.sh): the node in %s.\nINVINCIBLE_KEYSTORE=file\nexport INVINCIBLE_KEYSTORE\nexec "%s" "%s/packages/node/src/cli.ts" "$@"\n' "$APP" "$BUN" "$APP" >"$bin/invincible.new"
+  chmod 0755 "$bin/invincible.new" && mv -f "$bin/invincible.new" "$bin/invincible"
+  printf '#!/bin/sh\n# inv (scripts/remote-setup.sh): the command line client of Invincible in %s.\nINVINCIBLE_KEYSTORE=file\nexport INVINCIBLE_KEYSTORE\nexec "%s" "%s/packages/node/src/inv/main.ts" "$@"\n' "$APP" "$BUN" "$APP" >"$bin/inv.new"
+  chmod 0755 "$bin/inv.new" && mv -f "$bin/inv.new" "$bin/inv"
+  case ":$PATH:" in *":$bin:"*) ;; *) echo "→ add $bin to your PATH to type invincible anywhere: export PATH=\"$bin:\$PATH\"" ;; esac
+}
+install_commands
+
 if [[ $(uname) == Linux ]] && command -v systemctl >/dev/null && systemctl --user show-environment >/dev/null 2>&1; then
   mkdir -p "$HOME/.config/systemd/user"
   cat >"$HOME/.config/systemd/user/invincible.service" <<UNIT

@@ -45,7 +45,8 @@ The app's binary is also the node's launcher (`Mac/MacMain.swift`):
 
 - **Its home** is `~/.invincible`, as on Linux.
 - **The `invincible` command.** The app can put it on your PATH as a two-line script in `~/.local/bin` that runs its
-  bundled CLI. One that's already there (most likely `install.sh`'s) is left as it is.
+  bundled CLI. One that's already there (most likely `install.sh`'s, or a deploy's: `scripts/deploy.sh` writes both
+  commands there too) is left as it is.
 - **This Mac** (in Settings, and at the sidebar's foot) shows the node's service, its process and revision, staying on,
   that command, its log and its doctor.
 - **Updates.** Sparkle checks once a day, against the public key the build carries, for the signed feed on
