@@ -231,6 +231,38 @@ describe("a Claude seat's sign-in", () => {
     }
   });
 
+  // The third re-check of 28 November 2026, its Info (I2): where a sign-in took, a status naming no account (Codex's
+  // account/read answering late just after it, Claude's auth status with no org) was still taken for another account's,
+  // and the tool's own sign-out ran. It is no other account there either: only you sign a seat out.
+  test("a sign-in that took on a seat whose tool then names no account never signs it out: ready as its own, Claude's and Codex's", async () => {
+    for (const kind of ["claude-subscription", "chatgpt-codex"] as const) {
+      const status: Record<string, unknown> = { type: "status", installed: true, signedIn: true, method: kind === "chatgpt-codex" ? "chatgpt" : "claude.ai", plan: "pro", fingerprint: ONE, renewBy: 2_000_000_000_000 };
+      const n = node({ status });
+      n.add(A, kind);
+      const card = { url: kind === "chatgpt-codex" ? DEVICE : PAGE, ...(kind === "chatgpt-codex" ? { code: "FAKE-1234" } : {}) };
+      const signIn = async () => {
+        const started = n.signIns.start(A);
+        await n.settled(() => n.bridge().told.length > 0);
+        n.bridge().say({ type: "card", ...card });
+        const shown = await started;
+        if (kind === "claude-subscription") await n.signIns.answer(A, shown.attempt, CODE);
+        n.bridge().say({ type: "done", ok: true }, true);
+      };
+      await signIn();
+      await n.settled(() => n.asked.filter((a) => a[0] === "destroy").length === 1);
+      expect([kind, seatState(n.seat(A), Date.now()).is, n.seat(A).account]).toEqual([kind, "ready", ONE]);
+      // Signed in again, and it took; the tool's status now names no account.
+      delete status.fingerprint;
+      n.next();
+      const before = n.asked.length;
+      await signIn();
+      await n.settled(() => n.asked.filter((a) => a[0] === "destroy").length === 2);
+      const ran = n.asked.slice(before).filter((a) => a[0] === "exec").map((a) => (a[2] as string[]).join(" "));
+      expect([kind, ran.filter((command) => /logout/.test(command))]).toEqual([kind, []]);
+      expect([kind, seatState(n.seat(A), Date.now()).is, n.seat(A).account]).toEqual([kind, "ready", ONE]);
+    }
+  });
+
   test("an account that isn't the seat's, or is another seat's, is refused and signed out again by its own tool", async () => {
     const n = node({ status: { type: "status", installed: true, signedIn: true, method: "claude.ai", fingerprint: TWO } });
     n.add(A);

@@ -231,17 +231,21 @@ export class SeatSignIns {
     if (!signIn) throw new Error(`no tool says how a ${seat.kind} seat's sign-in stands`);
     const asked = await host.exec(attempt.vm, ["bash", "-lc", signIn.seatCheck(seatSalt(this.deps.vault))], 60);
     const told = signIn.read(asked.stdout);
+    // (A status with no account in it, as a late account lookup gives, is no other account: the seat's own, on either
+    // road. Only one that names another is.)
+    const named = seat.account && !told.fingerprint ? { ...told, fingerprint: seat.account } : told;
     if (took === undefined) {
       // Ended before it took: nothing is signed out, whatever the tool says; only you sign a seat out (the second re-check
       // of 28 November 2026, N3). A seat its tool still holds a sign-in on is ready again when that sign-in is its own, or
-      // one the read can't name (a status with no account in it, as a late account lookup gives); else it is as the
-      // attempt's end said.
+      // one the read can't name; else it is as the attempt's end said.
       if (!told.signedIn || (told.fingerprint && seat.account && told.fingerprint !== seat.account)) return;
-      recordSeatStatus(this.deps.store, this.deps.node, seat, { ...told, ...(seat.account && !told.fingerprint ? { fingerprint: seat.account } : {}) });
+      recordSeatStatus(this.deps.store, this.deps.node, seat, named);
       return;
     }
-    const stands = recordSeatStatus(this.deps.store, this.deps.node, seat, told, took);
-    // Another account than the seat's: refused, and signed out again by the tool's own command, so its home holds none.
+    // Took: ready as the tool says, its own account kept when the status names none, so no sign-out runs for that (the
+    // third re-check's I2).
+    const stands = recordSeatStatus(this.deps.store, this.deps.node, seat, named, took);
+    // Another account than the seat's, named: refused, and signed out again by the tool's own command, so its home holds none.
     const out = SIGN_OUT[seat.kind];
     if (stands === "wrong-account" && out) await host.exec(attempt.vm, out, 60).catch(() => undefined);
   }
