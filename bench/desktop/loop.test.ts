@@ -93,6 +93,20 @@ test("the stand-in that works the shell's way, as a model offered no toolset doe
   expect(vm.ran.filter((c) => c.startsWith("desktop fill"))).toHaveLength(1);
 });
 
+test("the shell's stand-in sets the settings' font size in one fill, the control below the screen or on it: no turn of its own to scroll", async () => {
+  // (`desktop fill` scrolls to a field below the screen the page's own way: the settings task took 4 calls, a scroll's
+  // among them, as every model run's did, 28 November 2026.)
+  const below = async (args: string) => (args === "settings-font" ? { offscreen: true, client: [636, 893], value: "16" } : where(args));
+  const asked: Asked[] = [];
+  const counted = { calls: 0, usage: { input: 0, output: 0, cached: 0 } };
+  const ctx = modelsContext("bench-stand-in-key-FAKE-0000", standIn(shellTurns("settings", below, ""), asked));
+  const vm = desk();
+  const run = await viaLoop(GOALS.settings(""), loopAsk(ctx, counted), vm.exec, counted);
+  expect([run.error, run.outcome?.status]).toEqual([null, "unverified"]);
+  expect(run.said).toEqual(["desktop key ctrl+l && desktop type chrome://settings/appearance && desktop key Return && desktop settle", 'desktop fill "Font size" Large']);
+  expect(run.calls).toBe(3);
+});
+
 test("a request or a turn not in the toolset's shape is said, so a task that passed its gate that way doesn't pass", () => {
   const fine: Asked = { toolset: true, echoed: { calls: 2, asToolset: 2, results: 2, resultsAsToolset: 2, pictures: 1 } };
   expect(shapeOf([fine, fine])).toBeNull();

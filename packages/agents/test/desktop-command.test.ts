@@ -108,3 +108,8 @@ test("an agent with a desktop is told how a file dialog takes a typed path: Retu
   expect(desktopBriefing()).toContain("In a file dialog, press Return in the same command as the path you type into it (`desktop type /work/notes.txt && desktop key Return`), or click its Save: a Return that comes in a later command may save nothing.");
   expect(desktopBriefing()).not.toMatch(/[<>]/);
 });
+
+test("an agent with a desktop is told that what is below or above the screen is reached by desktop find and desktop fill, the page scrolled its own way: no scroll of its own", () => {
+  // (Every settings run of the models, 28 November 2026, 6 of 6: a find that said nothing was there, then a blind scroll.)
+  expect(desktopBriefing()).toContain("What is below or above the screen `desktop find` and `desktop fill` reach, the page scrolled to it its own way: no scroll of yours is needed.");
+});

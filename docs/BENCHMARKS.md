@@ -265,8 +265,9 @@ everything but the model.
   going down.
 - **Held:** what C1's steps reached is held to bars whatever the baseline says: every task's passes, each way (the
   editor the naive way included: step 3 broke it and C0's 0/5 hid that), the toolset way at no more than a model call
-  an action, the shell way at no more calls a task than it took (form 3, terminal 2, settings 4, editor 3; an action
-  there may fill a whole form), the test string exact in each app, and the F tests' checks. The stream is held to at least 10 frames a
+  an action, the shell way at no more calls a task than it took (form 3, terminal 2, settings 3, editor 3; an action
+  there may fill a whole form), a form longer than the screen in one `desktop fill` 5 of 5, the test string exact in
+  each app, and the F tests' checks. The stream is held to at least 10 frames a
   second while it moves, at most 6 % of a core on the encoder and deskd together, and at most 100 kbit/s while the
   screen is still. Light by default is held to: a desktop never started at most 50 MB over none; grown within a second,
   its work as it was; started and idle at most 600 MB over; once stopped, nothing of it still running and at most
@@ -331,6 +332,16 @@ everything but the model.
   The toolset's stand-in takes 3 calls for the form as well; the six model runs of the form that day took 6 to 15.
   With what each field holds in its tree, a typical front page's tree came to 983 tokens (966 in the baseline) and
   the browser's settings' to 724 (686): within the 50 tokens these are read to.
+- **What is below the screen's edge, reached, 28 November 2026.** Every model run's settings task that day, 6 of 6,
+  lost a call or more to the font size below the screen's edge: a `desktop find` that said nothing was there, then a
+  blind scroll. `desktop find` and `desktop fill` now reach what is above or below the screen, or across its edge,
+  the page scrolled to it its own way (AT-SPI's ScrollTo), and say so. On Ultra, in fresh Kata VMs from this branch:
+  - the settings task the shell way: 5 of 5 at 3 calls, where it took 4 (its scroll turn gone);
+  - a form longer than the screen (`kit/pages/long-form.html`, nine fields, four below the edge, and Send below
+    them): one `desktop fill` in 1.42 to 1.52 s, then Send by `desktop find`, every value received, 5 of 5. Its first
+    try missed City, whose box crossed the screen's bottom edge (793 to 827): on the screen to the tree, its centre
+    past it, so the click fell off the screen. A node is now scrolled to when its centre is off the screen too;
+  - the trees as before: 981 and 724 tokens.
 
 ### hardware: KiCad and FreeCAD on an agent's desktop
 

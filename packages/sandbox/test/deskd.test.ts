@@ -1362,7 +1362,7 @@ NODES = {
 }
 COLLECTION = True  # (an app without it is walked)
 TEXTS = {"/n1": "Søren Ærø", "/n2": "soren@example.test"}  # (what a field holds, its caret at its end)
-calls, spaces = [], []
+calls, spaces, scrolled = [], [], []
 def kids(bus, path):
     return [(bus, p) for p, n in NODES.items() if n[0] == bus and n[1] == path]
 def under(bus, path):
@@ -1403,6 +1403,18 @@ def call(bus, path, iface, method, signature, args):
     if method == "GetSelectedChild":
         chosen = [r for r in kids(bus, path) if NODES[r[1]][4] >> d.STATE["selected"] & 1]
         return (chosen[0] if chosen else ("", "/org/a11y/atspi/null"),)
+    if method == "ScrollTo":
+        # (The page scrolls as Chromium scrolls it to a node: its document's nodes move together, the one asked for
+        # brought just inside the viewport, y 80 to 800; each is showing while it is inside, the hidden one never.)
+        scrolled.append(path)
+        x, y, w, h = n[5]
+        delta = (780 - (y + h)) if y + h > 800 else (100 - y) if y < 80 else 0
+        for p in [p for _, p in under(":1.5", "/d1")]:
+            m = NODES[p]
+            bx, by, bw, bh = m[5]
+            inside = 80 <= by + delta and by + delta + bh <= 800 and m[4] & VISIBLE and p != "/n6"
+            NODES[p] = m[:4] + ((m[4] | SHOWING) if inside else (m[4] & ~SHOWING), (bx, by + delta, bw, bh))
+        return (True,)
     if method == "GetExtents":
         spaces.append([path, args[0]])
         own = APPS[bus]["toolkit"] == "GTK"
@@ -1632,6 +1644,59 @@ print(json.dumps(filled(["Name", "Ada Lovelace", "Email", "ada@example.test"], h
     expect(got.out).toBe('filled ref=1 entry "Name" = "Ada Lovelace"\n');
     expect(got.err).toBe("desktop: the owner took this desktop over 0 s ago: the fields from Email on weren't filled; do something else meanwhile, and try again after\n");
     expect(got.texts["/n2"]).toBeUndefined();
+  });
+
+  test("desktop find reaches what is below or above the screen: the page scrolled to it its own way (AT-SPI's ScrollTo), and the answer says so", () => {
+    // (Every settings run of the models, 28 November 2026, 6 of 6: `desktop find combobox "Font size"` said nothing like
+    // it was on the screen, the control below its edge, and each run scrolled blind and looked again.)
+    const got = py(`${BUS}
+NODES["/n13"] = (":1.5", "/d1", "entry", "Comment", VISIBLE | SENSITIVE | EDITABLE, (100, 1200, 300, 24))
+before = [n["name"] for r, n, b in t.actable(pid=300, title="Form - Chromium")]
+ref, node, box = t.find("entry", "comment", pid=300)
+far = t.find("link", "far below", pid=300)
+none = t.find("entry", "nickname", pid=300)
+class Desk:
+    tree = t
+    def focused_app(self): return 300, "Form - Chromium"
+NODES["/n15"] = (":1.5", "/d1", "push button", "Post", VISIBLE | SENSITIVE, (100, 2600, 60, 24))
+said = d.cli(Desk(), ["find", "button", "post"])
+# One across the screen's bottom edge, its centre below it (Ultra, the long form's City at 793 to 827): on the screen to
+# the tree, but a click at its centre would land past the edge. It too is scrolled into view.
+NODES["/n16"] = (":1.5", "/d1", "entry", "Across the edge", ON | EDITABLE, (100, 790, 300, 24))
+_, edge, edge_box = t.find("entry", "across", pid=300)
+print(json.dumps({"before": before, "box": list(box), "scrolled": bool(node.get("scrolled")), "asked": scrolled, "far": bool(far and far[1].get("scrolled")), "none": none, "said": said, "edge": [bool(edge.get("scrolled")), edge_box[1] + edge_box[3] // 2]}))`) as Record<string, any>;
+    // Not in the tree as it stood: off the screen.
+    expect(got.before).not.toContain("Comment");
+    // Asked of the page, on the node itself, and on the screen after.
+    expect(got.asked).toEqual(["/n13", "/n8", "/n15", "/n16"]);
+    expect(got.box[1]).toBeGreaterThanOrEqual(80);
+    expect(got.box[1] + got.box[3]).toBeLessThanOrEqual(800);
+    expect([got.scrolled, got.far, got.none]).toEqual([true, true, null]);
+    // The answer says it scrolled.
+    expect(got.said[0]).toBe(0);
+    expect(got.said[1]).toMatch(/^130,768 · \[\d+\] push button "Post" at 130,768 \(60x24\) · scrolled into view\n$/);
+    expect(got.edge[0]).toBe(true);
+    expect(got.edge[1]).toBeLessThan(800);
+  });
+
+  test("desktop fill fills a field below the screen: scrolled into view its own way first, and said", () => {
+    const got = py(`${BUS}${FORM}
+NODES["/n13"] = (":1.5", "/d1", "entry", "Comment", VISIBLE | SENSITIVE | EDITABLE, (100, 1200, 300, 24))
+print(json.dumps(filled(["Name", "Ada Lovelace", "Comment", "Below the fold"]) | {"asked": scrolled}, ensure_ascii=False))`) as Record<string, any>;
+    expect(got.code).toBe(0);
+    expect(got.out).toBe('filled ref=1 entry "Name" = "Ada Lovelace"\nfilled ref=8 entry "Comment" = "Below the fold" (scrolled into view)\n');
+    expect(got.texts["/n13"]).toBe("Below the fold");
+    expect(got.asked).toEqual(["/n13"]);
+    // A field across the screen's bottom edge is scrolled into view before its click, as one below it is.
+    const edge = py(`${BUS}${FORM}
+NODES["/n16"] = (":1.5", "/d1", "entry", "City", ON | EDITABLE, (100, 790, 300, 24))
+listed = t.actable(pid=300, title="Form - Chromium")
+print(json.dumps(filled(["City", "Aarhus"]) | {"asked": scrolled}, ensure_ascii=False))`) as Record<string, any>;
+    expect([edge.code, edge.err]).toEqual([0, ""]);
+    expect(edge.out).toMatch(/^filled ref=\d+ entry "City" = "Aarhus" \(scrolled into view\)\n$/);
+    expect(edge.asked).toEqual(["/n16"]);
+    // Its click was where the field is once scrolled to: on the screen.
+    expect(got.did.filter((a: any[]) => a[0] === "left_click").at(-1)[1][1]).toBe(768);
   });
 
   test("an app that can't search its own tree (no Collection) is walked, many calls in flight, never below what isn't showing: the same nodes", () => {

@@ -418,6 +418,47 @@ export interface A11y {
 
 const tokens = (text: string): { tokens: number; lines: number } => ({ tokens: Math.ceil(text.length / 4), lines: text.trim().split("\n").length });
 
+/** What the long form is given (kit/pages/long-form.html): its fields' values, as its server receives them. */
+export const LONG_FORM = { name: "Søren Ærø", email: "soren@example.test", phone: "555-0100", company: "Example Co", plan: "Team", city: "Aarhus", country: "Norway", terms: "on", note: "Below the fold" };
+
+/**
+ * A form longer than the screen in one command (C1, 28 November 2026: every model run's settings task lost a call to a
+ * control below the screen's edge): kit/pages/long-form.html filled by one `desktop fill` through the agent's path,
+ * every field, those below the screen scrolled to as it goes; then Send, below the screen too, found by `desktop find`
+ * (which scrolls to it) and clicked by its ref; and what the page's server received checked against what was given.
+ */
+export async function longForm(vm: BenchVm, n: number): Promise<{ passed: number; misses: string[]; fillMs: number[] }> {
+  const F = LONG_FORM;
+  let passed = 0;
+  const misses: string[] = [];
+  const fillMs: number[] = [];
+  const forms = async () => (await vm.raw(["sh", "-c", `ls ${IN_VM}/out/form-*.json 2>/dev/null | wc -l`])).stdout.trim();
+  for (let i = 0; i < n; i++) {
+    must(await vm.raw(["desktop", "open", PAGE("long-form.html")]), "open long-form.html");
+    const before = await forms();
+    const filled = await vm.agent(`desktop fill "Full name" '${F.name}' Email ${F.email} Phone ${F.phone} Company '${F.company}' Plan ${F.plan} City ${F.city} Country ${F.country} "I accept the terms" on Note '${F.note}'`);
+    fillMs.push(filled.ms);
+    if (filled.code !== 0) {
+      misses.push(`the fill: ${(filled.stderr || filled.stdout).trim().slice(-200)}`);
+      continue;
+    }
+    const send = await vm.agent('desktop find button "Send"');
+    const ref = /\[(\d+)\] push button "Send"/.exec(send.stdout)?.[1];
+    if (!ref || (await vm.agent(`desktop click ref=${ref}`)).code !== 0) {
+      misses.push(`Send: ${(send.stderr || send.stdout).trim().slice(-200)}`);
+      continue;
+    }
+    let got = "";
+    for (let t = 0; t < 20 && !got; t++) {
+      if ((await forms()) !== before) got = (await vm.raw(["sh", "-c", `cat "$(ls ${IN_VM}/out/form-*.json | tail -1)"`])).stdout;
+      else await Bun.sleep(150);
+    }
+    if (got && JSON.stringify(JSON.parse(got)) === JSON.stringify(F)) passed++;
+    else misses.push(`it submitted ${got.trim().slice(0, 200) || "nothing"}`);
+  }
+  return { passed, misses, fillMs };
+}
+
 export async function a11y(vm: BenchVm, n: number): Promise<A11y> {
   must(await vm.raw(["desktop", "open", PAGE("form.html")]), "open form.html");
   let formMatch = 0;

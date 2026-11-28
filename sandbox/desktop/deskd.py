@@ -906,6 +906,7 @@ FILL_CHECK = {"check box", "check menu item", "switch", "toggle button"}
 FILL_RADIO = {"radio button", "radio menu item"}
 FILLED = FILL_TEXT | HOLDS_CHOICE | FILL_CHECK | FILL_RADIO
 SAYS_ON, SAYS_OFF = {"on", "yes", "true", "checked", "1"}, {"off", "no", "false", "unchecked", "0"}
+SCROLL_ANYWHERE = 6  # AT-SPI's ScrollType for Component.ScrollTo: as little as brings the node into view
 FILL_OPTIONS = 500  # a combo box's options looked through, at most
 FILL_BOUND = 1.0  # how long what a field holds is waited for, read again every 50 ms, once its action has answered
 ACTABLE = {"check box", "check menu item", "combo box", "entry", "link", "list item", "menu", "menu item", "page tab",
@@ -1048,10 +1049,11 @@ class Tree:
         except Failed:
             return None
 
-    def matches(self, window, roles):
-        """A window's nodes on the screen in those roles: the app searches its own tree when it can (Collection), else
-        the tree is walked, many calls in flight, never below a node that isn't showing."""
-        rule = ((_bits([STATE["showing"], STATE["visible"]], 2), ALL, {}, ALL, _bits([ROLES.index(r) for r in roles], 5), ANY, [], ALL, False), 1, 0, True)
+    def matches(self, window, roles, states=("showing", "visible")):
+        """A window's nodes in those roles with those states (on the screen, by default; visible alone, the page's off it
+        too): the app searches its own tree when it can (Collection), else the tree is walked, many calls in flight, never
+        below a node that isn't showing."""
+        rule = ((_bits([STATE[s] for s in states], 2), ALL, {}, ALL, _bits([ROLES.index(r) for r in roles], 5), ANY, [], ALL, False), 1, 0, True)
         try:
             (refs,) = self.call(window["bus"], window["path"], "org.a11y.atspi.Collection", "GetMatches", "((aiia{ss}iaiiasib)uib)", rule)
             return [(b or window["bus"], p) for b, p in refs]
@@ -1101,18 +1103,79 @@ class Tree:
             return chosen
         return sorted(apps, key=lambda a: a["pid"] != pid) if pid else apps
 
+    def _these(self, app=None, pid=None, title=None):
+        """The windows a tree is of: of the app named, else of the window with the keyboard's focus (its process and
+        title), else every app's; in each app, the window with the focus, else its active one, else every one showing."""
+        chosen = self._chosen(app, pid)
+        if not app and pid:
+            chosen = [a for a in chosen if a["pid"] == pid] or chosen
+        out = []
+        for a in chosen:
+            windows = [w for w in self.windows(a) if self.has(w, "showing")]
+            out.append((a, [w for w in windows if title and w["name"] == title] or [w for w in windows if self.has(w, "active")] or windows))
+        return out
+
+    def beyond_screen(self, node):
+        """Where a node off the screen is: "below" it or "above" it (its box wholly past the screen's bottom or top), else
+        None: on the screen, of no size (a closed select's options), or past its side."""
+        try:
+            x, y, w, h = self.box(node)
+        except Failed:
+            return None
+        if w <= 0 or h <= 0:
+            return None
+        return "below" if y >= H else "above" if y + h <= 0 else None
+
+    @staticmethod
+    def reachable(box):
+        """Whether a node is where a click reaches it: its centre on the screen, where deskd clicks it. One across the
+        screen's edge is on the screen to the tree, its centre past it (Ultra, the long form's City at 793 to 827)."""
+        x, y, w, h = box
+        return 0 <= x + w // 2 < W and 0 <= y + h // 2 < H
+
+    def into_view(self, node):
+        """A node of the page off the screen, scrolled into view the page's own way (AT-SPI's Component.ScrollTo, as a
+        screen reader asks it, never a guess at a distance): it, read again, and where it is now (half a second at most
+        for it to be on the screen), marked `scrolled`; or None, when it isn't on the screen after."""
+        try:
+            self.call(node["bus"], node["path"], "org.a11y.atspi.Component", "ScrollTo", "(u)", (SCROLL_ANYWHERE,))
+        except Failed:
+            return None
+        deadline = time.monotonic() + 0.5
+        while True:
+            now = self._try(self.node, (node["bus"], node["path"]), node["app"], node.get("window"))
+            box = self._on_screen(now) if now else None
+            if box or time.monotonic() > deadline:
+                break
+            time.sleep(0.02)
+        if not box:
+            return None
+        now["scrolled"] = True
+        self.held(now)
+        return now, box
+
+    def beyond(self, app=None, pid=None, title=None, roles=ACTABLE, limit=400):
+        """The nodes of the tree's windows (_these) that are off the screen, above or below it: visible, in those roles,
+        each with where it is (beyond_screen). Not given refs: what reaches one (find, fill) numbers it."""
+        with self.lock:
+            out = []
+            for a, these in self._these(app, pid, title):
+                for w in these:
+                    def one(ref, a=a, w=w):
+                        n = self._try(self.node, ref, a, w)
+                        if not n or (n["role"] == "text" and not self.has(n, "editable")) or self._on_screen(n):
+                            return None
+                        where = self.beyond_screen(n)
+                        return (n, where) if where else None
+                    out += [f for f in self._many(one, self.matches(w, roles, states=("visible",))[:limit]) if f]
+            return out
+
     def actable(self, app=None, pid=None, title=None, limit=400):
         """The nodes a person acts on, on the screen: of the app named, else of the window with the keyboard's focus
         (its process and title, from X), else every app's. Each is given a ref, which `click ref=N` takes."""
         with self.lock:
-            chosen = self._chosen(app, pid)
-            if not app and pid:
-                chosen = [a for a in chosen if a["pid"] == pid] or chosen
             found = []
-            for a in chosen:
-                windows = [w for w in self.windows(a) if self.has(w, "showing")]
-                # The window with the focus, when it is this app's; else its active one; else every one on the screen.
-                these = [w for w in windows if title and w["name"] == title] or [w for w in windows if self.has(w, "active")] or windows
+            for a, these in self._these(app, pid, title):
                 for w in these:
                     refs = self.matches(w, ACTABLE)
 
@@ -1157,9 +1220,15 @@ class Tree:
         return node.get("holds")
 
     def again(self, ref):
-        """A node said before as it is now: its states and what it holds read again, and where it is (at)."""
+        """A node said before as it is now: its states and what it holds read again, and where it is (at); one above or
+        below the screen, or across its edge (reachable), scrolled into view first (into_view), and marked so."""
         node, box = self.at(ref)
         with self.lock:
+            if self.beyond_screen(node) or not self.reachable(box):
+                seen = self.into_view(node)
+                if seen:
+                    self.refs[ref] = seen[0]
+                    return seen
             now = self.node((node["bus"], node["path"]), node["app"], node.get("window"))
             self.held(now)
             self.refs[ref] = now
@@ -1212,20 +1281,31 @@ class Tree:
 
     def find(self, role, name, pid=None):
         """The first node on the screen with that role and a name like that (any case), the app with the focus searched
-        first: it, its box and a ref."""
+        first; else the first above or below the screen, scrolled into view: it, its box and a ref."""
         role, name = _role(role), name.strip().lower()
         if role not in ROLES:
             raise Refused("there is no role %s (desktop tree shows the roles on the screen)" % json.dumps(role))
         with self.lock:
-            for a in self._chosen(pid=pid):
-                for w in [w for w in self.windows(a) if self.has(w, "showing")]:
-                    for ref in self.matches(w, [role]):
-                        n = self._try(self.node, ref, a, w)
-                        if n and name in n["name"].lower():
-                            box = self._on_screen(n)
-                            if box:
-                                self.held(n)
-                                return self.number(n), n, box
+            windows = [(a, w) for a in self._chosen(pid=pid) for w in self.windows(a) if self.has(w, "showing")]
+            for a, w in windows:
+                for ref in self.matches(w, [role]):
+                    n = self._try(self.node, ref, a, w)
+                    if n and name in n["name"].lower():
+                        box = self._on_screen(n)
+                        if box:
+                            seen = None if self.reachable(box) else self.into_view(n)
+                            if seen:
+                                return self.number(seen[0]), seen[0], seen[1]
+                            self.held(n)
+                            return self.number(n), n, box
+            # Not on the screen: the page above and below it, the first like it scrolled into view (into_view).
+            for a, w in windows:
+                for ref in self.matches(w, [role], states=("visible",)):
+                    n = self._try(self.node, ref, a, w)
+                    if n and name in n["name"].lower() and self.beyond_screen(n):
+                        seen = self.into_view(n)
+                        if seen:
+                            return self.number(seen[0]), seen[0], seen[1]
         return None
 
     def at(self, ref):
@@ -2108,11 +2188,13 @@ desktop windows                    the windows on the screen, and which has the 
 desktop focus [window]             the window with the focus; with a name, that window brought forward with it
 desktop tree [app]                 what can be acted on in the window with the focus (or that app), from its
                                    accessibility tree: each with a ref, its role, its name and where it is
-desktop find <role> <name>         where one is: x,y and its ref (desktop find button "Send")
+desktop find <role> <name>         where one is: x,y and its ref (desktop find button "Send"); one above or below
+                                   the screen is scrolled into view, the page's own way, and said
 desktop click ref=<n> [button]     click a node desktop tree or find gave, where it is at that moment
 desktop fill <field> <value>...    a form in one command: each field (ref=<n>, or its name as the tree says it)
                                    given its text, its option (a combo box) or on|off (a check box), read back
-                                   before the next; the first that doesn't hold it stops it. It never sends the form
+                                   before the next (one off the screen scrolled to first); the first that doesn't
+                                   hold it stops it. It never sends the form
 Every action answers with what it did, whether the screen changed, and the focus; the names Anthropic's computer
 toolset uses work too (left_click, mouse_move, left_click_drag, ...).
 The display is 1280 by 800; x runs right from 0, y runs down from 0. The clipboard is xclip's
@@ -2299,9 +2381,9 @@ def cli(desk, argv, cwd="/work", env=None):
             pid, _ = desk.focused_app()
             got = desk.tree.find(args[0], " ".join(args[1:]), pid=pid)
             if not got:
-                return 1, "", "desktop: no %s named like \"%s\" is on the screen (desktop tree lists what is)\n" % (_role(args[0]), " ".join(args[1:]))
+                return 1, "", "desktop: no %s named like \"%s\" is on the screen, nor above or below it (desktop tree lists what is)\n" % (_role(args[0]), " ".join(args[1:]))
             ref, node, (x, y, w, h) = got
-            return 0, "%d,%d · %s\n" % (x + w // 2, y + h // 2, say_node(ref, node, (x, y, w, h))), ""
+            return 0, "%d,%d · %s%s\n" % (x + w // 2, y + h // 2, say_node(ref, node, (x, y, w, h)), " · scrolled into view" if node.get("scrolled") else ""), ""
         if verb == "click" and args and args[0].startswith("ref="):
             ref = _whole(args[0][4:], "ref=")
             node, (x, y, w, h) = desk.tree.at(ref)
@@ -2455,6 +2537,7 @@ def fill(desk, args):
         raise Refused('fill takes each field and its value: desktop fill "Full name" "Ada Lovelace" ref=13 ada@example.test')
     pid, title = desk.focused_app()
     shown = None
+    off = None
     plan = []
     for i in range(0, len(args), 2):
         field, value = args[i], args[i + 1]
@@ -2464,7 +2547,18 @@ def fill(desk, args):
         else:
             if shown is None:
                 shown = [(r, n) for r, n, _ in desk.tree.actable(pid=pid, title=title)]
-            ref, node = _named_field(shown, field)
+            try:
+                ref, node = _named_field(shown, field)
+            except Refused:
+                # (None on the screen: one above or below it, which acting on it brings into view.)
+                if off is None:
+                    off = [(desk.tree.number(n), n) for n, _ in desk.tree.beyond(pid=pid, title=title, roles=FILLED)]
+                try:
+                    ref, node = _named_field(off, field)
+                except Refused:
+                    ref = None
+                if ref is None:
+                    raise
         if node["role"] not in FILLED:
             raise Refused("ref=%d %s \"%s\" isn't a field: fill takes text fields, combo boxes, check boxes and radio buttons "
                           "(a button is clicked: desktop click ref=%d)" % (ref, node["role"], node["name"][:80], ref))
@@ -2512,6 +2606,11 @@ def _named_field(shown, name):
 def _fill_one(desk, ref, value):
     """One field filled, and read back: what it says, or Stop with what it holds."""
     node, box = desk.tree.again(ref)
+    return _filled(desk, ref, value, node, box) + (" (scrolled into view)" if node.get("scrolled") else "")
+
+
+def _filled(desk, ref, value, node, box):
+    """_fill_one's work on the field as it is now (again)."""
     role, name = node["role"], node["name"][:80]
     named = 'ref=%d %s "%s"' % (ref, role, name)
     centre = lambda b: [b[0] + b[2] // 2, b[1] + b[3] // 2]

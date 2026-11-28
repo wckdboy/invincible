@@ -1,6 +1,6 @@
 import { DEFAULT_IMAGE, DESKTOP_IMAGE } from "../../packages/sandbox/src/spec.ts";
 import { buildImages } from "../desktop/images.ts";
-import { a11y, boot, core, costs, fragile, light, live, lookActLook, paths, type Samples, typing } from "../desktop/measure.ts";
+import { a11y, boot, core, costs, fragile, light, live, longForm, lookActLook, paths, type Samples, typing } from "../desktop/measure.ts";
 import { POLICIES, runTask, TASKS, type TaskRun } from "../desktop/tasks.ts";
 import { bench, BenchVm, cannotRunHere, clearLeftovers } from "../desktop/vm.ts";
 import { sig, type Suite, type SuiteContext } from "../lib.ts";
@@ -118,13 +118,15 @@ export const suite: Suite = {
     // C1, fewer model calls an action: every task the shell's way too, as a model offered no toolset works it, its
     // stand-in at the fewest calls (several actions a command, a form in one desktop fill): no more calls a task than
     // it took on Ultra (28 November 2026). An action there may fill a whole form, so its calls a task are what is held.
+    // What is below the screen's edge is reached (C1, 28 November 2026): a form longer than the screen in one fill.
+    "desktop.fill.long-form": 5,
     "desktop.task.form.shell": 5,
     "desktop.task.terminal.shell": 5,
     "desktop.task.settings.shell": 5,
     "desktop.task.editor.shell": 5,
     "desktop.task.form.shell.calls": 3,
     "desktop.task.terminal.shell.calls": 2,
-    "desktop.task.settings.shell.calls": 4,
+    "desktop.task.settings.shell.calls": 3,
     "desktop.task.editor.shell.calls": 3,
     "desktop.type.chromium.exact": 1,
     "desktop.type.xterm.exact": 1,
@@ -219,6 +221,9 @@ export const suite: Suite = {
       speed(ctx, "desktop.a11y.tree", tree.treeMs, `desktop tree of a typical front page (typical.html), ${NOTE.agent}`);
       ctx.quality("desktop.a11y.tree-tokens.typical", tree.typical.tokens, "tokens", "lower", { resolution: Math.max(50, tree.typical.tokens * 0.05), note: `desktop tree of a typical front page, as a model reads it: characters / 4 (${tree.typical.lines} lines)` });
       ctx.quality("desktop.a11y.tree-tokens.settings", tree.settings.tokens, "tokens", "lower", { resolution: Math.max(50, tree.settings.tokens * 0.05), note: `desktop tree of the browser's own settings (chrome://settings/appearance): characters / 4 (${tree.settings.lines} lines)` });
+
+      const long = await longForm(vm, 5);
+      ctx.quality("desktop.fill.long-form", long.passed, "of 5", "higher", { n: 5, note: `a form longer than the screen (kit/pages/long-form.html) by one desktop fill, those below its edge scrolled to as it goes, then Send found below it by desktop find: runs whose server got every value${long.misses.length ? `; not: ${long.misses.join("; ").slice(0, 300)}` : ""}` });
 
       const runs: TaskRun[] = [];
       const tasksFrom = performance.now();

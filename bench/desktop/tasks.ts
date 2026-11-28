@@ -158,12 +158,9 @@ export async function* shellTurns(task: TaskName, where: Where, file: string): A
     yield { text: "DONE\nRan it in the terminal." };
   } else if (task === "settings") {
     yield { calls: [bash("desktop key ctrl+l && desktop type chrome://settings/appearance && desktop key Return && desktop settle")] };
-    let p = await polled(() => where("settings-font"), (q) => typeof q.x === "number" || Boolean(q.offscreen), 8, 400);
-    for (let i = 0; i < 4 && p.offscreen; i++) {
-      yield { calls: [bash("desktop scroll down 3 640 450")] };
-      p = await where("settings-font");
-    }
-    if (typeof p.x !== "number") return yield { text: `GIVE UP\nThe font size setting isn't on the screen: ${JSON.stringify(p).slice(0, 200)}` };
+    // (On the screen or below its edge: `desktop fill` scrolls to it the page's own way, and needs no turn to scroll.)
+    const p = await polled(() => where("settings-font"), (q) => typeof q.x === "number" || Boolean(q.offscreen), 8, 400);
+    if (typeof p.x !== "number" && !p.offscreen) return yield { text: `GIVE UP\nThe font size setting isn't on the page: ${JSON.stringify(p).slice(0, 200)}` };
     if (p.value !== "16") return yield { text: `GIVE UP\nThe font size was ${p.value} before the run, not 16.` };
     yield { calls: [bash('desktop fill "Font size" Large')] };
     yield { text: "DONE\nThe font size is Large." };
