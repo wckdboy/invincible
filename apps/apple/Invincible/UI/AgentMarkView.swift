@@ -39,9 +39,12 @@ struct AgentFace: View {
     var label: String? = nil
     /// Kept for the places that pass it.
     var key: String? = nil
+    /// How many knocks were armed for it this session (Session.knocks), where its glass knocks while it waits on you: a
+    /// face in focus (the drawer's, its chat's bar). nil: it never knocks here.
+    var knock: Int? = nil
 
     var body: some View {
-        GlassMarkView(glass: AgentGlass.of(id: id, profile: profile), size: size, state: mood.map { AgentGlass.state(MarkState($0)) })
+        GlassMarkView(glass: AgentGlass.of(id: id, profile: profile), size: size, state: mood.map { AgentGlass.state(MarkState($0)) }, knock: knock.map { GlassKnock(agent: id, armed: $0) })
             .markLabel(label)
     }
 }

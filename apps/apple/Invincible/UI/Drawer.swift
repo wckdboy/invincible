@@ -281,7 +281,8 @@ private struct DrawerFaces: View {
             HStack(alignment: .top, spacing: Space.s1) {
                 ForEach(session.rows) { agent in
                     face(.agent(agent.id), name: agent.name, said: agent.standing.beside(agent.line)) {
-                        AgentFace(id: agent.id, profile: session.drawn(agent.id)?.avatar, size: Self.size, mood: Orb.Mood(agent.standing))
+                        // (Waiting on you, it knocks three times as something new waits on it, then rests.)
+                        AgentFace(id: agent.id, profile: session.drawn(agent.id)?.avatar, size: Self.size, mood: Orb.Mood(agent.standing), knock: session.knocks[agent.id])
                     }
                     .accessibilityIdentifier("roster.agent.\(agent.id)")
                 }

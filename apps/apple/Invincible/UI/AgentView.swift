@@ -104,7 +104,7 @@ struct AgentView: View {
                 // plain title gets the room between them, and ends in an ellipsis there.
                 HStack(spacing: Space.s2) {
                     // Its glass, its state's dot on it, as the roster has it.
-                    AgentFace(id: id, profile: profile, size: 28, mood: row.map { Orb.Mood($0.standing) })
+                    AgentFace(id: id, profile: profile, size: 28, mood: row.map { Orb.Mood($0.standing) }, knock: session.knocks[id])
                     TimelineTitle(title: name, line: row?.line, needs: row?.needs ?? false, alignment: .leading, standing: row?.standing)
                 }
                     .contentShape(.rect)

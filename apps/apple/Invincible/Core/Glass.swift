@@ -90,12 +90,35 @@ extension AgentGlass {
         static let period = 3.6
     }
 
+    /// How a glass that waits on you knocks (core's GLASS_NUDGE; the lead's words of 28 November 2026: "the avatar's nudge
+    /// is its motion, not a colour", "knock three times, then rest"): a knock `ms` long that turns it about its middle
+    /// through `turns` (each a share of `turn` degrees, at even steps; the last at rest), `count` times, one at each
+    /// multiple of `every` ms of the clock so the glasses that wait on you knock together, then still, so nothing moves at
+    /// rest. A new need knocks again (nudgeNow); never where motion is reduced.
+    enum Nudge {
+        static let every = 4000.0
+        static let ms = 600.0
+        static let turn = 7.0
+        static let turns: [Double] = [0, -1, 1, -0.5, 0]
+        static let count = 3
+    }
+
+    /// Whether a glass knocks now (core's nudgeNow): when it starts to wait on you, and again when more waits on it than
+    /// when it last knocked; never again for the same, however often it is drawn. `before`: how much waited on it then (nil:
+    /// it waited on nothing); `needs`: how much waits on it now. Returns whether it knocks, and what to keep for next time.
+    static func nudgeNow(before: Int?, state: State?, needs: Int) -> (knock: Bool, after: Int?) {
+        guard state == .needs else { return (false, nil) }
+        return (needs > (before ?? 0), needs)
+    }
+
     /// The dot: its colours (idle a ring in its colour), and its size by the avatar's: diameter, how far past the box's
     /// bottom-right corner it sits, and the ring cut out round it.
     enum Dot {
         static let colors: [State: AgentMark.Forms] = [
             .working: .init(light: "#155dfc", dark: "#51a2ff"),
-            .needs: .init(light: "#e17100", dark: "#ffba00"),
+            // Needs you is the ink, as everything that waits on you is (the lead's word, 28 November 2026: "Ink, not amber, in
+            // every app"): its glass's knock says it (Nudge), its motion, not a colour.
+            .needs: .init(light: "#0a0a0b", dark: "#ffffff"),
             .failed: .init(light: "#e7000b", dark: "#ff6467"),
             .idle: .init(light: "#a1a1a1", dark: "#737373"),
         ]

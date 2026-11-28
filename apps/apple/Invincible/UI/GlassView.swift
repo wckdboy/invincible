@@ -17,11 +17,13 @@ import AppKit
  * own box.
  */
 
-/// An agent's glass: its shape in its ramp, its glow, and its state's dot where its state is known.
+/// An agent's glass: its shape in its ramp, its glow, and its state's dot where its state is known; knocking while it
+/// waits on you, where its knocks are given (AgentFace's `knock`).
 struct GlassMarkView: View {
     let glass: AgentGlass
     let size: CGFloat
     var state: AgentGlass.State? = nil
+    var knock: GlassKnock? = nil
     @Environment(\.colorScheme) private var scheme
     @Environment(\.displayScale) private var displayScale
 
@@ -32,7 +34,59 @@ struct GlassMarkView: View {
                 GlassGlow(ramp: AgentGlass.ramps[glass.color], size: size, theme: theme, working: state == .working)
                 GlassPicture(shape: glass.shape, ramp: glass.color, size: size, theme: theme, scale: displayScale)
             }
+            .modifier(Knocking(knock: state == .needs ? knock : nil))
         }
+    }
+}
+
+/// A knock armed for an agent's glass (Session.knocks): its agent, and how many were armed for it this session.
+struct GlassKnock: Hashable, Sendable {
+    let agent: String
+    let armed: Int
+}
+
+/// Which knock each agent's glass has given, for the app's life: a glass drawn again (a face scrolled back, its chat's
+/// bar) doesn't knock again for the same need.
+@MainActor enum GlassKnocked {
+    private static var given: [String: Int] = [:]
+
+    /// Whether this glass gives the knock (the latest armed for its agent, not given yet), taking it if so.
+    static func take(_ knock: GlassKnock) -> Bool {
+        guard knock.armed > (given[knock.agent] ?? 0) else { return false }
+        given[knock.agent] = knock.armed
+        return true
+    }
+}
+
+/// A glass that waits on you, knocking (core's GLASS_NUDGE; the lead's words of 28 November 2026: "the avatar's nudge is its
+/// motion, not a colour", "knock three times, then rest"): for a knock armed for its agent, three knocks through its turns,
+/// one at each multiple of Nudge.every of the clock so the glasses that wait on you knock together; then still, asking for
+/// no frame. Where motion is reduced it is still, the knock taken all the same, so motion turned on later doesn't knock for
+/// an old need.
+private struct Knocking: ViewModifier {
+    let knock: GlassKnock?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var turned = 0.0
+
+    func body(content: Content) -> some View {
+        content
+            .rotationEffect(.degrees(turned))
+            .task(id: knock) {
+                guard let knock, GlassKnocked.take(knock), !reduceMotion else { return }
+                let turns = AgentGlass.Nudge.turns
+                let step = AgentGlass.Nudge.ms / 1000 / Double(max(1, turns.count - 1))
+                for _ in 0..<AgentGlass.Nudge.count {
+                    let now = Date.now.timeIntervalSince1970 * 1000
+                    let next = (floor(now / AgentGlass.Nudge.every) + 1) * AgentGlass.Nudge.every
+                    try? await Task.sleep(for: .milliseconds(Int(next - now)))
+                    for turn in turns.dropFirst() {
+                        guard !Task.isCancelled else { turned = 0; return }
+                        withAnimation(.linear(duration: step)) { turned = turn * AgentGlass.Nudge.turn }
+                        try? await Task.sleep(for: .seconds(step))
+                    }
+                }
+                turned = 0
+            }
     }
 }
 

@@ -85,6 +85,15 @@ struct RoomRow: Sendable, Equatable, Identifiable {
 
 enum Roster {
     /// The agent that filed an approval (`arm:team.<controller>.<handle>`), or nil when someone else asked.
+    /// What waits on you from an agent, as the list that is home counts it (lib/roster.ts homeRows' count): the approvals it
+    /// asks for and the tasks proposed to it; else one while it needs you otherwise. What its glass knocks for (Session).
+    static func waits(on row: RosterRow, snapshot: TeamSnapshot, asks: [Ask]) -> Int {
+        let asked = asks.filter { agentOfCaller($0.by) == row.id }.count
+        let proposed = snapshot.tasks.filter { $0.assignee == row.id && $0.status == "proposed" }.count
+        let waits = asked + proposed
+        return waits > 0 ? waits : (row.needs ? 1 : 0)
+    }
+
     static func agentOfCaller(_ by: String) -> String? {
         by.wholeMatch(of: #/arm:team\.[a-f0-9]{10}\.([a-z][a-z0-9-]{0,31})/#).map { String($0.1) }
     }

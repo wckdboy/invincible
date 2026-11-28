@@ -14,10 +14,10 @@ import Observation
     let chat = ChatModel()
 
     private(set) var whoami: WhoAmI?
-    private(set) var team: TeamSnapshot? { didSet { drawn &+= 1 } }
+    private(set) var team: TeamSnapshot? { didSet { drawn &+= 1; armKnocks() } }
     /// Why the agents couldn't be read, when it couldn't.
     private(set) var teamProblem: String?
-    private(set) var actions: [ActionView] = [] { didSet { drawn &+= 1 } }
+    private(set) var actions: [ActionView] = [] { didSet { drawn &+= 1; armKnocks() } }
     private(set) var requests: [SecretRequestView] = []
     private(set) var pairings: [PairingView] = []
     /// The facts about you it proposed, waiting for you (what you kept goes with every answer it gives).
@@ -49,7 +49,7 @@ import Observation
     private(set) var trouble: NodeError?
     /// The last team this device saw (KeptTable), drawn until the node first answers, and only ever looked at:
     /// whatever you change starts from the node's word (`team`).
-    private(set) var kept: KeptTable.Kept? { didSet { drawn &+= 1 } }
+    private(set) var kept: KeptTable.Kept? { didSet { drawn &+= 1; armKnocks() } }
     /// The node has been a moment answering while the kept team is drawn.
     private var slow = false
     /// Where what the node says of the agents is kept for the next time the app opens; nil: nowhere (a Mac, or a
@@ -98,6 +98,26 @@ import Observation
     var rows: [RosterRow] {
         if let team { return Roster.rows(snapshot: team, asks: asks) }
         return kept.map { Roster.rows(snapshot: $0.team, asks: $0.asks) } ?? []
+    }
+
+    /// For each agent waiting on you, how much did when its glass last knocked (AgentGlass.nudgeNow); and how many knocks
+    /// were armed for each this session: one more, and its glass knocks three times again (AgentFace's `knock`).
+    @ObservationIgnored private var nudged: [String: Int] = [:]
+    private(set) var knocks: [String: Int] = [:]
+
+    /// One more knock armed for each agent something new waits on (AgentGlass.nudgeNow), from the roster's rows and what
+    /// waits on each as the list counts it (Roster.waits), as the agents or the approvals move: Android's table's way.
+    private func armKnocks() {
+        let (snapshot, asked): (TeamSnapshot?, [Ask]) = team.map { ($0, asks) } ?? (kept?.team, kept?.asks ?? [])
+        guard let snapshot else { return }
+        var next: [String: Int] = [:]
+        for row in Roster.rows(snapshot: snapshot, asks: asked) {
+            let state = AgentGlass.state(MarkState(Orb.Mood(row.standing)))
+            let now = AgentGlass.nudgeNow(before: nudged[row.id], state: state, needs: Roster.waits(on: row, snapshot: snapshot, asks: asked))
+            if let after = now.after { next[row.id] = after }
+            if now.knock { knocks[row.id, default: 0] += 1 }
+        }
+        nudged = next
     }
 
     /// The agents as it is drawn: the node's word, or until it has answered, the kept one.

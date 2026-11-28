@@ -75,6 +75,12 @@ struct GlassTests {
         let paint: JSONValue
         let glow: JSONValue
         let dot: JSONValue
+        /// How a glass that waits on you knocks (core's GLASS_NUDGE), and when it does (nudgeNow), walked as an app keeps it
+        /// from one drawing to the next.
+        struct Nudge: Decodable { let every: Double; let ms: Double; let turn: Double; let turns: [Double]; let count: Int }
+        struct Knock: Decodable { let state: String; let needs: Int; let knock: Bool }
+        let nudge: Nudge
+        let knocks: [Knock]
     }
 
     static let vectors: Vectors = {
@@ -155,6 +161,53 @@ struct GlassTests {
         }
         #expect(n(dot["idleRing"]) == Double(AgentGlass.Dot.idleRing))
         #expect((dot["sizes"]?.array ?? []).map { [n($0["upTo"]), n($0["size"]), n($0["out"]), n($0["cut"])] } == AgentGlass.Dot.sizes.map { [Double($0.upTo), Double($0.size), Double($0.out), Double($0.cut)] as [Double?] })
+    }
+
+    /// A glass that waits on you knocks, its motion saying it, not a colour (the lead's words of 28 November 2026): three
+    /// knocks of 600 ms through its turns of 7°, one each 4 s of the clock, then rest (core's GLASS_NUDGE).
+    @Test func itKnocksAsCoresGlassKnocks() {
+        let v = Self.vectors.nudge
+        #expect(v.every == AgentGlass.Nudge.every && v.ms == AgentGlass.Nudge.ms && v.turn == AgentGlass.Nudge.turn, "\(v)")
+        #expect(v.turns == AgentGlass.Nudge.turns, "\(v.turns)")
+        #expect(v.count == AgentGlass.Nudge.count, "knocks \(AgentGlass.Nudge.count) times against core's \(v.count)")
+    }
+
+    /// When it knocks (core's nudgeNow), as an app keeps it from one drawing to the next: when it starts to wait on you;
+    /// not for the same again; again for more; not for less; again for more after less; not at work; again once it waits
+    /// again; not at rest; and for three at once.
+    @Test func itKnocksOnlyWhenSomethingNewWaitsOnIt() {
+        var before: Int? = nil
+        for (n, step) in Self.vectors.knocks.enumerated() {
+            let now = AgentGlass.nudgeNow(before: before, state: AgentGlass.State(rawValue: step.state), needs: step.needs)
+            #expect(now.knock == step.knock, "step \(n): \(step.state) \(step.needs)")
+            before = now.after
+        }
+        #expect(Self.vectors.knocks.count == 9)
+    }
+
+    /// What an agent's glass knocks for is what the list that is home counts (lib/roster.ts homeRows' count, the vectors'
+    /// agents.home): the approvals it asks for and the tasks proposed to it, else one while it needs you otherwise.
+    @Test func itKnocksForWhatTheListCounts() throws {
+        struct HomeRow: Decodable { let key: String; let count: Int }
+        struct Agents: Decodable { let snapshot: TeamSnapshot; let asks: [Ask]; let home: [HomeRow] }
+        struct Root: Decodable { let agents: Agents }
+        let url = try #require(Bundle(for: Token.self).url(forResource: "core-vectors", withExtension: "json"))
+        let agents = try JSONDecoder().decode(Root.self, from: Data(contentsOf: url)).agents
+        let counts = Dictionary(uniqueKeysWithValues: agents.home.map { ($0.key, $0.count) })
+        let rows = Roster.rows(snapshot: agents.snapshot, asks: agents.asks)
+        #expect(!rows.isEmpty && rows.contains { counts["person:\($0.id)"] ?? 0 > 0 })
+        for row in rows {
+            #expect(Roster.waits(on: row, snapshot: agents.snapshot, asks: agents.asks) == counts["person:\(row.id)"], "\(row.id)")
+        }
+    }
+
+    /// A knock armed for an agent is given once for the app's life, by whichever of its glasses comes first; a new need
+    /// arms another.
+    @MainActor @Test func aKnockIsGivenOnceForEachNewNeed() {
+        let agent = "test-\(UUID().uuidString.prefix(8).lowercased())"
+        #expect(GlassKnocked.take(GlassKnock(agent: agent, armed: 1)))
+        #expect(!GlassKnocked.take(GlassKnock(agent: agent, armed: 1)), "drawn again, it knocked again for the same need")
+        #expect(GlassKnocked.take(GlassKnock(agent: agent, armed: 2)), "a new need didn't knock")
     }
 
     @Test func itsRampsAreCores() {
