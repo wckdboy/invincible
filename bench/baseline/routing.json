@@ -1,11 +1,11 @@
 {
   "suite": "routing",
-  "commit": "dc381825b898",
-  "at": 1795873582754,
+  "commit": "908f5c8641a9",
+  "at": 1795877786824,
   "seed": 20261112,
   "machine": {
     "name": "Apple M3 Pro",
-    "calibration": 41258,
+    "calibration": 46773,
     "cores": 12
   },
   "metrics": [
@@ -28,6 +28,12 @@
     {"id":"routing.routed.escalations.review","value":6,"unit":"tasks","kind":"quality","better":"lower","note":"routed tasks whose work moved up because the reviewer sent it back twice in a row"},
     {"id":"routing.routed.escalations.stall","value":0,"unit":"tasks","kind":"quality","better":"lower","note":"routed tasks whose work moved up because two audits in a row steered it"},
     {"id":"routing.routed.escalations.rereads","value":8,"unit":"tasks","kind":"quality","better":"lower","note":"routed tasks whose work moved up because it read the same files again and again"},
+    {"id":"routing.notice.told","value":4,"unit":"tasks","kind":"quality","better":"higher","note":"of 36, routed tasks that went round on both tiers and were told to you as they went on"},
+    {"id":"routing.notice.minutes","value":6.98333333,"unit":"min","kind":"quality","better":"lower","note":"virtual minutes from such a task's start to its notice"},
+    {"id":"routing.notice.ended-minutes","value":19,"unit":"min","kind":"quality","better":"lower","note":"virtual minutes the same tasks ran in all: when you would have heard without the notice"},
+    {"id":"routing.notice.false","value":0,"unit":"tasks","kind":"quality","better":"lower","note":"tasks told as going round on both tiers that then ended verified"},
+    {"id":"routing.rule.notice-left","value":0,"unit":"tasks","kind":"quality","better":"lower","note":"notices left standing after their task ended (never)"},
+    {"id":"routing.rule.notice-lost","value":0,"unit":"tasks","kind":"quality","better":"lower","note":"tasks verified without the notice that weren't with it (never: it tells you, and stops nothing)"},
     {"id":"routing.rule.pinned-moved","value":0,"unit":"turns","kind":"quality","better":"lower","note":"turns of a pinned agent's work answered by a model other than its own (the rule: never)"},
     {"id":"routing.rule.climbs","value":0,"unit":"tasks","kind":"quality","better":"lower","note":"tasks whose work moved up more than once: the ladder has one rung (never)"},
     {"id":"routing.rule.same-rung","value":0,"unit":"","kind":"quality","better":"lower","note":"work said to move up onto the model it was on: with the planner's model the work's own there is no rung (never)"},
