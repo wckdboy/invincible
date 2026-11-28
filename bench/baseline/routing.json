@@ -1,11 +1,11 @@
 {
   "suite": "routing",
-  "commit": "2d68853a1495",
-  "at": 1795844517327,
+  "commit": "78337214db7b",
+  "at": 1795845252546,
   "seed": 20261112,
   "machine": {
     "name": "Apple M3 Pro",
-    "calibration": 78059,
+    "calibration": 86031,
     "cores": 12
   },
   "metrics": [
@@ -41,6 +41,12 @@
     {"id":"routing.memory.on.escalations","value":7,"unit":"","kind":"quality","better":"lower","note":"times work moved up, each agent's tasks so far its memory's, as a node's are"},
     {"id":"routing.memory.on.began-on-lead","value":7,"unit":"tasks","kind":"quality","better":"higher","note":"tasks that began on the lead by what their agent's last tasks needed"},
     {"id":"routing.rule.memory-misroutes","value":0,"unit":"tasks","kind":"quality","better":"lower","note":"tasks of an agent whose every task the worker does, begun on the lead (never)"},
+    {"id":"routing.pace.off.served","value":200,"unit":"calls","kind":"quality","better":"higher","note":"calls the plan answered in ten minutes to eight agents, each refusal waited out after it came, as bursts.ts does"},
+    {"id":"routing.pace.off.refused","value":320,"unit":"asks","kind":"quality","better":"lower","note":"asks it refused as a burst (past 25 a minute), each refusal waited out after it came, as bursts.ts does"},
+    {"id":"routing.pace.off.waited","value":3840,"unit":"s","kind":"quality","better":"lower","note":"seconds the agents waited, their turn or a burst out, each refusal waited out after it came, as bursts.ts does"},
+    {"id":"routing.pace.on.served","value":248,"unit":"calls","kind":"quality","better":"higher","note":"calls the plan answered in ten minutes to eight agents, every call taking its turn at 24 a minute, as a node's chat() and gateway do"},
+    {"id":"routing.pace.on.refused","value":0,"unit":"asks","kind":"quality","better":"lower","note":"asks it refused as a burst (past 25 a minute), every call taking its turn at 24 a minute, as a node's chat() and gateway do"},
+    {"id":"routing.pace.on.waited","value":3474,"unit":"s","kind":"quality","better":"lower","note":"seconds the agents waited, their turn or a burst out, every call taking its turn at 24 a minute, as a node's chat() and gateway do"},
     {"id":"routing.replay.differs","value":0,"unit":"tasks","kind":"quality","better":"lower","note":"of 36, the tasks whose outcome, cost, time or escalations differed when run again"}
   ]
 }
