@@ -27,8 +27,11 @@ const git = (dir: string, ...args: string[]) => {
   return run.stdout.toString().trim();
 };
 
-/** The invented repository on disk: its first commit (where the task began) and the task's own change as a patch. */
-export function widgets(): { dir: string; base: string; fixed: string; patch: Uint8Array; remove(): void } {
+/**
+ * The invented repository on disk: its first commit (where the task began) and the task's own change as a patch. The
+ * change can add files besides its fix (`fixAlso`, path → text), as a large change does.
+ */
+export function widgets(fixAlso: Record<string, string> = {}): { dir: string; base: string; fixed: string; patch: Uint8Array; remove(): void } {
   const dir = mkdtempSync(join(tmpdir(), "invincible-widgets-"));
   mkdirSync(join(dir, "test"));
   writeFileSync(join(dir, "README.md"), "Widgets: counts what you give it.\n");
@@ -39,6 +42,8 @@ export function widgets(): { dir: string; base: string; fixed: string; patch: Ui
   git(dir, "commit", "-qm", "Widgets count");
   const base = git(dir, "rev-parse", "HEAD");
   writeFileSync(join(dir, "total.sh"), "#!/bin/sh\n# The sum of a file's numbers, one a line.\nawk '{ s += $1 } END { print s }' \"$1\"\n");
+  for (const [path, text] of Object.entries(fixAlso)) writeFileSync(join(dir, path), text);
+  if (Object.keys(fixAlso).length) git(dir, "add", "-A");
   git(dir, "commit", "-qam", "The total is the sum, no more");
   const fixed = git(dir, "rev-parse", "HEAD");
   const patch = Bun.spawnSync(["git", "-C", dir, "diff", "--binary", base, fixed]).stdout;
@@ -121,11 +126,12 @@ interface Box {
   commands: string[];
 }
 
-/** /work as the sandbox's own; a piece of a patch on its way in is left as it is. */
-const local = (dir: string, command: string): string => {
-  const piece = /^printf %s '([A-Za-z0-9+/=]*)' >> (.+)$/s.exec(command);
-  return piece ? `printf %s '${piece[1]}' >> ${piece[2]!.replaceAll("/work", `${dir}/work`)}` : command.replaceAll("/work", `${dir}/work`);
-};
+/** /work as the sandbox's own; a piece of a patch on its way in (its base64 may spell /work) is left as it is. */
+const local = (dir: string, command: string): string =>
+  command
+    .split(/(printf %s '[A-Za-z0-9+/=]*')/)
+    .map((part, i) => (i % 2 ? part : part.replaceAll("/work", `${dir}/work`)))
+    .join("");
 
 function filesUnder(root: string): Map<string, Uint8Array> {
   const out = new Map<string, Uint8Array>();

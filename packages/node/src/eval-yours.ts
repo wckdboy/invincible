@@ -209,12 +209,23 @@ interface PatchLayer {
   except?: string[];
 }
 
-/** Commands that put bytes at a path in a sandbox, in pieces under the door's limit (base64 holds no quote). */
-function putBytes(bytes: Uint8Array, path: string): string[] {
+/** What the command that puts a patch and applies it exits with when the put failed: told from an apply that fails. */
+const PUT_FAILED = 97;
+
+/**
+ * The commands that put bytes at a path in a sandbox and then run `apply`, as few as the door's limit allows: each is a
+ * round trip (a `docker exec`, by way of the node). A patch of one piece, as most are, is put and applied in one; a
+ * larger one's pieces go first, the last with the apply (base64 holds no quote). Its put that fails exits PUT_FAILED.
+ */
+function putAndApply(bytes: Uint8Array, path: string, apply: string): string[] {
   const text = Buffer.from(bytes).toString("base64");
   const pieces: string[] = [];
   for (let at = 0; at < text.length; at += CHUNK) pieces.push(text.slice(at, at + CHUNK));
-  return [`mkdir -p ${quote(path.slice(0, path.lastIndexOf("/")))} && : > ${quote(`${path}.b64`)}`, ...pieces.map((piece) => `printf %s '${piece}' >> ${quote(`${path}.b64`)}`), `base64 -d < ${quote(`${path}.b64`)} > ${quote(path)} && rm -f ${quote(`${path}.b64`)}`];
+  const b64 = quote(`${path}.b64`);
+  return pieces.map((piece, i) => {
+    const put = `${i === 0 ? `mkdir -p ${quote(path.slice(0, path.lastIndexOf("/")))} && ` : ""}printf %s '${piece}' ${i === 0 ? ">" : ">>"} ${b64}`;
+    return i < pieces.length - 1 ? put : `{ ${put} && base64 -d < ${b64} > ${quote(path)} && rm -f ${b64}; } || exit ${PUT_FAILED}; ${apply}`;
+  });
 }
 
 /** A patch kept in an artifact (a task's change, or what an eval left), read from where it was kept. */
@@ -315,13 +326,16 @@ async function gatesOn(node: CaseClient, c: YourCase, job: EvalJob, layers: Patc
       const layer = layers[i]!;
       if (!layer.patch.length) continue;
       const patch = `${PATCH}.${i}`;
-      for (const command of putBytes(layer.patch, patch)) {
-        const put = await exec(command, 120);
-        if (put.exitCode !== 0) throw new Error(`the patch couldn't be put in the grading sandbox: ${(put.stderr || put.stdout).trim().slice(0, 300)}`);
-      }
       const args = ["apply", "--whitespace=nowarn", ...(layer.only ?? []).map((f) => `--include=${quote(literally(f))}`), ...(layer.except ?? []).map((f) => `--exclude=${quote(literally(f))}`)];
-      const applied = await exec(`cd ${quote(root)} && git ${args.join(" ")} ${quote(patch)}`, 300);
-      if (applied.exitCode !== 0) throw new Error(`the patch doesn't apply to ${c.base.slice(0, 12)}: ${(applied.stderr || applied.stdout).trim().slice(0, 300)}`);
+      const commands = putAndApply(layer.patch, patch, `cd ${quote(root)} && git ${args.join(" ")} ${quote(patch)}`);
+      for (const [n, command] of commands.entries()) {
+        const last = n === commands.length - 1;
+        const ran = await exec(command, last ? 300 : 120);
+        if (ran.exitCode === 0) continue;
+        const said = (ran.stderr || ran.stdout).trim().slice(0, 300);
+        if (!last || ran.exitCode === PUT_FAILED) throw new Error(`the patch couldn't be put in the grading sandbox: ${said}`);
+        throw new Error(`the patch doesn't apply to ${c.base.slice(0, 12)}: ${said}`);
+      }
     }
     // What the layers changed of what was there (a test file a patch adds is new: one the work was to write).
     const changedRun = await exec(`cd ${quote(root)} && git add -A -N . && git diff --name-only`, 300);

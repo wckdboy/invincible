@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { EvalRecord, evalProblem } from "@invincible/core";
+import { EvalRecord, evalProblem, type RouteName } from "@invincible/core";
 import type { EvalJob } from "../src/eval-cli.ts";
 import { evalCommand, UsageError } from "../src/eval-commands.ts";
 import { attemptCase, chooseCases, commandsFor, type GateRun, hardestFirst, judgeGates, rootOf, yourCases } from "../src/eval-yours.ts";
@@ -289,6 +289,57 @@ describe("an eval of a case", () => {
     expect(node.workshops()).toHaveLength(2);
     expect(node.checkouts.filter((c) => node.workshops().some((b) => b.id === c.id))).toHaveLength(2);
     expect(node.chats.some((chat) => String(chat.messages[0].content).startsWith("You are choosing between") && chat.memories === false)).toBe(true);
+  });
+
+  test("each layer of a patch is put and applied in one sandbox command, a round trip each, where it was four", async () => {
+    const node = standIn(FIX);
+    const record = (await attemptCase(node, widgetsCase(repo.base), job()))!;
+    valid(record);
+    expect(record).toMatchObject({ status: "scored", score: 1 });
+    // Two layers, each in a sandbox that grades: the task's own change, then what the engineer left. A command each.
+    const puts = node.graders().flatMap((b) => b.commands).filter((c) => c.includes("/work/.eval/"));
+    expect(puts).toHaveLength(2);
+    for (const c of puts) for (const part of ["printf %s '", "base64 -d", "|| exit 97;", "git apply"]) expect(c).toContain(part);
+  });
+
+  test("a patch larger than a command may carry goes in pieces, the last with its apply, and is graded the same", async () => {
+    // The task's own change adds 100 KB besides its fix: three pieces of its base64 at the door's limit.
+    const big = widgets({ "data.txt": `${"0123456789abcdef".repeat(6_400)}\n` });
+    try {
+      const node = new YoursStandIn({ [WIDGETS]: big.dir }, big.patch);
+      node.work = FIX;
+      nodes.push(node);
+      const record = (await attemptCase(node, widgetsCase(big.base), job()))!;
+      valid(record);
+      expect(record).toMatchObject({ status: "scored", score: 1 });
+      const puts = node.graders().flatMap((b) => b.commands).filter((c) => c.includes("/work/.eval/"));
+      // Its three pieces (the last applies it), then what the engineer left in one.
+      expect(puts).toHaveLength(4);
+      expect(puts.filter((c) => c.includes("git apply"))).toHaveLength(2);
+      expect(Math.max(...puts.map((c) => c.length))).toBeLessThan(100_000);
+    } finally {
+      big.remove();
+    }
+  });
+
+  test("a patch that doesn't apply, or that can't be put, is a crash that says which", async () => {
+    // The task's own change, against lines the commit doesn't have.
+    const off = new YoursStandIn({ [WIDGETS]: repo.dir }, new TextEncoder().encode(new TextDecoder().decode(repo.patch).replace("print s + 1", "print s + 2")));
+    off.work = FIX;
+    nodes.push(off);
+    const wrong = (await attemptCase(off, widgetsCase(repo.base), job()))!;
+    valid(wrong);
+    expect(wrong).toMatchObject({ status: "crashed", score: 0 });
+    expect(wrong.note).toStartWith(`the patch doesn't apply to ${repo.base.slice(0, 12)}: `);
+    // A sandbox whose put fails (its decoding, here).
+    const node = standIn(FIX);
+    const call = node.call.bind(node);
+    node.call = ((name: RouteName, input?: any) =>
+      call(name, name === "execSandbox" && String(input.cmd[2]).includes("base64 -d") ? { ...input, cmd: [input.cmd[0], input.cmd[1], String(input.cmd[2]).replace("base64 -d", "false")] } : input)) as typeof node.call;
+    const unput = (await attemptCase(node, widgetsCase(repo.base), job()))!;
+    valid(unput);
+    expect(unput).toMatchObject({ status: "crashed", score: 0 });
+    expect(unput.note).toStartWith("the patch couldn't be put in the grading sandbox");
   });
 
   test("stopped by you, nothing is recorded", async () => {
