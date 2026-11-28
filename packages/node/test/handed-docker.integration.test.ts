@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkpointCommand, HANDED_CHANGES_BYTES, handedApply, handedGive, handedReceive, handedSend, handedTake } from "@invincible/agents";
+import { checkpointCommand, HANDED_CHANGES_BYTES, handedApply, handedGive, handedNonce, handedReceive, handedSend, handedTake } from "@invincible/agents";
 import type { SandboxView } from "@invincible/core";
 import { KATA_RUNTIME, SandboxHost } from "@invincible/sandbox";
 
@@ -108,11 +108,12 @@ for (const runtime of ["runc", "kata"] as const) {
         // The task's work in its clone: a change, a deletion, a new file in a new folder, a binary file, and a link.
         const work = inside(task, `set -e; cd ${root}; printf 'two\\n' > app.txt; rm README.md; mkdir -p src; printf 'export const x = 1;\\n' > src/new.ts; printf '\\000\\001\\377' > logo.bin; ln -s src/new.ts link.ts`);
         expect(work.status).toBe(0);
-        const back = await pipes.pipe(side(task, handedSend(root, base)), side(agent, handedReceive(id, HANDED_CHANGES_BYTES)), { timeoutSec: 120, maxBytes: HANDED_CHANGES_BYTES });
+        const nonce = handedNonce();
+        const back = await pipes.pipe(side(task, handedSend(root, base)), side(agent, handedReceive(id, nonce, HANDED_CHANGES_BYTES)), { timeoutSec: 120, maxBytes: HANDED_CHANGES_BYTES });
         expect([back.cut, back.from.exitCode, back.to.exitCode, back.from.stderr.trim()]).toEqual([false, 0, 0, ""]);
         // All of it kept, as many bytes as were carried: only then is it applied.
         expect(Number(back.to.stdout.trim())).toBe(back.bytes);
-        const applied = inside(agent, handedApply(root, base, id, back.bytes, HANDED_CHANGES_BYTES));
+        const applied = inside(agent, handedApply(root, base, id, nonce, back.bytes, HANDED_CHANGES_BYTES));
         expect([applied.status, applied.stderr.trim()]).toEqual([0, ""]);
         const seen = inside(agent, `cd ${root} && cat app.txt src/new.ts && od -An -tx1 logo.bin && readlink link.ts && test ! -e README.md && echo gone && git diff --cached --name-status ${base} | sort`);
         expect(seen.stdout.trim().split("\n").map((line) => line.trim())).toEqual(["two", "export const x = 1;", "00 01 ff", "src/new.ts", "gone", "A\tlink.ts", "A\tlogo.bin", "A\tsrc/new.ts", "D\tREADME.md", "M\tapp.txt"]);

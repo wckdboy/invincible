@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { handedApply, handedDrop, handedGive, handedReceive, handedSend, handedTake } from "../src/handed-repo.ts";
+import { handedApply, handedDrop, handedGive, handedNonce, handedReceive, handedSend, handedTake } from "../src/handed-repo.ts";
+import { changesCommand } from "../src/team-runtime.ts";
 
 // Every test here makes repositories and runs git on them, as processes of their own, so its time is the machine's to
 // give: "its changes come back to the agent's worktree" took 1.1 s on the Mac mini at a load of 25 on 18 cores, the
@@ -52,13 +53,21 @@ function setUp() {
   const theirs = join(task, "tasks", "task-x");
   /** The task's clone, from what the agent's side gives, through a pipe. */
   const give = () => sh(`${handedGive(root, "task-x", keep.agent)} | ${handedTake(theirs, base, "Ada", "ada@agents.invalid", keep.task)}`);
-  /** What the agent's side received, applied as the node applies it: as many bytes as it says it kept. */
-  const applyReceived = (received: ReturnType<typeof sh>, limit: number) => (received.status !== 0 ? received : sh(handedApply(root, base, "task-x", Number(received.stdout.trim()), limit, keep.agent)));
+  /** What the agent's side received (by `nonce`), applied as the node applies it: as many bytes as it says it kept. */
+  const applyReceived = (received: ReturnType<typeof sh>, nonce: string, limit: number) => (received.status !== 0 ? received : sh(handedApply(root, base, "task-x", nonce, Number(received.stdout.trim()), limit, keep.agent)));
   /** Its changes since the base, back to the agent's side through a pipe, then applied to its worktree. */
-  const bring = (limit = 64 << 20) => applyReceived(sh(`${handedSend(theirs, base, keep.task)} | ${handedReceive("task-x", limit, keep.agent)}`), limit);
+  const bring = (limit = 64 << 20) => {
+    const nonce = handedNonce();
+    return applyReceived(sh(`${handedSend(theirs, base, keep.task)} | ${handedReceive("task-x", nonce, limit, keep.agent)}`), nonce, limit);
+  };
   /** A patch of the task's own making, received and applied on the agent's side. */
-  const apply = (patch: string, limit = 64 << 20) => applyReceived(sh(handedReceive("task-x", limit, keep.agent), patch), limit);
-  return { agent, task, repo, root, theirs, base, git, give, bring, apply, keep };
+  const apply = (patch: string, limit = 64 << 20) => {
+    const nonce = handedNonce();
+    return applyReceived(sh(handedReceive("task-x", nonce, limit, keep.agent), patch), nonce, limit);
+  };
+  /** The agent's side's scratch files left in its keep (none, once each script has ended). */
+  const left = () => (existsSync(keep.agent) ? readdirSync(keep.agent) : []);
+  return { agent, task, repo, root, theirs, base, git, give, bring, apply, keep, left };
 }
 
 describe("another node's task's clone of its own", () => {
@@ -107,7 +116,7 @@ describe("another node's task's clone of its own", () => {
     expect(s.bring().status).toBe(0);
     expect(readFileSync(join(s.root, "app.txt"), "utf8")).toBe("three\n");
     expect(existsSync(join(s.root, "later.txt"))).toBe(false);
-    expect(existsSync(join(s.keep.agent, "task-x.patch"))).toBe(false);
+    expect(s.left()).toEqual([]);
   });
 
   test("an earlier run's files, untracked in the agent's worktree as its changes' read leaves them, come back as the clone has them: kept, changed or gone", () => {
@@ -211,18 +220,113 @@ describe("what comes back from another node's task", () => {
     const [part, whole] = [Buffer.byteLength(one), Buffer.byteLength(one + two)];
     // (Its sender ended by its deadline, or the pipe cut at its cap, after the first file's part: what came reads as a
     // patch of its own, and is kept as it came.)
-    const received = sh(handedReceive("task-x", 64 << 20, s.keep.agent), one);
+    const nonce = handedNonce();
+    const received = sh(handedReceive("task-x", nonce, 64 << 20, s.keep.agent), one);
     expect([received.status, received.stdout.trim()]).toEqual([0, String(part)]);
-    const applied = sh(handedApply(s.root, s.base, "task-x", whole, 64 << 20, s.keep.agent));
+    const applied = sh(handedApply(s.root, s.base, "task-x", nonce, whole, 64 << 20, s.keep.agent));
     expect([applied.status, applied.stderr.trim()]).toEqual([1, `its changes came cut short: ${part} of ${whole} bytes`]);
     expect(existsSync(join(s.root, "one.txt"))).toBe(false);
-    expect(existsSync(join(s.keep.agent, "task-x.patch"))).toBe(false);
+    expect(s.left()).toEqual([]);
     // (All of it, as the node carried it, is applied.)
     expect(s.apply(one + two).status).toBe(0);
     expect([readFileSync(join(s.root, "one.txt"), "utf8"), readFileSync(join(s.root, "two.txt"), "utf8")]).toEqual(["one\n", "two\n"]);
     // (And one the node saw cut, never applied: dropped.)
-    expect(sh(handedReceive("task-x", 64 << 20, s.keep.agent), one).status).toBe(0);
-    expect(sh(handedDrop("task-x", s.keep.agent)).status).toBe(0);
-    expect(existsSync(join(s.keep.agent, "task-x.patch"))).toBe(false);
+    const cut = handedNonce();
+    expect(sh(handedReceive("task-x", cut, 64 << 20, s.keep.agent), one).status).toBe(0);
+    expect(s.left()).toEqual([`task-x.${cut}.patch`]);
+    expect(sh(handedDrop("task-x", cut, s.keep.agent)).status).toBe(0);
+    expect(s.left()).toEqual([]);
+  });
+
+  test("is kept by each receive in a file of its own: an apply reads only what its own pipe carried, by its own name", () => {
+    const s = setUp();
+    const patch = (name: string) => `diff --git a/${name} b/${name}\nnew file mode 100644\n--- /dev/null\n+++ b/${name}\n@@ -0,0 +1 @@\n+${name}\n`;
+    const [a, b] = [handedNonce(), handedNonce()];
+    // (Two receives of the one task, as a step's and the last one could be: neither takes the other's file.)
+    const one = sh(handedReceive("task-x", a, 64 << 20, s.keep.agent), patch("a.txt"));
+    const two = sh(handedReceive("task-x", b, 64 << 20, s.keep.agent), patch("b.txt"));
+    expect([one.status, two.status]).toEqual([0, 0]);
+    expect(s.left().sort()).toEqual([`task-x.${a}.patch`, `task-x.${b}.patch`].sort());
+    const applied = sh(handedApply(s.root, s.base, "task-x", a, Number(one.stdout.trim()), 64 << 20, s.keep.agent));
+    expect(applied.status).toBe(0);
+    expect([existsSync(join(s.root, "a.txt")), existsSync(join(s.root, "b.txt"))]).toEqual([true, false]);
+    expect(s.left()).toEqual([`task-x.${b}.patch`]);
+    // A name no receive kept is no patch: refused, nothing applied.
+    const none = sh(handedApply(s.root, s.base, "task-x", handedNonce(), Number(two.stdout.trim()), 64 << 20, s.keep.agent));
+    expect([none.status, none.stderr.trim()]).toEqual([1, `its changes came cut short: 0 of ${Number(two.stdout.trim())} bytes`]);
+    // And a name that isn't one is refused before any file is read or written.
+    for (const bad of ["../x", "", "A".repeat(32)]) {
+      expect(sh(handedReceive("task-x", bad, 64 << 20, s.keep.agent), patch("c.txt")).stderr.trim()).toBe("no such receive");
+      expect(sh(handedApply(s.root, s.base, "task-x", bad, 10, 64 << 20, s.keep.agent)).stderr.trim()).toBe("no such receive");
+    }
+    expect(s.left()).toEqual([`task-x.${b}.patch`]);
+  });
+});
+
+/*
+ * The seventh fabric review's R7-3, at the scripts: a step's apply and the last bring-back on the one worktree at once.
+ * The review's PoC forced it with a `git` that holds the step's `git apply` (its parse, which takes seconds for a large
+ * patch) while the last bring-back's apply made `l` a link to the agent's HOME and the changes' read left that link in
+ * the worktree, out of the index: the step's `git apply --index` then wrote `l/.bash_profile` into HOME. The runtime now
+ * runs them one at a time (team-runtime.test.ts); here, with the same order forced, the step's apply reads only its own
+ * patch, into an index of its own, and the tree it makes replaces the link with a folder, writing nothing through it.
+ */
+describe("a step's apply beside the last bring-back's (R7-3)", () => {
+  test("the link the other left where the step's patch lands is replaced by a folder: nothing is written through it", async () => {
+    const s = setUp();
+    // (A fetched repository has an origin, which the changes' read records.)
+    s.git(s.repo, "remote", "add", "origin", "https://example.test/you/project");
+    const home = join(s.agent, "home");
+    mkdirSync(home);
+    const PROFILE = "echo 'a handed task ran this as the agent' >&2\n";
+    const underL = `diff --git a/l/.bash_profile b/l/.bash_profile\nnew file mode 100644\n--- /dev/null\n+++ b/l/.bash_profile\n@@ -0,0 +1 @@\n+${PROFILE}`;
+    const linkL = `diff --git a/l b/l\nnew file mode 120000\n--- /dev/null\n+++ b/l\n@@ -0,0 +1 @@\n+${home}\n\\ No newline at end of file\n`;
+    // A `git` on the step's PATH that holds its `git apply` (as a large patch's parse would) until it is told to go.
+    const real = spawnSync("bash", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+    const wrap = temp("handed-wrap-");
+    const q = (v: string) => `'${v.replace(/'/g, `'\\''`)}'`;
+    writeFileSync(join(wrap, "git"), `#!/bin/bash\nfor a in "$@"; do if [ "$a" = apply ]; then touch ${q(join(wrap, "started"))}; while [ ! -f ${q(join(wrap, "go"))} ]; do sleep 0.02; done; break; fi; done\nexec ${q(real)} "$@"\n`);
+    chmodSync(join(wrap, "git"), 0o755);
+    const limit = 64 << 20;
+    // 1. The step's patch comes, and its apply begins.
+    const stepNonce = handedNonce();
+    const step = sh(handedReceive("task-x", stepNonce, limit, s.keep.agent), underL);
+    expect(step.status).toBe(0);
+    const applyStep = Bun.spawn(["bash", "-c", handedApply(s.root, s.base, "task-x", stepNonce, Number(step.stdout.trim()), limit, s.keep.agent)], { env: { PATH: `${wrap}:${env.PATH}`, HOME: "/nonexistent" }, stdout: "pipe", stderr: "pipe" });
+    for (let i = 0; i < 500 && !existsSync(join(wrap, "started")); i++) await Bun.sleep(20);
+    expect(existsSync(join(wrap, "started"))).toBe(true);
+    // 2. Meanwhile the last bring-back: its own receive and apply make `l` a link to the agent's HOME, and the changes'
+    //    read leaves it in the worktree, out of the index, just where the step's patch lands.
+    const lastNonce = handedNonce();
+    const last = sh(handedReceive("task-x", lastNonce, limit, s.keep.agent), linkL);
+    expect(sh(handedApply(s.root, s.base, "task-x", lastNonce, Number(last.stdout.trim()), limit, s.keep.agent)).status).toBe(0);
+    const read = sh(`cd ${q(s.root)} && ${changesCommand(join(temp("handed-out-"), "out"), s.base)}`);
+    expect([read.status, read.stderr]).toEqual([0, ""]);
+    expect(lstatSync(join(s.root, "l")).isSymbolicLink()).toBe(true);
+    expect(s.git(s.root, "ls-files", "l").stdout).toBe("");
+    // 3. The step's apply goes on: harmless. Nothing in HOME; the link is a folder in the worktree, holding the step's file.
+    writeFileSync(join(wrap, "go"), "");
+    const [code, said] = [await applyStep.exited, await new Response(applyStep.stderr).text()];
+    expect([code, said]).toEqual([0, ""]);
+    expect(existsSync(join(home, ".bash_profile"))).toBe(false);
+    expect(lstatSync(join(s.root, "l")).isDirectory()).toBe(true);
+    expect(readFileSync(join(s.root, "l/.bash_profile"), "utf8")).toBe(PROFILE);
+  });
+
+  test("a link inside an untracked nested repository in the worktree is never written through (I-a)", () => {
+    const s = setUp();
+    const outside = temp("handed-outside-");
+    // (Nothing a task sends can make this: a patch writes no .git. Only what writes in the agent's store already can.)
+    const nested = join(s.root, "vendor/lib");
+    mkdirSync(nested, { recursive: true });
+    spawnSync("git", ["init", "-q", nested], { env });
+    symlinkSync(outside, join(nested, "out"));
+    const through = `diff --git a/vendor/lib/out/planted.txt b/vendor/lib/out/planted.txt\nnew file mode 100644\n--- /dev/null\n+++ b/vendor/lib/out/planted.txt\n@@ -0,0 +1 @@\n+planted\n`;
+    const applied = s.apply(through);
+    expect([applied.status, applied.stderr]).toEqual([0, ""]);
+    expect(existsSync(join(outside, "planted.txt"))).toBe(false);
+    // (The link is a folder of the worktree's now, holding the patch's file.)
+    expect(lstatSync(join(nested, "out")).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(nested, "out/planted.txt"), "utf8")).toBe("planted\n");
   });
 });

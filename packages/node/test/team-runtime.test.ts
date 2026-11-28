@@ -865,6 +865,59 @@ test("another node's task in a repository works on a clone of its own: set up, c
   expect(inAgent.findLastIndex((c) => c.includes("--allow-empty"))).toBeLessThan(inAgent.findIndex((c) => c.includes(`'/work/out/tasks/${handedTask.id}'`)));
 });
 
+/* The seventh fabric review's R7-3: every step of another node's task's agent's side on its worktree runs one at a time
+ * (its bring-backs, its checkpoints, its review's evidence and its changes' read). A run that ended with no command after
+ * its last one (GIVE UP, which its goal can ask for) began its last bring-back while its step's was under way: two patches
+ * and two applies on the one worktree at once, and the step's apply landed after its changes were read. */
+test("another node's task's agent's side runs one step at a time: its last bring-back waits for its step's, and its changes are read after both (R7-3)", async () => {
+  const HANDED_BASE = "89abcdef0123456789abcdef0123456789abcdef";
+  const agent = { ...member, repository: "https://github.com/you/project" };
+  const events: string[] = [];
+  let sends = 0, sending = 0, mostSending = 0, applying = 0, mostApplying = 0;
+  const f = fixture([say("1. Run it."), say("```sh\necho one\n```"), say("GIVE UP\nAs the goal says.")], {
+    agent: () => agent,
+    models: () => [{ provider: "paid", model: "m" }],
+    paid: (ref: string) => ref === "paid/m",
+    exec: async (_m: Agent, command: string) => {
+      if (command.includes("from_commit")) return result({ stdout: `${HANDED_BASE} fetched` });
+      if (command.includes("--allow-empty")) {
+        mostApplying = Math.max(mostApplying, ++applying);
+        events.push("apply begins");
+        // (An apply takes a while: a large patch's parse alone can take seconds.)
+        await Bun.sleep(200);
+        applying--;
+        events.push("apply ends");
+        return result({ stdout: "0" });
+      }
+      if (command.includes(`'/work/out/tasks/${handedTask.id}'`)) events.push("its changes are read");
+      return result({ stdout: "0" });
+    },
+    handedVm: async () => ({
+      exec: async () => result(),
+      receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }),
+      // The task's VM sends its patch as it likes: its step's takes 300 ms to come (its VM's to choose), its last at once.
+      send: async () => {
+        const n = ++sends;
+        mostSending = Math.max(mostSending, ++sending);
+        events.push(`send ${n} begins`);
+        if (n === 1) await Bun.sleep(300);
+        sending--;
+        events.push(`send ${n} ends`);
+        return { from: result(), to: result({ stdout: "0" }), bytes: 0, cut: false };
+      },
+      stop: async () => {},
+      release: async () => {},
+    }),
+  });
+  f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  await f.runtime.executeTask(agent, handedTask, f.context);
+  events.push("its run returned");
+  // (Time for anything of its step's still going to show itself.)
+  await Bun.sleep(800);
+  expect([sends, mostSending, mostApplying]).toEqual([2, 1, 1]);
+  expect(events).toEqual(["send 1 begins", "send 1 ends", "apply begins", "apply ends", "send 2 begins", "send 2 ends", "apply begins", "apply ends", "its changes are read", "its run returned"]);
+});
+
 /* What another node's task sends back is applied on its agent's side only once all of it came (R5-3): a pipe cut at its
  * cap, a sender ended by its deadline, or fewer bytes kept than the node carried each end the other side's input as if the
  * patch ended there, and a patch cut short at a file's end reads as a smaller one. None is applied; each is dropped, and
@@ -900,7 +953,7 @@ test("another node's task's changes that didn't all come back are never applied 
     const done = await f.runtime.executeTask(agent, handedTask, { ...f.context, emit: (line: string) => void lines.push(line) });
     expect([what, inAgent.some((c) => c.includes("--allow-empty"))]).toEqual([what, false]);
     // (Dropped on its agent's side, each time.)
-    expect([what, inAgent.some((c) => c.includes("keep, task = sys.argv[1], sys.argv[2]"))]).toEqual([what, true]);
+    expect([what, inAgent.some((c) => c.includes("keep, task, nonce = sys.argv[1], sys.argv[2], sys.argv[3]"))]).toEqual([what, true]);
     expect([what, done.output]).toEqual([what, expect.stringContaining(`Changes: could not be read (its changes couldn't be brought back from its VM: ${why})`)]);
     expect([what, "changes" in done]).toEqual([what, false]);
     expect([what, lines.some((line) => line.startsWith("Steps · this task's steps can't be kept") && line.includes(why))]).toEqual([what, true]);

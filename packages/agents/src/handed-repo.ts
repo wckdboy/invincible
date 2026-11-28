@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { heldGit } from "./held-git.ts";
 
 /*
@@ -9,10 +10,12 @@ import { heldGit } from "./held-git.ts";
  * - Its own VM makes its clone of that bundle at the same place, its HEAD where the work began and its changes so far in
  *   its files, as the agent's (`handedTake`).
  * - After each step it keeps, and as it ends, what changed in its clone since then comes back as one patch
- *   (`handedSend`, in its own VM), which its agent's side keeps as a file (`handedReceive`), held to a limit, and then
- *   applies to the task's worktree with the node's held git (`handedApply`): the worktree set back to where the work
- *   began, with nothing an earlier run left in it, then git apply, which takes nothing outside the worktree, into a
- *   .git, or through a link; what the patch's binary parts inflate to is held to the limit too.
+ *   (`handedSend`, in its own VM), which its agent's side keeps as a file of that receive's own (`handedReceive`, named
+ *   by a nonce the node gives it and its apply), held to a limit, and then applies with the node's held git
+ *   (`handedApply`): to where the work began alone, in an index of its own, so that nothing in the task's worktree is read
+ *   or written through, and then the tree that makes, and nothing else, is made the worktree's; what the patch's binary
+ *   parts inflate to is held to the limit too. Every step of the agent's side on that worktree runs one at a time
+ *   (team-runtime.ts).
  * - It is applied only once the node has seen all of it come: its sender done, the pipe not cut, and as many bytes kept
  *   as were carried. A side ended by its deadline, or a pipe cut at its cap, ends what the other reads as if the patch
  *   ended there, so a patch cut short at a file's end would otherwise be applied as a smaller one. One that didn't all
@@ -97,16 +100,21 @@ r = subprocess.run(['git','-C',root,*HELD_OFF,'diff','--cached','--binary','--fu
 gone()
 if r.returncode: sys.exit('could not read its changes: '+r.stderr.decode(errors='replace')[-300:])`;
 
-/** Its agent's side: the patch on stdin kept as the task's file in `keep`, refused past `limit` bytes; its size printed. */
-const RECEIVE_SCRIPT = `keep, task, limit = sys.argv[1], sys.argv[2], int(sys.argv[3])
+/**
+ * Its agent's side: the patch on stdin kept in `keep` as a file of this receive's own, by the node's `nonce`, refused past
+ * `limit` bytes; its size printed.
+ */
+const RECEIVE_SCRIPT = `keep, task, nonce, limit = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+if not re.fullmatch('[0-9a-f]{32}', nonce): sys.exit('no such receive')
 os.makedirs(keep, exist_ok=True)
-path = os.path.join(keep, task+'.patch')
+path = os.path.join(keep, task+'.'+nonce+'.patch')
 def gone():
     try:
         os.remove(path)
     except OSError:
         pass
-# (A file of its own each time: whatever an earlier one cut short still writes goes to that one's.)
+# (A file of its own each time, by a name only the node and this receive's apply know: the apply reads only what its own
+# pipe carried, and whatever an earlier one cut short still writes goes to that one's (the seventh fabric review's R7-3).)
 gone()
 size = 0
 with open(path,'wb') as f:
@@ -121,17 +129,21 @@ if size > limit:
 print(size)`;
 
 /**
- * Its agent's side: the patch kept in `keep`, applied to the task's worktree at `root`, set back to `base` first with
- * nothing else in it (what git ignores too), with the node's held git, and then dropped. Refused whole unless it is the
- * `size` bytes the node carried, or past `limit` as its binary parts say they inflate.
+ * Its agent's side: the patch of one receive (`nonce`) kept in `keep`, applied with the node's held git to `base` alone, in
+ * an index of its own, and then dropped; the tree that made is then the task's worktree at `root`, and its index, with
+ * nothing else in it (what git ignores too). Its size printed. Refused whole unless it is the `size` bytes
+ * the node carried, or past `limit` as its binary parts say they inflate.
  */
-const APPLY_SCRIPT = `root, base, keep, task, size, limit = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], int(sys.argv[5]), int(sys.argv[6])
-path = os.path.join(keep, task+'.patch')
+const APPLY_SCRIPT = `root, base, keep, task, nonce, size, limit = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], int(sys.argv[6]), int(sys.argv[7])
+if not re.fullmatch('[0-9a-f]{32}', nonce): sys.exit('no such receive')
+path = os.path.join(keep, task+'.'+nonce+'.patch')
+index = os.path.join(keep, task+'.'+nonce+'.apply-index')
 def gone():
-    try:
-        os.remove(path)
-    except OSError:
-        pass
+    for each in (path, index):
+        try:
+            os.remove(each)
+        except OSError:
+            pass
 bad = refused(root)
 if bad:
     gone()
@@ -154,25 +166,33 @@ if inflated > limit:
     gone()
     sys.exit('its changes inflate to more than %d bytes' % limit)
 said = lambda r: (r.stderr or r.stdout).decode(errors='replace')[-300:]
-# (Its worktree set back to where the work began, and nothing else in it: an earlier run's files are untracked once its
-# changes are read, and the patch has them all as the clone has them, kept, changed or gone. Those git ignores go too,
-# a link among them: git apply checks the index alone for a link its paths go through, and would follow one.)
-r = git(root,'read-tree','--reset','-u',base,timeout=600)
-if not r.returncode: r = git(root,'clean','-f','-d','-x','-q',timeout=600)
-if r.returncode:
-    gone()
-    sys.exit('could not set its workspace back to where it began: '+said(r))
-r = git(root,'apply','--index','--binary','--allow-empty','--whitespace=nowarn',path,timeout=600)
+# (The patch applied to where the work began alone, in an index of this apply's own. git apply --cached reads and writes
+# nothing of the worktree, so no file or link there is read or written through: not an earlier run's, nor one another
+# apply on the worktree left in it (the seventh fabric review's R7-3), nor one inside an untracked nested repository
+# (I-a). git apply --index checks the index alone for a link its paths go through, and would follow one.)
+held = {'GIT_INDEX_FILE': index}
+r = git(root,'read-tree',base,env=held)
+if not r.returncode: r = git(root,'apply','--cached','--binary','--allow-empty','--whitespace=nowarn',path,timeout=600,env=held)
+tree = '' if r.returncode else git(root,'write-tree',env=held).stdout.decode().strip()
 gone()
-if r.returncode: sys.exit('its changes could not be applied: '+said(r))
+if r.returncode or not re.fullmatch('[0-9a-f]{40}|[0-9a-f]{64}', tree): sys.exit('its changes could not be applied: '+(said(r) if r.returncode else 'their tree could not be written'))
+# (Then that tree, and nothing else, is the worktree and its index. An earlier run's files are untracked once its changes
+# are read, and the tree has them all as the clone has them, kept, changed or gone. read-tree -u replaces a link in the
+# way of a path it writes with a folder, and writes nothing through it; clean -ff takes the rest, what git ignores and an
+# untracked nested repository among it.)
+r = git(root,'read-tree','--reset','-u',tree,timeout=600)
+if not r.returncode: r = git(root,'clean','-f','-f','-d','-x','-q',timeout=600)
+if r.returncode: sys.exit('its workspace could not be made what its changes are: '+said(r))
 print(size)`;
 
-/** Its agent's side: a patch that didn't all come, dropped. */
-const DROP_SCRIPT = `keep, task = sys.argv[1], sys.argv[2]
-try:
-    os.remove(os.path.join(keep, task+'.patch'))
-except OSError:
-    pass`;
+/** Its agent's side: a patch of one receive (`nonce`) that didn't all come, dropped, with its apply's index. */
+const DROP_SCRIPT = `keep, task, nonce = sys.argv[1], sys.argv[2], sys.argv[3]
+if re.fullmatch('[0-9a-f]{32}', nonce):
+    for each in ('.patch', '.apply-index'):
+        try:
+            os.remove(os.path.join(keep, task+'.'+nonce+each))
+        except OSError:
+            pass`;
 
 /** Where each side keeps its scratch files: under the agent's /work/.agent, and the task VM's own. */
 export const HANDED_KEEP = "/work/.agent/handed";
@@ -180,6 +200,8 @@ export const HANDED_KEEP = "/work/.agent/handed";
 export const handedGive = (root: string, task: string, keep = HANDED_KEEP): string => heldGit(GIVE_SCRIPT, root, task, keep);
 export const handedTake = (root: string, base: string, name: string, email: string, keep = HANDED_KEEP): string => heldGit(TAKE_SCRIPT, root, base, name, email, keep);
 export const handedSend = (root: string, base: string, keep = HANDED_KEEP): string => heldGit(SEND_SCRIPT, root, base, keep);
-export const handedReceive = (task: string, limit: number, keep = HANDED_KEEP): string => heldGit(RECEIVE_SCRIPT, keep, task, String(limit));
-export const handedApply = (root: string, base: string, task: string, size: number, limit: number, keep = HANDED_KEEP): string => heldGit(APPLY_SCRIPT, root, base, keep, task, String(size), String(limit));
-export const handedDrop = (task: string, keep = HANDED_KEEP): string => heldGit(DROP_SCRIPT, keep, task);
+/** A receive's own name, which its apply (or its drop) is given too: 128 random bits, as hex. */
+export const handedNonce = (): string => randomBytes(16).toString("hex");
+export const handedReceive = (task: string, nonce: string, limit: number, keep = HANDED_KEEP): string => heldGit(RECEIVE_SCRIPT, keep, task, nonce, String(limit));
+export const handedApply = (root: string, base: string, task: string, nonce: string, size: number, limit: number, keep = HANDED_KEEP): string => heldGit(APPLY_SCRIPT, root, base, keep, task, nonce, String(size), String(limit));
+export const handedDrop = (task: string, nonce: string, keep = HANDED_KEEP): string => heldGit(DROP_SCRIPT, keep, task, nonce);

@@ -9,7 +9,7 @@ import { commandsRun, DESKTOP_EVIDENCE, escalatedWhy, runLoop, stepsNamed, type 
 import { type Trip } from "./tripwires.ts";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
 import { HELD_GIT, heldGit } from "./held-git.ts";
-import { handedApply, handedDrop, handedGive, handedReceive, handedSend, handedTake } from "./handed-repo.ts";
+import { handedApply, handedDrop, handedGive, handedNonce, handedReceive, handedSend, handedTake } from "./handed-repo.ts";
 import { runEvidence, runTrail } from "./skills-run.ts";
 
 /** What one run of an agent is given by the team service (node/team.ts) that starts it. */
@@ -878,25 +878,29 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
        * Another node's task's changes since its base, from its own clone to the task's worktree in its agent's repository,
        * as one patch the agent's side keeps and then applies with the node's held git (R5-3). Applied only once all of it
        * came: its sender done, the pipe not cut, and as many bytes kept as were carried (a side ended by its deadline, or
-       * the pipe cut, ends the other's input as if the patch ended there). Null when they came, else why not.
+       * the pipe cut, ends the other's input as if the patch ended there). Null when they came, else why not. Only ever
+       * one at a time, with every other step of its agent's side on that worktree (`serially`, R7-3).
        */
       const bringBack = async (): Promise<string | null> => {
         if (!own || !agent.repository) return null;
         const said = (r: { stdout: string; stderr: string }) => redact(r.stderr || r.stdout).trim().split("\n").at(-1)?.slice(0, 300) || "no reason given";
+        // (A file of its own on its agent's side, by a name only its receive and its apply are given: an apply reads only
+        // what its own pipe carried, R7-3.)
+        const nonce = handedNonce();
         /** Whatever of it came, dropped, on a signal of its own (the task's may have ended); and why it isn't applied. */
         const dropped = async (why: string) => {
-          await deps.exec(agent, handedDrop(task.id), 60, AbortSignal.timeout(90_000)).catch(() => {});
+          await deps.exec(agent, handedDrop(task.id, nonce), 60, AbortSignal.timeout(90_000)).catch(() => {});
           return why;
         };
-        const back = await own.vm.send(handedSend(root, base), handedReceive(task.id, HANDED_CHANGES_BYTES), 900, ctx.signal).catch((error: Error) => error);
+        const back = await own.vm.send(handedSend(root, base), handedReceive(task.id, nonce, HANDED_CHANGES_BYTES), 900, ctx.signal).catch((error: Error) => error);
         if (back instanceof Error) return dropped(redact(back.message).slice(0, 300));
         const kept = back.to.stdout.trim();
         if (back.cut) return dropped(`its changes come to more than ${HANDED_CHANGES_BYTES} bytes`);
         if (back.to.exitCode !== 0) return dropped(said(back.to));
         if (back.from.exitCode !== 0) return dropped(said(back.from));
         if (!/^\d{1,15}$/.test(kept) || Number(kept) !== back.bytes) return dropped(`its changes came cut short: ${/^\d{1,15}$/.test(kept) ? kept : "no"} bytes of ${back.bytes} kept`);
-        const applied = await inRepo(handedApply(root, base, task.id, back.bytes, HANDED_CHANGES_BYTES), 600, ctx.signal).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
-        return applied.exitCode === 0 ? null : said(applied);
+        const applied = await inRepo(handedApply(root, base, task.id, nonce, back.bytes, HANDED_CHANGES_BYTES), 600, ctx.signal).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
+        return applied.exitCode === 0 ? null : dropped(said(applied));
       };
       // The VM's notes store (Engram), when the node's switch is on: kept under the agent's repository, or with none
       // its own handle, so every task of its finds them. Whether this VM has the pinned binary is asked as the task
@@ -938,10 +942,24 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // its workspace is kept as a commit (checkpointCommand), so another task can start from any of them. The next
       // command waits for it. One that can't be kept is said once, and the work goes on.
       const steps = { last: "", commit: "", said: false, command: "", on: false };
-      let keeping: Promise<void> = Promise.resolve();
+      /**
+       * Every step of this task's on its agent's side, one at a time and in order (the seventh fabric review's R7-3): another
+       * node's task's bring-backs (a receive and an apply on its worktree), its steps' checkpoints, its review's evidence and
+       * its changes' read. Two bring-backs at once let a step's apply write through a link the other's left in the
+       * worktree, and land after the changes were read. The next command waits for them all.
+       */
+      let onSide: Promise<unknown> = Promise.resolve();
+      const serially = <T>(step: () => Promise<T>): Promise<T> => {
+        const next = onSide.then(step, step);
+        onSide = next.catch(() => {});
+        return next;
+      };
+      /** The run has ended: a step's keeping that hasn't begun by then is dropped, as its changes all come back at the end. */
+      let ending = false;
       const keepStep = (step: number) => {
         const command = steps.command;
-        keeping = keeping.then(async () => {
+        void serially(async () => {
+          if (ending) return;
           // (Another node's task's changes brought back to its agent's worktree first, where the step is kept.)
           const back = await bringBack();
           if (back !== null) {
@@ -959,12 +977,16 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
             return;
           }
           deps.checkpoint?.(task, { step, commit: steps.commit, command, at: Date.now() });
+        }).catch((error: Error) => {
+          // (Said, and the work goes on: a step that can't be kept never fails the next command.)
+          if (!steps.said) ctx.emit(`Steps · this task's steps can't be kept to start another from: ${redact(String(error?.message ?? error)).slice(0, 200)}`);
+          steps.said = true;
         });
       };
       /** A command of the task's, in its workspace: in the agent's own VM (`exec`), or in the VM of the seat its coding tool runs on (`execOn`). */
       const inTask = (command: string) => withGateway(`mkdir -p ${quote(temp)} && export TMPDIR=${quote(temp)} && ${sees ? `export INVINCIBLE_EYES=${quote(sees)} && ` : ""}${space ? `export INVINCIBLE_EYES_SPACE=${quote(space)} && ` : ""}cd ${quote(root)} && ${engram ? engramShell(engram, home) : ""}${command}`);
       const exec = async (command: string, timeout = 120, what?: "gate") => {
-        await keeping;
+        await onSide;
         // A plain `desktop …` (C1 step 3): its words to the VM's held desktop session, not a login shell's 111 ms. Not
         // for another node's task: its commands all run under the handed helper below, so what a `desktop start` or a
         // `desktop app` of its starts is bounded with it too (the third re-review's R3-3).
@@ -1212,6 +1234,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           if (saved.exitCode !== 0) throw new Error("Could not retain the harness session");
         },
       }).finally(async () => {
+        ending = true;
         await letGo();
         if (handed) await endHanded();
       });
@@ -1230,12 +1253,13 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       let changed = "";
       if (agent.repository) {
         const out = `/work/out/tasks/${task.id}`;
-        // (Another node's task's: brought back from its clone to its agent's worktree, and read there, as an own task's.)
-        const back = await bringBack();
+        // (Another node's task's: brought back from its clone to its agent's worktree, and read there, as an own task's, after
+        // every step of its agent's side before it, one at a time: R7-3.)
+        const back = await serially(bringBack);
         const made = back !== null
           ? { exitCode: -1, stdout: "", stderr: `its changes couldn't be brought back from its VM: ${back}` }
           : own
-            ? await inRepo(`cd ${quote(root)} && ${changesCommand(out, base)}`, 300, ctx.signal).catch((error: Error) => ({ exitCode: -1, stdout: "", stderr: error.message }))
+            ? await serially(() => inRepo(`cd ${quote(root)} && ${changesCommand(out, base)}`, 300, ctx.signal)).catch((error: Error) => ({ exitCode: -1, stdout: "", stderr: error.message }))
             : await exec(changesCommand(out, base), 300).catch((error: Error) => ({ exitCode: -1, stdout: "", stderr: error.message }));
         const files = made.exitCode === 0 ? Number(made.stdout.trim().split("\n").at(-1)) : NaN;
         const count = `${files} file${files === 1 ? "" : "s"}`;
