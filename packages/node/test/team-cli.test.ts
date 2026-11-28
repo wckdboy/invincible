@@ -794,6 +794,67 @@ test("where an agent's next task of each kind begins: by how its tasks of that k
   const none: string[] = [];
   await teamCommand({ async call<T>(): Promise<T> { return { ...state, tasks: [] } as T; } }, "routing", ["ada"], {}, (line) => none.push(line));
   expect(none).toEqual(["Ada has no finished task with its routing kept yet: each kind begins on the engineer's models until one is verified on the planner's."]);
-  await expect(teamCommand(api, "routing", [], {}, () => {})).rejects.toThrow("usage: invincible agents routing <id>");
   await expect(teamCommand(api, "routing", ["cy"], {}, () => {})).rejects.toThrow("no agent cy");
+});
+
+test("`invincible agents routing`, no agent: the team's routing from the node's own finished tasks, said and as JSON, read-only", async () => {
+  /** A task finished on a model (a million tokens in: $1 cheap, $10 strong), in so many minutes, with its routing. */
+  const finished = (n: number, routing: object | undefined, opts: { verified?: boolean; minutes: number; model?: string }) => ({
+    id: `task-${String(n).padStart(12, "0")}`, room: "forge", assignee: "ada", title: `t${n}`, goal: "g", dependsOn: [], gates: [], status: opts.verified === false ? "failed" : "done", verified: opts.verified !== false, progress: "", output: "", error: null, chainId: "c", createdAt: 1, updatedAt: 1,
+    record: { startedAt: 0, endedAt: opts.minutes * 60_000, ended: opts.verified === false ? "unverified" : "done", commands: 3, revisions: 0, spent: [{ role: "engineer", model: opts.model ?? "plan/cheap", calls: 1, unknown: 0, input: 1_000_000, output: 0, cached: 0, reasoning: 0 }], ...(routing ? { routing } : {}) },
+  });
+  const state = { agents: [member("ada")], rooms: [], deliveries: [], tasks: [
+    finished(1, { began: "engineer", kind: "code" }, { minutes: 6 }),
+    finished(2, { began: "engineer", moved: "gate", kind: "code" }, { minutes: 20, model: "plan/strong" }),
+    finished(3, { began: "engineer", moved: "rereads", round: true, kind: "code" }, { verified: false, minutes: 30, model: "plan/strong" }),
+    finished(4, { began: "planner", because: "memory", kind: "code" }, { minutes: 8, model: "plan/strong" }),
+    finished(5, { began: "engineer", kind: "fix" }, { minutes: 4 }),
+    // A coding tool's: no routing kept. And one still running: no record, not read.
+    finished(6, undefined, { minutes: 3 }),
+    { id: "task-running00007", room: "forge", assignee: "ada", title: "t7", goal: "g", dependsOn: [], gates: [], status: "running", verified: false, progress: "", output: "", error: null, chainId: "c", createdAt: 1, updatedAt: 1 },
+    finished(8, { began: "engineer", because: "probe", kind: "code" }, { minutes: 8 }),
+  ] };
+  const asked: string[] = [];
+  const prices = { "plan/cheap": { input: 1, output: 4 }, "plan/strong": { input: 10, output: 40 } };
+  const api = { async call<T>(name: string): Promise<T> { asked.push(name); return (name === "prices" ? { prices } : state) as T; } };
+  const lines: string[] = [];
+  await teamCommand(api, "routing", [], {}, (line) => lines.push(line));
+  expect(lines).toEqual([
+    "Routing, from the last 7 tasks this node finished (1 not routed: held to models, a coding tool's, or from before kinds were kept):",
+    "  Fixes: 1 task, 1 verified, $1.00 and 4.0 min a verified task",
+    "    began on the engineer's models: 1 task, 1 verified, $1.00 and 4.0 min a verified task",
+    "  Code tasks: 5 tasks, 4 verified, $8.00 and 18.0 min a verified task",
+    "    began on the engineer's models: 3 tasks, 2 verified, $10.50 and 28.0 min a verified task · 2 moved up (1 gate, 1 reading again) · 1 went round on both tiers",
+    "    began on the engineer's, as a try: 1 task, 1 verified, $1.00 and 8.0 min a verified task",
+    "    began on the planner's, by the memory: 1 task, 1 verified, $10.00 and 8.0 min a verified task",
+    "  Tries of the engineer's after the planner's: 1, of which 1 held (verified there, never moved up).",
+  ]);
+  // Read-only: the team, and your prices.
+  expect(asked).toEqual(["team", "prices"]);
+  // The same, as JSON: core's routingReport, v 1, a contract.
+  const json: string[] = [];
+  await teamCommand(api, "routing", [], { json: true }, (line) => json.push(line));
+  const report = JSON.parse(json.join("\n"));
+  expect([report.v, report.finished, report.unrouted, report.kinds.map((k: { kind: string }) => k.kind), report.probes]).toEqual([1, 7, 1, ["fix", "code"], { tried: 1, held: 1 }]);
+  expect(report.kinds[1].groups[0]).toEqual({ began: "engineer", because: null, tasks: 3, verified: 2, usd: 21, priced: true, minutes: 56, usdPerVerified: 10.5, minutesPerVerified: 28, movedUp: { gate: 1, review: 0, stall: 0, rereads: 1 }, wentRound: 1 });
+  // A coding plan's calls are paid for already (core's moneyPrices, as the node's own money is): no money, and priced.
+  const planned: string[] = [];
+  await teamCommand({ async call<T>(name: string): Promise<T> { return (name === "prices" ? { prices: {}, plans: ["plan"] } : state) as T; } }, "routing", [], {}, (line) => planned.push(line));
+  expect(planned[1]).toBe("  Fixes: 1 task, 1 verified, $0.00 and 4.0 min a verified task");
+  // Your prices out of reach: the money is said not all priced, and the rest stands.
+  const unpriced: string[] = [];
+  await teamCommand({ async call<T>(name: string): Promise<T> { if (name === "prices") throw new Error("403"); return state as T; } }, "routing", [], {}, (line) => unpriced.push(line));
+  expect(unpriced[1]).toBe("  Fixes: 1 task, 1 verified, 4.0 min a verified task (money not all priced)");
+  // A place this CLI has no words for (the schema takes it, the runtime never makes it): said as its record has it, and
+  // no try of the engineer's.
+  const odd: string[] = [];
+  await teamCommand({ async call<T>(name: string): Promise<T> { return (name === "prices" ? { prices } : { ...state, tasks: [finished(9, { began: "planner", because: "probe", kind: "fix" }, { minutes: 2 })] }) as T; } }, "routing", [], {}, (line) => odd.push(line));
+  expect(odd).toEqual(["Routing, from the last 1 task this node finished:", "  Fixes: 1 task, 1 verified, $1.00 and 2.0 min a verified task", "    began on the planner's, probe: 1 task, 1 verified, $1.00 and 2.0 min a verified task"]);
+  // Nothing finished yet, or nothing routed: said so.
+  const empty: string[] = [];
+  await teamCommand({ async call<T>(name: string): Promise<T> { return (name === "prices" ? { prices } : { ...state, tasks: [] }) as T; } }, "routing", [], {}, (line) => empty.push(line));
+  expect(empty).toEqual(["No task has finished on this node yet: nothing to say of its routing."]);
+  const unrouted: string[] = [];
+  await teamCommand({ async call<T>(name: string): Promise<T> { return (name === "prices" ? { prices } : { ...state, tasks: [finished(6, undefined, { minutes: 3 })] }) as T; } }, "routing", [], {}, (line) => unrouted.push(line));
+  expect(unrouted).toEqual(["Routing, from the last 1 task this node finished (1 not routed: held to models, a coding tool's, or from before kinds were kept):", "  None of them was routed."]);
 });

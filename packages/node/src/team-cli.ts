@@ -1,4 +1,4 @@
-import { beginsByKind, capLabel, TEAM_LIMITS, interventionWords, agentFromFile, agentToFile, plainLine, plainText, type Prices, type TeamChangesView, type TeamFilesView, type TeamFileView, type RouteName, taskRecordFacts, type TeamModelChoice, type TeamSnapshot, type TeamRoomView, type TeamRoom, type TeamTask, type Agent, type TeamCheckpoint, mergeRepository } from "@invincible/core";
+import { beginsByKind, KIND_WORDS, moneyPrices, routingReport, type RoutingReport, type RoutingTally, capLabel, TEAM_LIMITS, interventionWords, agentFromFile, agentToFile, plainLine, plainText, type Prices, type TeamChangesView, type TeamFilesView, type TeamFileView, type RouteName, taskRecordFacts, type TeamModelChoice, type TeamSnapshot, type TeamRoomView, type TeamRoom, type TeamTask, type Agent, type TeamCheckpoint, mergeRepository } from "@invincible/core";
 import { MARK_PALETTE } from "@invincible/core/agent-mark";
 import { GLASS_RAMPS, GLASS_SHAPES, glassOf, readGlassProfile } from "@invincible/core/glass";
 
@@ -54,7 +54,53 @@ export const taskRecordLine = (task: Pick<TeamTask, "record">, prices: Prices): 
 /** What a task changed in its repository and where that is kept (`invincible ship <artifact>` opens a pull request from it). Empty when it kept nothing. */
 export const taskChangesLine = (task: Pick<TeamTask, "changes">): string => (task.changes ? ` · ${task.changes.files} file${task.changes.files === 1 ? "" : "s"} changed, kept as ${task.changes.artifact}` : "");
 
-const usage = "invincible agents [add <id> | avatar <id> | models <id> [provider/model…] | sensitive <id> [on|off] [provider/model…] | dm <id> [message] | room <name> <member…> | chat <room> [message] | task <room> <assignee> <goal> [--sensitive] [--models provider/model,…] | steps <task-id> | again <task-id> [--from <step>] [goal] | keys <id> [add <secret> [--write] | rm <secret>] | export <id> [--out file.md] | import <file.md> [--id <new id>] [-y] | give <goal> | trail <task-id> [--follow] | routing <id> | provision <id> | memory <id> [text] | engram [on|off] | ci [on|off] | daily [<usd>] | merge <owner/repo> [on|off] | pause|resume|stop <room|agent|task> <id> | approve|decline <task-id> | remove <id> [--destroy-workspace] [--yes]]";
+const usage = "invincible agents [add <id> | avatar <id> | models <id> [provider/model…] | sensitive <id> [on|off] [provider/model…] | dm <id> [message] | room <name> <member…> | chat <room> [message] | task <room> <assignee> <goal> [--sensitive] [--models provider/model,…] | steps <task-id> | again <task-id> [--from <step>] [goal] | keys <id> [add <secret> [--write] | rm <secret>] | export <id> [--out file.md] | import <file.md> [--id <new id>] [-y] | give <goal> | trail <task-id> [--follow] | routing [<id>] [--json] | provision <id> | memory <id> [text] | engram [on|off] | ci [on|off] | daily [<usd>] | merge <owner/repo> [on|off] | pause|resume|stop <room|agent|task> <id> | approve|decline <task-id> | remove <id> [--destroy-workspace] [--yes]]";
+
+/** Where a group of tasks' work began, in words (core's routingReport keys); one this CLI doesn't know, as it is. */
+const BEGAN_WORDS: Readonly<Record<string, string>> = {
+  engineer: "on the engineer's models",
+  "engineer:probe": "on the engineer's, as a try",
+  "planner:memory": "on the planner's, by the memory",
+  "planner:plan": "on the planner's, by its plan",
+  planner: "on the planner's models",
+};
+const MOVED_SHORT: Readonly<Record<string, string>> = { gate: "gate", review: "review", stall: "audits", rereads: "reading again" };
+
+/** A tally in words: its tasks, those verified, and per verified task its money (all of it priced) and minutes. */
+function tallyWords(t: RoutingTally): string {
+  const counted = `${t.tasks} task${t.tasks === 1 ? "" : "s"}, ${t.verified} verified`;
+  if (t.minutesPerVerified === null) return counted;
+  const minutes = `${t.minutesPerVerified.toFixed(1)} min a verified task`;
+  return t.usdPerVerified === null ? `${counted}, ${minutes} (money not all priced)` : `${counted}, $${t.usdPerVerified.toFixed(2)} and ${minutes}`;
+}
+
+/**
+ * `invincible agents routing` with no agent, said: core's routingReport, a line each kind and each place its work began,
+ * then the tries of the engineer's. Its words are a contract, held by the team CLI's tests; `--json` is the report itself.
+ */
+export function routingReportLines(report: RoutingReport): string[] {
+  if (!report.finished) return ["No task has finished on this node yet: nothing to say of its routing."];
+  const lines = [
+    `Routing, from the last ${report.finished} task${report.finished === 1 ? "" : "s"} this node finished${report.unrouted ? ` (${report.unrouted} not routed: held to models, a coding tool's, or from before kinds were kept)` : ""}:`,
+  ];
+  if (!report.kinds.length) return [...lines, "  None of them was routed."];
+  for (const kind of report.kinds) {
+    const many = KIND_WORDS[kind.kind].many;
+    lines.push(`  ${many[0]!.toUpperCase()}${many.slice(1)}: ${tallyWords(kind)}`);
+    for (const group of kind.groups) {
+      const key = group.because ? `${group.began}:${group.because}` : group.began;
+      const moved = Object.entries(group.movedUp).filter(([, n]) => n > 0);
+      const movedCount = moved.reduce((sum, [, n]) => sum + n, 0);
+      const extras = [
+        movedCount ? `${movedCount} moved up (${moved.map(([why, n]) => `${n} ${MOVED_SHORT[why] ?? why}`).join(", ")})` : "",
+        group.wentRound ? `${group.wentRound} went round on both tiers` : "",
+      ].filter(Boolean);
+      lines.push(`    began ${BEGAN_WORDS[key] ?? `on the ${group.began}'s${group.because ? `, ${group.because}` : ""}`}: ${tallyWords(group)}${extras.map((extra) => ` · ${extra}`).join("")}`);
+    }
+  }
+  if (report.probes.tried) lines.push(`  Tries of the engineer's after the planner's: ${report.probes.tried}, of which ${report.probes.held} held (verified there, never moved up).`);
+  return lines;
+}
 
 /** What an agent works on, in a sentence: its own models or its role's, and whether it is in sensitive mode. */
 const agentModels = (m: Agent): string =>
@@ -310,9 +356,19 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     }
   }
   if (sub === "routing") {
+    // No agent: the team's routing, from the node's own finished tasks (core's routingReport), read-only: the team and
+    // your prices, nothing else. Money as the node's own is (moneyPrices): a coding plan's calls are paid for already.
+    // `--json`: the report itself, a contract.
+    if (!args[0]) {
+      const state = await api.call<TeamSnapshot>("team");
+      const prices: Prices = state.tasks.some((t) => t.record) ? await api.call<{ prices: Prices; plans?: string[] }>("prices").then((answer) => moneyPrices(answer.prices, answer.plans ?? []), (): Prices => ({})) : {};
+      const report = routingReport(state.tasks, prices);
+      if (flags.json) print(JSON.stringify(report, null, 2));
+      else for (const line of routingReportLines(report)) print(line);
+      return;
+    }
     // Where an agent's next task of each kind begins (core's routing.ts): by how its tasks of that kind went, the
     // planner's models where the last of its kind was verified there, the engineer's until one was.
-    if (!args[0]) throw new Error("usage: invincible agents routing <id>");
     const state = await api.call<TeamSnapshot>("team");
     const agent = state.agents.find((a) => a.id === args[0]);
     if (!agent) throw new Error(`no agent ${args[0]}`);
