@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { BRAND_PNGS, ZOOM } from "../../../scripts/brand.ts";
 import { downscale, greyscale, png, roundTile } from "../../../scripts/field-icon.ts";
-import { MARK_RECTS, markCoverage, markReach, renderMark } from "../../../scripts/mark.ts";
+import { MARK_FORMS, MARK_RECTS, markCoverage, markReach, renderMark } from "../../../scripts/mark.ts";
 
 const ROOT = resolve(import.meta.dir, "../../..");
 /** A PNG's width, height and colour type (2: RGB, 6: RGBA), from its header. */
@@ -22,6 +22,27 @@ describe("the app icon: the I-beam, one solid form in one ink", () => {
     const box = 0.7 * 100, unit = box / 100, area = MARK_RECTS.reduce((sum, [x0, y0, x1, y1]) => sum + (x1 - x0) * unit * ((y1 - y0) * unit), 0);
     const covered = markCoverage(100).reduce((sum, k) => sum + k, 0);
     expect(Math.abs(covered - area)).toBeLessThan(1e-3);
+  });
+
+  // The owner's, 28 November 2026: "what ever makes it look the best, light/dark mode, preferred bare I-beam logo/no
+  // background". Its forms come from one source: the page's ground in its ink, light and dark, and the bare I-beam.
+  test("its forms: light, the ink on the white ground; dark, as first chosen; bare, the I-beam alone in either ink", () => {
+    const n = 64;
+    const pixel = (image: Uint8Array, x: number, y: number) => [...image.subarray((y * n + x) * 4, (y * n + x) * 4 + 4)];
+    const rgb = (colour: string) => [1, 3, 5].map((i) => Number.parseInt(colour.slice(i, i + 2), 16));
+    const light = renderMark(n, { tile: MARK_FORMS.light.tile, ink: MARK_FORMS.light.mark });
+    expect([pixel(light, 0, 0), pixel(light, 32, 32)]).toEqual([[255, 255, 255, 255], [10, 10, 11, 255]]);
+    const dark = renderMark(n, { tile: MARK_FORMS.dark.tile, ink: MARK_FORMS.dark.mark });
+    expect([pixel(dark, 0, 0), pixel(dark, 32, 32)]).toEqual([[10, 10, 11, 255], [255, 255, 255, 255]]);
+    expect(dark).toEqual(renderMark(n)); // the black icon, as it was
+    for (const form of [MARK_FORMS.light, MARK_FORMS.dark]) {
+      const bare = renderMark(n, { tile: null, ink: form.mark });
+      expect([pixel(bare, 0, 0)[3], pixel(bare, 32, 32)]).toEqual([0, [...rgb(form.mark), 255]]);
+    }
+    // The page's own ground and ink, as the apps' themes have them (Android's, which its splash and icon are drawn in).
+    const colours = (dir: string) => Object.fromEntries([...readFileSync(join(ROOT, `apps/android/app/src/main/res/${dir}/colors.xml`), "utf8").matchAll(/<color name="(\w+)">(#\w+)<\/color>/g)].map((m) => [m[1], m[2]!.toLowerCase()]));
+    expect([colours("values").window, colours("values").ink]).toEqual([MARK_FORMS.light.tile, MARK_FORMS.light.mark]);
+    expect([colours("values-night").window, colours("values-night").ink]).toEqual([MARK_FORMS.dark.tile, MARK_FORMS.dark.mark]);
   });
 
   test("it is upright and even: the same mirrored left to right, and top to bottom", () => {

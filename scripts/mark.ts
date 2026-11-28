@@ -23,6 +23,15 @@ export const MARK_BOX = 0.7;
 /** The ink and the tile: white on near black (the app icon), and the tile's own colour. */
 export const MARK_INK = { mark: "#ffffff", tile: "#0a0a0b" } as const;
 
+/**
+ * The icon's forms (the owner's word, 28 November 2026: "what ever makes it look the best, light/dark mode, preferred
+ * bare I-beam logo/no background"): where a platform follows the mode, the page's own ground in its ink, light (near
+ * black on white) and dark (white on near black, the black icon as first chosen, kept too where a platform can't follow
+ * the mode), as the apps' themes have them; and where it takes no ground, bare: the I-beam alone on nothing, in either
+ * ink (`tile: null`).
+ */
+export const MARK_FORMS = { light: { mark: "#0a0a0b", tile: "#ffffff" }, dark: MARK_INK } as const;
+
 /** The farthest corner of the mark from the image's middle, as a share of the image's width, at a zoom: what a mask
  * keeps (a maskable icon's 0.4, an adaptive icon's 66/108/2) must reach past it. */
 export function markReach(zoom = 1): number {
