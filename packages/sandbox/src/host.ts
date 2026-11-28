@@ -826,9 +826,10 @@ export class SandboxHost {
 
   /**
    * Whether this host makes sandboxes: its engine answers and its image is here and, on a Mac, its sandbox firewall is
-   * on, what the doctor names when it isn't (the rule the gateway's listener holds to, daemon.ts). One that makes none
-   * has no VM to ask its engine about, so a failure to say which it has is no trouble of its. Its networks are asked
-   * nothing (status() would): a node whose sandboxes have none asks its engine of none (scratch-node.e2e.test.ts).
+   * on, what the doctor names when it isn't. Asked by the gateway's listener (daemon.ts) and the sweep of other nodes'
+   * tasks' VMs (task-vms.ts): one that makes none has no sandbox to reach a gateway, nor a VM to ask its engine about, so
+   * neither says anything of one. Its networks are asked nothing (status() would): a node whose sandboxes have none asks
+   * its engine of none (scratch-node.e2e.test.ts).
    */
   async makesSandboxes(): Promise<boolean> {
     const [image, wall] = await Promise.all([this.available().then((up) => up && this.hasImage()).catch(() => false), this.firewallState().catch(() => null)]);

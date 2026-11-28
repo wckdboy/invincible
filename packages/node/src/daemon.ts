@@ -995,12 +995,11 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     // nothing held 7402 on the Mac mini that said so (27 November 2026). Whether the address is one of this machine's
     // says which it is.
     const addressHere = () => Object.values(networkInterfaces()).some((list) => list?.some((i) => i.address === gatewayAt.hostname));
-    // Whether this node makes sandboxes: its image there and, on a Mac, its sandbox firewall on (what the doctor names
-    // when it doesn't). One that makes none has no sandbox to reach a gateway, so it says nothing of one. Asked once, and
-    // only of a node whose gateway's address isn't its own.
+    // Whether this node makes sandboxes (SandboxHost.makesSandboxes: its image there and, on a Mac, its sandbox firewall
+    // on, what the doctor names when it doesn't). One that makes none has no sandbox to reach a gateway, so it says
+    // nothing of one. Asked once, and only of a node whose gateway's address isn't its own.
     let makes: Promise<boolean> | null = null;
-    const makesSandboxes = () =>
-      (makes ??= Promise.all([host.status().catch(() => null), host.firewallState().catch(() => null)]).then(([status, wall]) => !!status?.image && (!apple || !!wall?.on)));
+    const makesSandboxes = () => (makes ??= host.makesSandboxes());
     const host = sandbox;
     const bindGateway = async (): Promise<boolean> => {
       tries++;
