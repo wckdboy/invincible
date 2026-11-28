@@ -125,11 +125,31 @@ fun ProjectBadge(project: Work.Project, size: Dp = 16.dp) {
 }
 
 /**
- * How a row stands in a word: its word, or once it has ended its verdict as its proof allows (Proven with a tick in the
- * ink, Reviewed, not proven in grey, Failed · gate 2 in red), never colour alone.
+ * What a task's row shows, as the web's workRow (views/work-rows.ts): its project's line only where the work names
+ * projects (Work.namesProjects; else two lines, its title with how it stands, then its agent with what it is doing); a
+ * tick before its word for proven work alone, else a dot of its tone; what it came to, unless its word says it already
+ * ("Gave up", never "gave up" again under it).
+ */
+internal data class RowLook(val projectLine: Boolean, val tick: Boolean, val detail: String)
+
+internal fun rowLook(row: Work.Row, named: Boolean): RowLook = RowLook(
+    projectLine = named,
+    tick = row.verdict?.verdict == Steps.Verdict.PROVEN,
+    detail = row.detail.takeUnless { it.isEmpty() || it.equals(row.word, ignoreCase = true) } ?: "",
+)
+
+/** A Work row's title, as the web's Home has it: large and firm, in the ink whether or not its task is at work. */
+private val HomeTitle = Type.rowTitle.copy(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = androidx.compose.ui.text.font.FontWeight(650), letterSpacing = (-0.19).sp)
+
+/** How it stands beside a Work row's title: its word and its age a step larger than the lines under it, as the web's. */
+private val HomeWord = Type.word.copy(fontSize = 14.sp, lineHeight = 22.sp)
+
+/**
+ * How a row stands in a word: a dot of its tone and its word, or once it has ended its verdict as its proof allows (Proven
+ * with a tick in the ink, Reviewed, not proven in grey, Failed · gate 2 in red), never colour alone.
  */
 @Composable
-fun StateWord(row: Work.Row) {
+fun StateWord(row: Work.Row, modifier: Modifier = Modifier, style: androidx.compose.ui.text.TextStyle = Type.word) {
     val brand = LocalBrand.current
     val verdict = row.verdict
     val color = when {
@@ -138,22 +158,24 @@ fun StateWord(row: Work.Row) {
         verdict.verdict.wrong -> brand.danger
         else -> brand.quiet
     }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
         if (verdict?.verdict == Steps.Verdict.PROVEN) Icon(CheckIcon, null, Modifier.size(14.dp), tint = color)
-        Text(row.word, style = Type.word, color = color, maxLines = 1)
+        else androidx.compose.foundation.layout.Box(Modifier.size(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(color))
+        Text(row.word, style = style, color = color, maxLines = 1)
     }
 }
 
 /**
- * A task as a row of three lines. [face]: its agent's mark's size (14 to 18; still: only the mark in focus moves).
- * [current]: it is the task open now (a wide screen's sidebar marks it). Work in hand that only waits on its agent reads
- * quieter than what is new to you.
+ * A task as a row, as the web's Work (views/work-rows.ts workRow): two lines where the work is in one project (its title,
+ * firm and in the ink, with how it stands and its age; then its agent and what it is doing), three where [named] (its
+ * project's line above). [face]: its agent's mark's size (14 to 18; still: only the mark in focus moves). [current]: it is
+ * the task open now (a wide screen's sidebar marks it).
  */
 @Composable
-fun WorkRow(row: Work.Row, onOpen: () -> Unit, face: Dp = 18.dp, current: Boolean = false, inset: Dp = Space.margin) {
+fun WorkRow(row: Work.Row, onOpen: () -> Unit, face: Dp = 18.dp, current: Boolean = false, inset: Dp = Space.margin, named: Boolean = true) {
     val brand = LocalBrand.current
     val quiet = MaterialTheme.colorScheme.onSurfaceVariant
-    val calm = row.attention == Work.Attention.WORKING
+    val look = rowLook(row, named)
     val big = LocalDensity.current.fontScale > 1.3f
     Column(
         Modifier
@@ -169,18 +191,26 @@ fun WorkRow(row: Work.Row, onOpen: () -> Unit, face: Dp = 18.dp, current: Boolea
             .padding(horizontal = inset, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            ProjectBadge(row.project)
-            Text(row.project.name, style = Type.meta, color = quiet, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            StateWord(row)
-            row.age?.let { Text(it, style = Type.meta, color = quiet, maxLines = 1) }
+        if (look.projectLine) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ProjectBadge(row.project)
+                Text(row.project.name, style = Type.meta, color = quiet, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                StateWord(row)
+                row.age?.let { Text(it, style = Type.meta, color = quiet, maxLines = 1) }
+            }
+            Text(row.title, style = HomeTitle, color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        } else {
+            // Its title, with how it stands and its age at the end of its first line.
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(row.title, style = HomeTitle, color = MaterialTheme.colorScheme.onSurface, maxLines = if (big) 3 else 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).alignByBaseline())
+                StateWord(row, Modifier.alignByBaseline(), style = HomeWord)
+                row.age?.let { Text(it, style = Type.meta.copy(fontSize = 14.sp, lineHeight = 22.sp), color = quiet, maxLines = 1, modifier = Modifier.alignByBaseline()) }
+            }
         }
-        Text(row.title, style = Type.rowTitle, color = if (calm) quiet else MaterialTheme.colorScheme.onSurface, maxLines = if (big) 2 else 1, overflow = TextOverflow.Ellipsis)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             AgentMarkView(row.agent, row.avatar, face, state = AgentMark.state(row.state))
-            Text(row.agentName, style = Type.meta, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (calm) 0.72f else 0.86f), maxLines = 1)
-            // (Not what its word says already: "Gave up", then "gave up".)
-            if (row.detail.isNotEmpty() && !row.detail.equals(row.word, ignoreCase = true)) Text(row.detail, style = if (row.mono) Type.mono else Type.meta, color = quiet, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            Text(row.agentName, style = Type.meta, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f), maxLines = 1)
+            if (look.detail.isNotEmpty()) Text(look.detail, style = if (row.mono) Type.mono else Type.meta, color = quiet, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         }
     }
 }

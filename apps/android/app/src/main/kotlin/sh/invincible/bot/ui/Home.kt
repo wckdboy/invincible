@@ -131,13 +131,15 @@ fun HomeScreen(app: AppModel, nav: Nav, back: () -> Unit) {
             if (work.projects.size > 1) item(key = "filters") { ProjectFilters(work.projects, filtered) { filtered = it } }
             // The work by proof: in hand first (a running task one tap from here), then proven, then failed; the rest folds.
             val groups = Work.ByProof(shown!!)
+            // Each row names its project only where the work is in more than one (the web's namesProjects).
+            val named = Work.namesProjects(work)
             fun section(key: String, title: String, rows: List<Work.Row>, failed: Boolean = false) {
                 if (rows.isEmpty()) return
                 item(key = "$key-head") { SectionHead(title, rows.size, tone = if (failed) brand.danger else null) }
                 items(rows, key = { "$key:${it.id}" }) { row ->
                     Column {
                         Hairline(inset = Space.margin)
-                        WorkRow(row, onOpen = { nav.go(Nav.task(row.id)) })
+                        WorkRow(row, onOpen = { nav.go(Nav.task(row.id)) }, named = named)
                     }
                 }
             }
@@ -154,7 +156,7 @@ fun HomeScreen(app: AppModel, nav: Nav, back: () -> Unit) {
                 if (doneOpen) items(groups.done, key = { "d:${it.id}" }) { row ->
                     Column {
                         Hairline(inset = Space.margin)
-                        WorkRow(row, onOpen = { nav.go(Nav.task(row.id)) })
+                        WorkRow(row, onOpen = { nav.go(Nav.task(row.id)) }, named = named)
                     }
                 }
             }

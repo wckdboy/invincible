@@ -366,6 +366,11 @@ object Work {
     }
 
     /** The rows of one project alone (a filter), its sections as they were; every project's with none. */
+    /** Whether the rows name their project: only where the work is in more than one (with one, or none, "Other work" and
+     * its dashed badge on every row said nothing; a row's first line is then its title with how it stands, and its age).
+     * The web's lib/work.ts namesProjects. */
+    fun namesProjects(work: Attended): Boolean = work.projects.size > 1
+
     fun inProject(work: Attended, key: String?): Attended {
         if (key == null) return work
         fun only(rows: List<Row>) = rows.filter { it.project.key == key }
