@@ -1758,7 +1758,10 @@
       .team-workspace-empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-5); border: 1px dashed var(--border-strong); border-radius: var(--r-lg); }
       @media (min-width: 768px) { .team-layout { height: calc(100dvh - var(--topbar-h)); } }
       @media (max-width: 719px) {
-        .team-head { padding: calc(var(--safe-top) + 6px) var(--sp-3) 6px; gap: var(--sp-2); min-height: 56px; }
+        /* (As tall as it is with its pill from its first frame, under a notch too: 6 px, the pill's 44, 6 px and its
+           hairline, below the screen's top inset. A flat 56 held the placeholder under a 47 px inset at 96, the pill made it
+           104, and the timeline dropped 8 px as the agent came.) */
+        .team-head { padding: calc(var(--safe-top) + 6px) var(--sp-3) 6px; gap: var(--sp-2); min-height: calc(var(--safe-top) + 57px); }
         .team-who > .grow { flex-direction: column; align-items: stretch; gap: 0; }
         .team-head > .badge { display: none; }
         .team-who > .avatar { display: none; }
