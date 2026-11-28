@@ -125,6 +125,11 @@ describe("the checkout, really run", () => {
     }
   };
   const tools = have(["python3", "--version"]) && have(["git", "--version"]);
+  // Each is processes, git's dozen and python's (whose script fetches and checks out with git of its own), and a busy Mac
+  // starts them slowly: at 2 % of a core (SIGSTOP 980 ms of every second, the Mac mini, 28 November 2026) they took 6
+  // to 21 s, where bun's 5 s was met at a load of 44 to 61 there. The limit is three times that: how long a busy machine
+  // may take, never what a test checks.
+  const LIMIT = 60_000;
 
   function upstream() {
     const dir = mkdtempSync(join(tmpdir(), "invincible-checkout-"));
@@ -162,7 +167,7 @@ describe("the checkout, really run", () => {
     } finally {
       rmSync(u.dir, { recursive: true, force: true });
     }
-  });
+  }, LIMIT);
 
   test.skipIf(!tools)("a commit the repository doesn't have fails, and the lease is gone all the same", () => {
     const u = upstream();
@@ -174,5 +179,5 @@ describe("the checkout, really run", () => {
     } finally {
       rmSync(u.dir, { recursive: true, force: true });
     }
-  });
+  }, LIMIT);
 });
