@@ -96,7 +96,9 @@ enum Home {
         if work.unread.count > 1 { return "\(work.unread.count) new answers" }
         if let fresh = work.unread.first { return fresh.flatMap { $0.isEmpty ? nil : "New answer in “\($0)”" } ?? "A new answer" }
         let said = latest.map { Self.firstLine($0) }.flatMap { $0.isEmpty ? nil : $0 }
-        return said ?? title ?? "Start a chat"
+        // (A title of spaces says nothing: the chat is yet to be started.)
+        let named = title.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
+        return said ?? named ?? "Start a chat"
     }
 
     /// The first line of what was said, its Markdown marks aside, as a list shows a message.

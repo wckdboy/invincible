@@ -166,6 +166,20 @@ struct Vectors: Decodable {
         let devices: [Device]
     }
 
+    /// Your agent's line in the list that is home (lib/roster.ts homePrimaryLine), never what waits on you: what it is doing
+    /// (`answering`: writing an answer this app watches, at `step`), an answer unread, else your chat's latest words or its
+    /// title.
+    struct HomePrimary: Decodable {
+        let answering: Bool
+        let step: String?
+        let turns: [String?]
+        let runs: [String]
+        let unread: [String?]
+        let latest: String?
+        let title: String?
+        let line: String
+    }
+
     struct AgentForms: Decodable {
         struct Handle: Decodable { let name: String; let taken: [String]; let handle: String }
         struct Removal: Decodable {
@@ -477,6 +491,7 @@ struct Vectors: Decodable {
     let unread: Unread
     let rooms: Rooms
     let listTimes: ListTimes
+    let homePrimary: [HomePrimary]
     let agentForms: AgentForms
     let keys: KeyCases
     let desktop: DesktopCases

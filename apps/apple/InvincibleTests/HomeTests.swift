@@ -48,6 +48,16 @@ struct HomeTests {
         }
     }
 
+    /// Your agent's line as every app says it (lib/roster.ts homePrimaryLine, by the vectors' homePrimary): what it is
+    /// doing, an answer unread, else your chat's latest words or its title, never what waits on you.
+    @Test func yourAgentsLineIsTheOneEveryAppSays() {
+        let cases = Vectors.shared.homePrimary
+        #expect(!cases.isEmpty)
+        for item in cases {
+            let work = PrimaryWork(answering: item.answering, step: item.step, turns: item.turns, runs: item.runs, unread: item.unread)
+            #expect(Home.primaryLine(work, latest: item.latest, title: item.title) == item.line, "\(item)")
+        }
+    }
 
     #if os(iOS)
     @MainActor @Test func whatWaitsOnYouIsAnsweredInTheChatItWaitsIn() {
