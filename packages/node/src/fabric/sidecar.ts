@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { commandOf, outputOf } from "../processes.ts";
 import { SidecarClient, within } from "./socket.ts";
 
 /*
@@ -62,13 +63,12 @@ export const spawnSidecar: SpawnSidecar = (binary, args, env, line, key) => {
 
 /**
  * Whether a `qamp` binary has a sidecar at all (Q-AMP 0.1.0, the first release, has none), and its version: asked of
- * the binary itself, `qamp sidecar --help` and `qamp --version`.
+ * the binary itself, `qamp sidecar --help` and `qamp --version`, without holding the thread (processes.ts).
  */
-export function probeSidecar(binary: string): { sidecar: boolean; version: string | null } {
-  const version = Bun.spawnSync([binary, "--version"], { stdout: "pipe", stderr: "ignore", timeout: 5_000 });
-  const help = Bun.spawnSync([binary, "sidecar", "--help"], { stdout: "ignore", stderr: "ignore", timeout: 5_000 });
-  const said = version.exitCode === 0 ? version.stdout.toString().trim().replace(/^qamp\s+/, "").slice(0, 40) : null;
-  return { sidecar: help.exitCode === 0, version: said };
+export async function probeSidecar(binary: string): Promise<{ sidecar: boolean; version: string | null }> {
+  const [version, help] = await Promise.all([outputOf([binary, "--version"]), outputOf([binary, "sidecar", "--help"])]);
+  const said = version?.code === 0 ? version.stdout.trim().replace(/^qamp\s+/, "").slice(0, 40) : null;
+  return { sidecar: help?.code === 0, version: said };
 }
 
 /** The node's transport key as the sidecar is given it (home.ts transportKey): its text, its DID, and its proof for the node. */
@@ -106,7 +106,7 @@ export interface SidecarOptions {
   startMs?: number;
   stopGraceMs?: number;
   /** How a binary is asked whether it has a sidecar (tests: a stand-in): asked again only when the binary changes. */
-  probe?: (binary: string) => { sidecar: boolean; version: string | null };
+  probe?: (binary: string) => Promise<{ sidecar: boolean; version: string | null }> | { sidecar: boolean; version: string | null };
   /** Each time the node holds a connection to a sidecar that is up: serve its tools there. */
   up?(client: SidecarClient): Promise<void> | void;
   /** Each time it went down (or never came up), and why. */
@@ -192,7 +192,8 @@ export class Sidecar {
     // A binary from before the sidecar (0.1.0) runs grants' bridges and no sidecar: asked once, again when it changes.
     const stat = statSync(binary);
     const made = `${binary}:${stat.size}:${stat.mtimeMs}`;
-    if (this.probed?.key !== made) this.probed = { key: made, ...(this.opts.probe ?? probeSidecar)(binary) };
+    if (this.probed?.key !== made) this.probed = { key: made, ...(await (this.opts.probe ?? probeSidecar)(binary)) };
+    if (this.stopping) return;
     if (!this.probed.sidecar) return this.off(`the qamp here (${this.probed.version ?? binary}) has no sidecar: Q-AMP's release with one goes to <home>/bin/qamp (scripts/qamp-pin.sh; deploy.sh --qamp <file>)`);
     if (this.socketPath.length > SOCKET_PATH_MAX) return this.off(`the sidecar's socket path is too long for a Unix socket (${this.socketPath.length} bytes): set INVINCIBLE_QAMP_SOCKET to a shorter one`);
     let key: SidecarKey;
@@ -301,19 +302,18 @@ export class Sidecar {
     const pid = Number(readFileSync(pidFile, "utf8").trim());
     rmSync(pidFile, { force: true });
     if (!Number.isInteger(pid) || pid <= 1) return;
-    const ours = (): boolean => {
-      const ps = Bun.spawnSync(["ps", "-ww", "-p", String(pid), "-o", "command="], { stdout: "pipe", stderr: "ignore" });
-      const command = ps.exitCode === 0 ? ps.stdout.toString() : "";
+    const ours = async (): Promise<boolean> => {
+      const command = (await commandOf(pid)) ?? "";
       return /\bsidecar\b/.test(command) && command.includes(this.socketPath);
     };
-    if (!ours()) return;
+    if (!(await ours())) return;
     try {
       process.kill(pid, "SIGTERM");
     } catch {
       return;
     }
-    for (let i = 0; i < 120 && ours(); i++) await Bun.sleep(100);
-    if (ours()) process.kill(pid, "SIGKILL");
+    for (let i = 0; i < 120 && (await ours()); i++) await Bun.sleep(100);
+    if (await ours()) process.kill(pid, "SIGKILL");
     this.opts.log(`qamp: stopped a sidecar a node before this one left running (pid ${pid})`);
   }
 

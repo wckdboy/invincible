@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -124,7 +124,14 @@ describe("a binary from before the sidecar", () => {
   test("is asked, and the node says so instead of starting a sidecar that can't start", async () => {
     const dir = temp();
     const binary = qamp010(dir);
-    expect(probeSidecar(binary)).toEqual({ sidecar: false, version: "0.1.0" });
+    // (Asked of it without holding the thread: a Bun.spawnSync that lost its child held a process for good, 28 November 2026.)
+    const sync = spyOn(Bun, "spawnSync");
+    try {
+      expect(await probeSidecar(binary)).toEqual({ sidecar: false, version: "0.1.0" });
+      expect(sync).not.toHaveBeenCalled();
+    } finally {
+      sync.mockRestore();
+    }
     let spawned = 0;
     const sidecar = new Sidecar({ home: join(dir, "home"), key: someKey, binary: () => binary, listen: () => null, name: "n", log: () => {}, spawn: () => (spawned++, null as never) });
     await sidecar.start();
@@ -244,6 +251,36 @@ describe("the sidecar's socket directory (L4)", () => {
       await sidecar.start();
       await sidecar.stop();
       expect(statSync(socket ? join(dir, "made") : join(home, "run")).mode & 0o777).toBe(0o700);
+    }
+  });
+});
+
+describe("a sidecar a node that died left running", () => {
+  test("is stopped as the node starts it again, by the pid it was started as, asked of ps without holding the thread", async () => {
+    const dir = temp();
+    const socketDir = join(dir, "s");
+    mkdirSync(socketDir, { mode: 0o700 });
+    const socket = join(socketDir, "q.sock");
+    // The stray: a process whose command line is a sidecar's on this socket.
+    const stray = Bun.spawn(["bash", "-c", `exec -a 'qamp sidecar --socket ${socket}' sleep 60`], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+    writeFileSync(join(socketDir, "qamp.pid"), String(stray.pid));
+    const binary = join(dir, "qamp");
+    writeFileSync(binary, "#!/bin/sh\nexit 0\n");
+    chmodSync(binary, 0o755);
+    const logged: string[] = [];
+    const sync = spyOn(Bun, "spawnSync");
+    try {
+      const sidecar = new Sidecar({ home: join(dir, "home"), socket, key: someKey, binary: () => binary, listen: () => null, name: "n", log: (line) => logged.push(line), spawn: () => ({ ready: Promise.resolve(null), exited: Promise.resolve(1), kill() {} }), probe: () => ({ sidecar: true, version: "0.2.0" }) });
+      await sidecar.start();
+      await sidecar.stop();
+      await stray.exited;
+      expect(stray.signalCode).toBe("SIGTERM");
+      expect(existsSync(join(socketDir, "qamp.pid"))).toBe(false);
+      expect(logged).toContain(`qamp: stopped a sidecar a node before this one left running (pid ${stray.pid})`);
+      expect(sync).not.toHaveBeenCalled();
+    } finally {
+      sync.mockRestore();
+      stray.kill("SIGKILL");
     }
   });
 });

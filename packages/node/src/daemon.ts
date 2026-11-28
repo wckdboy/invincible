@@ -20,7 +20,7 @@ import { calibrate, spawnBench } from "./compute/calibrate.ts";
 import { GovernedSandboxHost } from "./compute/governed-host.ts";
 import { Governor } from "./compute/governor.ts";
 import { modelSpeed, sandboxStart } from "./compute/measure.ts";
-import { ComputeService, liveHost, type Measure } from "./compute/service.ts";
+import { ComputeService, liveHost, type Measure, readMacLevel } from "./compute/service.ts";
 import { ArmTokens, PRIMARY_ARM } from "./arms.ts";
 import { QampGrants, type QampRunner, qampRunner, unspecified } from "./qamp-grants.ts";
 import { Fabric, fabricRequest, type FabricPrincipal } from "./fabric/service.ts";
@@ -549,6 +549,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   // Compute: this node's slots. Every sandbox it creates and every background model call takes one, and waits when
   // there's none; the ceiling is the owner's (or the default half), read from the mind as it is each time.
   let computeService: ComputeService | null = null;
+  // (A Mac's memory pressure is read in the background, so its first reading is asked for now: processes.ts.)
+  if (process.platform === "darwin" && !opts.hostLoad && !opts.capabilities) void readMacLevel();
   const governor = new Governor({
     capacity: () => computeService!.selfCapacity(),
     host: opts.hostLoad ?? (opts.capabilities ? () => null : liveHost),

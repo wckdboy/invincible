@@ -1,8 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { NodeCapacity } from "@invincible/core";
 import os from "node:os";
 import { CapacityError, Governor, KEPT_WORK_MS } from "../src/compute/governor.ts";
-import { liveHost, macFreeShare } from "../src/compute/service.ts";
+import { liveHost, macFreeShare, readMacLevel } from "../src/compute/service.ts";
 
 /*
  * The governor: a node's slots. Work that fits is admitted; work that doesn't waits
@@ -279,7 +279,25 @@ describe("the machine, as it is now", () => {
     for (const said of [null, "", "101", "-3", "48%", "abc", "4.5"]) expect(macFreeShare(() => said)).toBeNull();
   });
 
-  test.skipIf(process.platform !== "darwin")("on a Mac, memory free is what its memory pressure says, not only the pages no cache holds", () => {
+  test("it's read without holding the thread, by no synchronous spawn, and asked once however often it's used (28 November 2026: a Bun.spawnSync that lost its child held a process for good)", () => {
+    const sync = spyOn(Bun, "spawnSync");
+    const spawn = spyOn(Bun, "spawn");
+    try {
+      for (let i = 0; i < 100; i++) {
+        macFreeShare();
+        liveHost();
+      }
+      expect(sync).not.toHaveBeenCalled();
+      expect(spawn.mock.calls.length).toBeLessThanOrEqual(1);
+    } finally {
+      sync.mockRestore();
+      spawn.mockRestore();
+    }
+  });
+
+  test.skipIf(process.platform !== "darwin")("on a Mac, memory free is what its memory pressure says, not only the pages no cache holds", async () => {
+    // (Read in the background, so asked for first, as the node does when it starts.)
+    await readMacLevel();
     const share = macFreeShare();
     expect(share).not.toBeNull();
     // (Read a moment apart, so within a couple of gigabytes.)

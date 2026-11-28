@@ -8,6 +8,7 @@ import os from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { outputOf } from "../packages/node/src/processes.ts";
 import { collector, DEFAULT_SEED, Pace, type Suite } from "./lib.ts";
 import { BASELINE_DIR, type Comparison, compare, nextBaseline, OUT_DIR, readScorecard, renderSuite, type Scorecard, SPEED_FAIL_FACTOR, SPEED_NOISE_FLOOR, writeScorecard } from "./scorecard.ts";
 
@@ -39,18 +40,14 @@ const USAGE = `bun run bench [suite…] [--full] [--json] [--all] [--ci] [--seed
   --update-baseline  record this run as bench/baseline/<suite>.json, on purpose
   --list             the suites, a line each`;
 
-function revision(root: string): string {
+async function revision(root: string): Promise<string> {
   // A copy with no history of its own (one sent to a sandbox host to run a suite there) says which commit it is.
   const said = process.env.INVINCIBLE_BENCH_COMMIT?.trim();
   if (said && /^[0-9a-f]{7,40}(\+dirty)?$/.test(said)) return said;
-  try {
-    const git = Bun.spawnSync(["git", "describe", "--always", "--dirty=+dirty", "--abbrev=12"], { cwd: root, stderr: "ignore" });
-    const rev = git.stdout.toString().trim();
-    if (git.exitCode === 0 && rev) return rev.slice(0, 64);
-  } catch {
-    /* no git */
-  }
-  return "unknown";
+  // (Never by a synchronous spawn: one of this very call held a test worker for 58 minutes, 28 November 2026.)
+  const git = await outputOf(["git", "describe", "--always", "--dirty=+dirty", "--abbrev=12"], { cwd: root, timeoutMs: 10_000 });
+  const rev = git?.code === 0 ? git.stdout.trim() : "";
+  return rev ? rev.slice(0, 64) : "unknown";
 }
 
 /** What ran: the processor's own name (a hostname says who, not what). */
@@ -109,7 +106,7 @@ async function main(): Promise<number> {
   const progress = (line: string): void => void process.stderr.write(`  · ${line}\n`);
 
   const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-  const commit = revision(root);
+  const commit = await revision(root);
   const machine = { name: machineName(), cores: os.cpus().length };
   const options = { full, qualityOnly: values.ci };
   const started = performance.now();

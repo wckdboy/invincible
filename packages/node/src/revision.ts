@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { outputOf } from "./processes.ts";
 
 /** How long git may take to describe the checkout before the revision is "unknown". */
 const DESCRIBE_MS = 10_000;
@@ -26,19 +27,8 @@ async function describe(): Promise<string> {
   } catch {
     /* not a deployed release */
   }
-  try {
-    const git = Bun.spawn(["git", "describe", "--always", "--dirty=+dirty", "--abbrev=12"], { cwd: root, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
-    const late = setTimeout(() => git.kill(), DESCRIBE_MS);
-    late.unref?.();
-    try {
-      const [out, code] = await Promise.all([new Response(git.stdout).text(), git.exited]);
-      const rev = out.trim();
-      if (code === 0 && rev) return rev.slice(0, 64);
-    } finally {
-      clearTimeout(late);
-    }
-  } catch {
-    /* no git */
-  }
-  return "unknown";
+  // (No git, or one that took past DESCRIBE_MS: unknown.)
+  const git = await outputOf(["git", "describe", "--always", "--dirty=+dirty", "--abbrev=12"], { cwd: root, timeoutMs: DESCRIBE_MS });
+  const rev = git?.code === 0 ? git.stdout.trim() : "";
+  return rev ? rev.slice(0, 64) : "unknown";
 }

@@ -42,6 +42,7 @@ import { roster } from "@invincible/models";
 import type { Device, LedgerStore } from "@invincible/ledger";
 import type { LedgerEntryInput } from "@invincible/sandbox";
 import type { Capabilities } from "../capabilities.ts";
+import { outputOf } from "../processes.ts";
 import type { Governor } from "./governor.ts";
 
 /*
@@ -72,14 +73,32 @@ export interface ComputeDeps {
   measure: Measure | null;
 }
 
+/** How old macOS's memory pressure, as last read, may be before the next use of it asks again. */
+const MAC_LEVEL_MS = 2_000;
+let macLevel: { text: string | null; at: number } | null = null;
+let macAsking: Promise<void> | null = null;
+
+/**
+ * kern.memorystatus_level as it was last read. The next use once that's MAC_LEVEL_MS old asks again, in the background
+ * (processes.ts): it's read at every admission, and a Bun.spawnSync that lost its child would hold the node for good
+ * (28 November 2026). Null until a first reading is in; the daemon asks for one as it starts (readMacLevel).
+ */
+function macLevelNow(): string | null {
+  if (!macAsking && (!macLevel || Date.now() - macLevel.at >= MAC_LEVEL_MS)) macAsking = readMacLevel().finally(() => (macAsking = null));
+  return macLevel?.text ?? null;
+}
+
+/** Reads kern.memorystatus_level now; what the memory pressure is said to be from then on. */
+export async function readMacLevel(): Promise<void> {
+  const out = await outputOf(["sysctl", "-n", "kern.memorystatus_level"]);
+  macLevel = { text: out?.code === 0 ? out.stdout : null, at: Date.now() };
+}
+
 /**
  * The share of memory macOS's memory pressure calls free (what `memory_pressure` prints as "System-wide memory free
- * percentage"), from 0 to 1; null if it won't say.
+ * percentage"), from 0 to 1; null if it won't say, or hasn't yet.
  */
-export function macFreeShare(read: () => string | null = () => {
-  const out = Bun.spawnSync(["sysctl", "-n", "kern.memorystatus_level"], { stdout: "pipe", stderr: "ignore" });
-  return out.exitCode === 0 ? out.stdout.toString() : null;
-}): number | null {
+export function macFreeShare(read: () => string | null = macLevelNow): number | null {
   const text = read()?.trim() ?? "";
   if (!/^\d{1,3}$/.test(text) || Number(text) > 100) return null;
   return Number(text) / 100;

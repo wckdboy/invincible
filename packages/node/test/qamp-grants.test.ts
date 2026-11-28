@@ -397,7 +397,7 @@ describe("while the daemon runs, and when it stops and starts", () => {
     const running = new Map(qamp.bridges.map((b, i) => [4100 + i, `qamp serve --key k --listen 127.0.0.1:1 -- bun cli.ts mcp --arm ${b.args[b.args.indexOf("--arm") + 1]} --tools fleet`]));
     // A pid that's now some other process: never touched.
     running.set(4200, "/usr/bin/some-other-thing");
-    const strays = { command: (pid: number) => running.get(pid) ?? null, kill: (pid: number, signal: string) => void (killed.push([pid, signal]), running.delete(pid)) };
+    const strays = { command: async (pid: number) => running.get(pid) ?? null, kill: (pid: number, signal: string) => void (killed.push([pid, signal]), running.delete(pid)) };
     db.query("UPDATE qamp_grants SET pid = 4200 WHERE id = ?").run(lapsing.grant.id);
     db.query("UPDATE qamp_grants SET pid = 4100 WHERE id = ?").run(kept.grant.id);
     clock += 120_000;

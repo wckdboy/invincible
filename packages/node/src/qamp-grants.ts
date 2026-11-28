@@ -6,6 +6,7 @@ import { QAMP_ARM_PREFIX, QAMP_BRIDGE_PORTS, QAMP_TOOLS, QampDid, type QampGrant
 import type { LedgerEntryInput } from "@invincible/sandbox";
 import { ARM_FORBIDDEN_SCOPES, type ArmTokens } from "./arms.ts";
 import type { Home } from "./home.ts";
+import { commandOf } from "./processes.ts";
 import { type PrimaryTool, TOOLS, toolScopes } from "./tools.ts";
 
 /*
@@ -84,16 +85,13 @@ export interface QampProcess {
 
 /** How a bridge a dead node left running is found and stopped (tests: a stand-in). */
 export interface QampStrays {
-  /** A process's whole command line, or null if there's none by that id. */
-  command(pid: number): string | null;
+  /** A process's whole command line, or null if there's none by that id (asked without holding the thread: processes.ts). */
+  command(pid: number): Promise<string | null>;
   kill(pid: number, signal: "SIGTERM" | "SIGKILL"): void;
 }
 
 const processes: QampStrays = {
-  command(pid) {
-    const ps = Bun.spawnSync(["ps", "-ww", "-p", String(pid), "-o", "command="], { stdout: "pipe", stderr: "ignore" });
-    return ps.exitCode === 0 ? ps.stdout.toString().trim() || null : null;
-  },
+  command: commandOf,
   kill(pid, signal) {
     try {
       process.kill(pid, signal);
@@ -462,14 +460,14 @@ export class QampGrants {
    */
   private async stopStray(row: Row): Promise<void> {
     const strays = this.opts.strays ?? processes;
-    const ours = (): boolean => {
-      const command = row.pid ? strays.command(row.pid) : null;
+    const ours = async (): Promise<boolean> => {
+      const command = row.pid ? await strays.command(row.pid) : null;
       return !!command && /\bserve\b/.test(command) && command.includes(`--arm ${qampArm(row.id)} `);
     };
-    if (!row.pid || !ours()) return;
+    if (!row.pid || !(await ours())) return;
     strays.kill(row.pid, "SIGTERM");
-    for (let i = 0; i < 50 && ours(); i++) await Bun.sleep(100);
-    if (ours()) strays.kill(row.pid, "SIGKILL");
+    for (let i = 0; i < 50 && (await ours()); i++) await Bun.sleep(100);
+    if (await ours()) strays.kill(row.pid, "SIGKILL");
     this.opts.log(`qamp: stopped ${qampArm(row.id)}'s bridge, left running by a node that didn't stop it (pid ${row.pid})`);
   }
 
