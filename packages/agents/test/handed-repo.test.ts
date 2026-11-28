@@ -1,9 +1,16 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handedApply, handedDrop, handedGive, handedReceive, handedSend, handedTake } from "../src/handed-repo.ts";
+
+// Every test here makes repositories and runs git on them, as processes of their own, so its time is the machine's to
+// give: "its changes come back to the agent's worktree" took 1.1 s on the Mac mini at a load of 25 on 18 cores, the
+// clone's tests ran past bun's 5 s on main at load (28 November 2026), and the slowest took 39.5 s with 2 % of a core
+// (what each of about 585 runnable tasks gets of 12). The limit is how long a busy machine may take, never what a test
+// checks.
+setDefaultTimeout(120_000);
 
 /*
  * Another node's task's clone of its own, and its changes back (handed-repo.ts; the fifth fabric review's R5-3, by the
