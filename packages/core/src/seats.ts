@@ -319,13 +319,19 @@ export const SIGN_IN_HOSTS: Readonly<Record<"claude-subscription" | "chatgpt-cod
  * its own redirect and scopes (Gmail, say), so a card showing one would hand your account to someone else. A Gemini
  * seat's card is held to agy's own sign-in, as agy 1.5.18 prints it (read signed out on Ultra, 28 November 2026): its
  * path, its OAuth client, its redirect to Google's callback page, a code to paste, and exactly its scopes, each said
- * once. An agy that asks for anything else gets no card until its pin moves, and this with it (the review's L3).
+ * once (the review's L3); and its nine parameters and no other, each with the value agy gives it (an offline grant,
+ * Google's own consent prompt, a PKCE challenge of S256) or of its shape (a state, a challenge), since Google's consent
+ * page honours others that change what you are asked or granted, include_granted_scopes and prompt=none among them (the
+ * re-check of 28 November 2026, R7). An agy that asks for anything else gets no card until its pin moves, and this with it.
  */
 export const AGY_SIGN_IN = {
   path: "/o/oauth2/auth",
   clientId: "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
   redirectUri: "https://antigravity.google/oauth-callback",
   responseType: "code",
+  /** The parameters it prints, each once (with client_id, redirect_uri, response_type and scope): fixed, or of their shape. */
+  fixed: { access_type: "offline", code_challenge_method: "S256", prompt: "consent" },
+  shaped: { code_challenge: /^[A-Za-z0-9_-]{43}$/, state: /^[A-Za-z0-9_-]{16,128}$/ },
   scopes: [
     "openid",
     "https://www.googleapis.com/auth/aicode",
@@ -342,7 +348,12 @@ function agySignIn(url: URL): boolean {
     return said.length === 1 ? said[0]! : null;
   };
   const scopes = (once("scope") ?? "").split(" ").filter(Boolean).sort();
+  const names = ["client_id", "redirect_uri", "response_type", "scope", ...Object.keys(AGY_SIGN_IN.fixed), ...Object.keys(AGY_SIGN_IN.shaped)];
   return (
+    url.hash === "" &&
+    [...new Set(url.searchParams.keys())].every((name) => names.includes(name)) &&
+    Object.entries(AGY_SIGN_IN.fixed).every(([name, value]) => once(name) === value) &&
+    Object.entries(AGY_SIGN_IN.shaped).every(([name, shape]) => shape.test(once(name) ?? "")) &&
     url.pathname === AGY_SIGN_IN.path &&
     once("client_id") === AGY_SIGN_IN.clientId &&
     once("redirect_uri") === AGY_SIGN_IN.redirectUri &&

@@ -244,7 +244,7 @@ describe("a ChatGPT seat's sign-in, by Codex's device code", () => {
  */
 describe("an Antigravity seat's sign-in, Google's to finish", () => {
   // agy's own sign-in, as agy 1.5.18 prints it (core's AGY_SIGN_IN): the node shows no other Google page on a card.
-  const GOOGLE = `https://accounts.google.com${AGY_SIGN_IN.path}?${new URLSearchParams({ access_type: "offline", client_id: AGY_SIGN_IN.clientId, code_challenge: "FAKE-challenge-0000", code_challenge_method: "S256", prompt: "consent", redirect_uri: AGY_SIGN_IN.redirectUri, response_type: AGY_SIGN_IN.responseType, scope: AGY_SIGN_IN.scopes.join(" "), state: "FAKE-state-0000" })}`;
+  const GOOGLE = `https://accounts.google.com${AGY_SIGN_IN.path}?${new URLSearchParams({ access_type: "offline", client_id: AGY_SIGN_IN.clientId, code_challenge: `FAKE${"0".repeat(39)}`, code_challenge_method: "S256", prompt: "consent", redirect_uri: AGY_SIGN_IN.redirectUri, response_type: AGY_SIGN_IN.responseType, scope: AGY_SIGN_IN.scopes.join(" "), state: `FAKE${"0".repeat(18)}` })}`;
   /** A code of the shape Google's callback page shows ("4/0A" and 69 more), fake: made here, never anyone's (the review's H2: a short one hid that the node refused a real one). */
   const GOOGLE_CODE = `4/0A${Array.from({ length: 69 }, (_, i) => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[(i * 37 + 11) % 64]).join("")}`;
 
@@ -268,7 +268,7 @@ describe("an Antigravity seat's sign-in, Google's to finish", () => {
     // Its status asked of agy itself, by its own driver's check, in the same VM; then the VM gone, as its own run.
     expect(n.asked.find((a) => a[0] === "exec")).toEqual(["exec", "vm00000001", ["bash", "-lc", AGENTS.antigravity!.signIn!.seatCheck(seatSalt(n.vault))]]);
     expect(n.asked.at(-1)).toEqual(["destroy", "vm00000001", { run: `seat.${A}` }]);
-    for (const kept of [GOOGLE, "FAKE-state-0000", GOOGLE_CODE]) expect(n.log()).not.toContain(kept);
+    for (const kept of [GOOGLE, `FAKE${"0".repeat(18)}`, GOOGLE_CODE]) expect(n.log()).not.toContain(kept);
   });
 
   test("an address that isn't Google's own sign-in is never shown, the page that shows its code included", async () => {

@@ -318,7 +318,7 @@ describe("a sign-in's card", () => {
       scope: "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs https://www.googleapis.com/auth/aicode openid",
     };
     const page = (over: Record<string, string> = {}, path = "/o/oauth2/auth") =>
-      `https://accounts.google.com${path}?${new URLSearchParams({ access_type: "offline", ...AGY, code_challenge: "FAKE-challenge-0000", code_challenge_method: "S256", prompt: "consent", state: "FAKE-state-0000", ...over })}`;
+      `https://accounts.google.com${path}?${new URLSearchParams({ access_type: "offline", ...AGY, code_challenge: `FAKE${fakeRun(30, 39)}`, code_challenge_method: "S256", prompt: "consent", state: `FAKE${fakeRun(31, 18)}`, ...over })}`;
     expect(signInUrlOk("google-antigravity", page())).toBe(true);
     // Another app's consent page on the same host: its own client, redirect, scopes (one more, or fewer), response or
     // path; or agy's with a second client named in it.
@@ -342,6 +342,20 @@ describe("a sign-in's card", () => {
     ]) expect([url.slice(0, 48), signInUrlOk("google-antigravity", url)]).toEqual([url.slice(0, 48), false]);
     expect(signInUrlOk("claude-subscription", page())).toBe(false);
     expect(signInUrlOk("chatgpt-codex", page())).toBe(false);
+    // The parameters agy 1.5.18 prints (its nine, read signed out: a 22-character state, a 43-character PKCE challenge),
+    // each once, with the values it gives them, and no other: Google's consent page honours some that change what you
+    // are asked or granted (include_granted_scopes adds every scope ever granted agy's client; login_hint, authuser and
+    // hd pick the account; prompt=none skips the consent screen). The re-check of 28 November 2026, R7.
+    const extras: [string, string][] = [["include_granted_scopes", "true"], ["login_hint", "someone@example.test"], ["authuser", "1"], ["hd", "example.test"], ["prompt", "none"], ["response_mode", "form_post"], ["nonce", "FAKE"]];
+    for (const [name, value] of extras) expect([name, signInUrlOk("google-antigravity", `${page()}&${name}=${encodeURIComponent(value)}`)]).toEqual([name, false]);
+    const changed: Record<string, string>[] = [{ access_type: "online" }, { prompt: "select_account" }, { prompt: "none" }, { code_challenge_method: "plain" }, { code_challenge: "FAKE-short" }, { state: "" }, { state: "FAKE state" }];
+    for (const over of changed) expect([JSON.stringify(over), signInUrlOk("google-antigravity", page(over))]).toEqual([JSON.stringify(over), false]);
+    for (const name of ["access_type", "code_challenge", "code_challenge_method", "prompt", "state"]) {
+      const url = new URL(page());
+      url.searchParams.delete(name);
+      expect([name, signInUrlOk("google-antigravity", url.toString())]).toEqual([name, false]);
+    }
+    expect(signInUrlOk("google-antigravity", `${page()}#FAKE`)).toBe(false);
   });
 });
 

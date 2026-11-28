@@ -30,7 +30,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 const PYTHON = Bun.which("python3")!;
 // Fake, every one: Google's page with its state, and the code that page shows.
 // agy's own sign-in, as agy 1.5.18 prints it (core's AGY_SIGN_IN): its client, its redirect, its scopes; its state and challenge fake.
-const PAGE = `https://accounts.google.com${AGY_SIGN_IN.path}?${new URLSearchParams({ access_type: "offline", client_id: AGY_SIGN_IN.clientId, code_challenge: "FAKE-challenge-0000", code_challenge_method: "S256", prompt: "consent", redirect_uri: AGY_SIGN_IN.redirectUri, response_type: AGY_SIGN_IN.responseType, scope: AGY_SIGN_IN.scopes.join(" "), state: "FAKE-state-0000" })}`;
+const PAGE = `https://accounts.google.com${AGY_SIGN_IN.path}?${new URLSearchParams({ access_type: "offline", client_id: AGY_SIGN_IN.clientId, code_challenge: `FAKE${"0".repeat(39)}`, code_challenge_method: "S256", prompt: "consent", redirect_uri: AGY_SIGN_IN.redirectUri, response_type: AGY_SIGN_IN.responseType, scope: AGY_SIGN_IN.scopes.join(" "), state: `FAKE${"0".repeat(18)}` })}`;
 /** A code of the shape Google's callback page shows ("4/0A" and 69 more), fake: made here, never anyone's (the review's H2: a short one hid that the node refused a real one). */
 const CODE = `4/0A${Array.from({ length: 69 }, (_, i) => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[(i * 37 + 11) % 64]).join("")}`;
 // (Where agy 1.5.18 keeps its sign-in with no keyring, as in every VM: its profile, in a file of this name; strace, on Ultra.)
