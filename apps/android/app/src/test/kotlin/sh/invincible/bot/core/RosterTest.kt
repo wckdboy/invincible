@@ -29,6 +29,23 @@ class RosterTest {
         }
     }
 
+    @Test fun yourAgentsLineInTheListIsThePwasAndNeverSaysWhatWaitsOnYou() {
+        val cases = v["homePrimary"].list
+        assertTrue(cases.size >= 15)
+        for (c in cases) {
+            val line = Roster.homePrimaryLine(
+                here = c["answering"].bool!!,
+                step = c["step"].string,
+                turns = c["turns"].list.map { it.string },
+                runs = c["runs"].list.map { it.string!! },
+                unread = c["unread"].list.map { it.string },
+                latest = c["latest"].string,
+                title = c["title"].string,
+            )
+            assertEquals(c.toString(), c["line"].string, line)
+        }
+    }
+
     @Test fun theListThatIsHomeIsThePwasEveryAgentAndRoomTheLatestFirst() {
         val now = v["agents"]["now"].long!!
         for ((name, asked) in listOf("agents" to asks(v["agents"]["asks"]), "rooms" to emptyList(), "unread" to emptyList())) {

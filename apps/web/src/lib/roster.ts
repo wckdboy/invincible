@@ -1,6 +1,7 @@
 import { avatarExpression, type AvatarExpression } from "@invincible/core/avatar";
 import type { TeamDelivery, TeamMessage, TeamRoom, TeamSnapshot, TeamTask, Agent } from "@invincible/core/team";
 import type { AgentState } from "./agent-state.ts";
+import { lineParts, type NowInput } from "./now.ts";
 import { factsOfRecord, verdictOf } from "./steps.ts";
 import { taskBadge } from "./task-card.ts";
 import { taskDependencies, agentMaker, teamSpeaker } from "./team.ts";
@@ -219,4 +220,21 @@ export function homeRows(input: RosterInput): HomeRow[] {
     return { ...row, at: latest(room.updatedAt, jobs), count: proposals(jobs).length || (row.needs ? 1 : 0) };
   });
   return rows.sort((a, b) => b.at - a.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+}
+
+/** The first line of what was said, its Markdown marks at either end aside, as a list shows a message ("## Done": "Done"). */
+const firstSaid = (text: string | null): string =>
+  (text ?? "").split(/[\n\r\v\f\u0085\u2028\u2029]/).find((line) => line.trim())?.trim().replace(/^[#*_`>\- ]+|[#*_`>\- ]+$/g, "") ?? "";
+
+/**
+ * Your agent's line in the list that is home (I10's for the iPhone, settled with the lead on 28 November 2026): what it
+ * is doing (the step it is at as it answers, "Writing…" before it says one; the turns and runs in hand), an answer of its
+ * you haven't read, else the first line of the latest words of your chat with it, else that chat's title, else "Start a
+ * chat". What waits on you is never said here: the row's count says it (primaryNeeds), and every other place says it
+ * first (needsFirst).
+ */
+export function homePrimaryLine(work: Omit<NowInput, "needs">, latest: string | null, title: string | null): string {
+  if (work.step !== undefined) return work.step || "Writing…";
+  const { doing, fresh } = lineParts({ ...work, needs: null });
+  return doing ?? fresh ?? (firstSaid(latest) || title?.trim() || "Start a chat");
 }

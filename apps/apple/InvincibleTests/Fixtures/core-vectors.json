@@ -5667,6 +5667,177 @@
       }
     ]
   },
+  "homePrimary": [
+    {
+      "answering": true,
+      "step": "Reading sync.ts",
+      "turns": [
+        "Fix sync"
+      ],
+      "runs": [],
+      "unread": [],
+      "latest": null,
+      "title": null,
+      "line": "Reading sync.ts"
+    },
+    {
+      "answering": true,
+      "step": null,
+      "turns": [],
+      "runs": [],
+      "unread": [],
+      "latest": "Earlier words",
+      "title": "Release",
+      "line": "Writing…"
+    },
+    {
+      "answering": false,
+      "step": null,
+      "turns": [
+        "Fix sync"
+      ],
+      "runs": [],
+      "unread": [],
+      "latest": null,
+      "title": null,
+      "line": "Working in “Fix sync”"
+    },
+    {
+      "answering": false,
+      "step": null,
+      "turns": [
+        null
+      ],
+      "runs": [],
+      "unread": [],
+      "latest": null,
+      "title": null,
+      "line": "Working in a temporary chat"
+    },
+    {
+      "answering": false,
+      "step": null,
+      "turns": [
+        "a"
+      ],
+      "runs": [
+        "b"
+      ],
+      "unread": [],
+      "latest": null,
+      "title": null,
+      "line": "Working on 2 things"
+    },
+    {
+      "answering": false,
+      "step": null,
+      "turns": [],
+      "runs": [
+        "  Make sync faster\nand more"
+      ],
+      "unread": [],
+      "latest": null,
+      "title": null,
+      "line": "Working on: Make sync faster"
+    },
+    {
+      "answering": false,
+      "step": null,
+      "turns": [],
+      "runs": [],
+      "unread": [
+        "The release"
+      ],
+      "latest": "## Done",
+      "title": "Release",
+      "line": "New answer in “The release”"
+    },
+    {
+      "answering": false,
+      "step": null,
+      "turns": [],
+      "runs": [],
+      "unread": [
+        null
+      ],
+      "latest": null,
+      "title": null,
+      "line": "A new answer"
+    },
+    {
+      "answering": false,
+      "step": null,
+      "turns": [],
+      "runs": [],
+      "unread": [
+        "a",
+        "b"
+      ],
+      "latest": null,
+      "title": null,
+      "line": "2 new answers"
+    },
+    {
+      "answering": false,
+      "step": null,
+      "turns": [],
+      "runs": [],
+      "unread": [],
+      "latest": "## Done\nThe board is green.",
+      "title": "Release",
+      "line": "Done"
+    },
+    {
+      "answering": false,
+      "step": null,
+      "turns": [],
+      "runs": [],
+      "unread": [],
+      "latest": "\n\n  > Quoted first\nnext",
+      "title": "Release",
+      "line": "Quoted first"
+    },
+    {
+      "answering": false,
+      "step": null,
+      "turns": [],
+      "runs": [],
+      "unread": [],
+      "latest": "   \n\t",
+      "title": "Release",
+      "line": "Release"
+    },
+    {
+      "answering": false,
+      "step": null,
+      "turns": [],
+      "runs": [],
+      "unread": [],
+      "latest": null,
+      "title": "Release",
+      "line": "Release"
+    },
+    {
+      "answering": false,
+      "step": null,
+      "turns": [],
+      "runs": [],
+      "unread": [],
+      "latest": null,
+      "title": "   ",
+      "line": "Start a chat"
+    },
+    {
+      "answering": false,
+      "step": null,
+      "turns": [],
+      "runs": [],
+      "unread": [],
+      "latest": null,
+      "title": null,
+      "line": "Start a chat"
+    }
+  ],
   "agentForms": {
     "handles": [
       {

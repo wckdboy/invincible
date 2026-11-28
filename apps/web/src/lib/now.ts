@@ -31,8 +31,8 @@ export interface Now {
 export const needsYou = (n: number): string => `${n} ${n === 1 ? "thing needs" : "things need"} you`;
 
 /** Its line's parts: what it is doing (null: nothing), how much needs you (null: nothing, or not asked yet), and an answer
- * of its you haven't read. */
-function lineParts(input: NowInput): { here: boolean; doing: string | null; needs: string | null; fresh: string | null } {
+ * of its you haven't read. (The list's line is made of them too: roster.ts homePrimaryLine.) */
+export function lineParts(input: NowInput): { here: boolean; doing: string | null; needs: string | null; fresh: string | null } {
   const here = input.step !== undefined;
   const inHand = input.turns.length + input.runs.length;
   const needs = input.needs ? needsYou(input.needs) : null;

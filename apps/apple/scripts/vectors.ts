@@ -14,7 +14,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import * as core from "../../../packages/core/src/index.ts";
 import { besideChip, primaryState, type AgentState } from "../../web/src/lib/agent-state.ts";
-import { homeRows, primaryNeeds, rosterRows } from "../../web/src/lib/roster.ts";
+import { homePrimaryLine, homeRows, primaryNeeds, rosterRows } from "../../web/src/lib/roster.ts";
 import { listTime } from "../../web/src/lib/time.ts";
 import { primaryNow, needsFirst, type NowInput } from "../../web/src/lib/now.ts";
 import { groupConversations } from "../../web/src/lib/chats.ts";
@@ -512,6 +512,37 @@ const listTimes = {
     Date.UTC(2026, 0, 2, 7, 0), Date.UTC(2025, 11, 31, 22, 0), Date.UTC(2026, 10, 29, 8, 0),
   ].map((at) => ({ at, words: listTime(at, LIST_NOW, LIST_ZONE, LIST_LOCALE) })),
 };
+
+// ---- your agent's line in the list that is home (lib/roster.ts homePrimaryLine): never what waits on you, which its row
+// counts. `answering`: it is writing an answer this app watches (`step`: the step it is at, null before it says one). ----
+const homePrimary = (
+  [
+    [{ step: "Reading sync.ts", turns: [{ title: "Fix sync" }], runs: [] }, null, null],
+    [{ step: null, turns: [], runs: [] }, "Earlier words", "Release"],
+    [{ turns: [{ title: "Fix sync" }], runs: [] }, null, null],
+    [{ turns: [{ title: null }], runs: [] }, null, null],
+    [{ turns: [{ title: "a" }], runs: [{ goal: "b" }] }, null, null],
+    [{ turns: [], runs: [{ goal: "  Make sync faster\nand more" }] }, null, null],
+    [{ turns: [], runs: [], unread: [{ title: "The release" }] }, "## Done", "Release"],
+    [{ turns: [], runs: [], unread: [{ title: null }] }, null, null],
+    [{ turns: [], runs: [], unread: [{ title: "a" }, { title: "b" }] }, null, null],
+    [{ turns: [], runs: [] }, "## Done\nThe board is green.", "Release"],
+    [{ turns: [], runs: [] }, "\n\n  > Quoted first\nnext", "Release"],
+    [{ turns: [], runs: [] }, "   \n\t", "Release"],
+    [{ turns: [], runs: [] }, null, "Release"],
+    [{ turns: [], runs: [] }, null, "   "],
+    [{ turns: [], runs: [] }, null, null],
+  ] as [Omit<NowInput, "needs">, string | null, string | null][]
+).map(([work, latest, title]) => ({
+  answering: work.step !== undefined,
+  step: work.step ?? null,
+  turns: work.turns.map((turn) => turn.title),
+  runs: work.runs.map((run) => run.goal),
+  unread: (work.unread ?? []).map((chat) => chat.title),
+  latest,
+  title,
+  line: homePrimaryLine(work, latest, title),
+}));
 
 const unread = {
   snapshot: seenSnapshot,
@@ -2028,6 +2059,7 @@ const vectors = {
   unread,
   rooms,
   listTimes,
+  homePrimary,
   agentForms,
   keys,
   desktop,

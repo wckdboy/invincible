@@ -58,6 +58,7 @@ class TableTest {
         assertNull(after.asOf)
         assertEquals(listOf("engineer", "engineer"), after.rows.map { it.line })
         assertEquals(turns["chats"]?.text(), after.chats)
+        assertEquals(listOf("Release notes"), after.turns)
     }
 
     @Test fun anAgentsTheNodeDrewIsDrawnAgainFromItsLastTeamWithWhatsNew() {

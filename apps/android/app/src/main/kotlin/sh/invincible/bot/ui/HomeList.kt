@@ -56,6 +56,8 @@ import sh.invincible.bot.core.AgentState
 import sh.invincible.bot.core.ListTime
 import sh.invincible.bot.core.Primary
 import sh.invincible.bot.core.Roster
+import sh.invincible.bot.core.get
+import sh.invincible.bot.core.string
 import java.time.ZoneId
 
 /*
@@ -76,6 +78,10 @@ import java.time.ZoneId
 fun HomeList(app: AppModel, open: (String) -> Unit, settings: () -> Unit, current: String? = null, modifier: Modifier = Modifier) {
     val table by app.table.collectAsState()
     val needsYou by app.needsYou.collectAsState()
+    // (Your agent's row says the latest words of your chat with it: that chat is read once the node has answered, as it
+    // was when the chat was home, so the row can say them and a tap opens it at once.)
+    val answered = table.snapshot != null && table.asOf == null
+    LaunchedEffect(answered) { if (answered) app.chat.openLatest() }
     val minute = rememberMinute()
     val now = minute * 60_000
     val times = rememberListTime()
@@ -114,10 +120,23 @@ fun HomeList(app: AppModel, open: (String) -> Unit, settings: () -> Unit, curren
                 }
             }
             item(key = "primary") {
-                // (Pinned first, it says no time.)
+                // (Pinned first, it says no time. What its chat holds is read here alone: an answer as it streams redraws
+                // this row, never the list.)
+                val bubbles by app.chat.bubbles.collectAsState()
+                val chatTitle by app.chat.title.collectAsState()
+                val live by app.chat.live.collectAsState()
                 HomeRowView(
                     name = Primary.name,
-                    line = table.primary.line,
+                    // (Never what waits on you, which its count says: Roster.homePrimaryLine, the PWA's.)
+                    line = Roster.homePrimaryLine(
+                        here = live,
+                        step = bubbles.lastOrNull { it.streaming }?.steps?.lastOrNull(),
+                        turns = table.turns,
+                        runs = emptyList(),
+                        unread = table.unread.map { it["title"].string },
+                        latest = bubbles.lastOrNull { it.text.isNotBlank() }?.text,
+                        title = chatTitle,
+                    ),
                     time = null,
                     // (What waits on you that is no agent's: an agent's own asks are counted on its row.)
                     count = table.primaryNeeds,

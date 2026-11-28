@@ -61,6 +61,7 @@ class KeptTableTest {
         val restored = Table.restored(kept, Snapshot.of(kept.team), now)
         assertEquals(3, restored.primaryNeeds)
         assertEquals(Roster.primaryNow(turns = listOf("Release notes", null), runs = emptyList(), needs = 3, unread = listOf("The importer")), restored.primary)
+        assertEquals(listOf("Release notes", null), restored.turns)
         // (One kept before the Inbox's count was says nothing of what needs you until the node answers, never the whole count.)
         val older = KeptTable.read(Json.parse(KeptTable.of(node, team, turns, adas, waiting = 5, at = 1).text()), node)!!
         assertNull(older.inbox)

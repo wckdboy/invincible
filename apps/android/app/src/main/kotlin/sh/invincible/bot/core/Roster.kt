@@ -321,22 +321,46 @@ object Roster {
 
     fun needsYou(n: Int) = "$n ${if (n == 1) "thing needs" else "things need"} you"
 
-    /** What the primary is doing now, in one line (lib/now.ts): idle, working on something, or needing you. */
-    fun primaryNow(step: String? = null, here: Boolean = false, turns: List<String?>, runs: List<String>, needs: Int?, unread: List<String?> = emptyList()): Now {
-        val inHand = turns.size + runs.size
-        val needsLine = needs?.takeIf { it > 0 }?.let(::needsYou)
-        val doing = when {
-            here -> step?.ifEmpty { null } ?: "Starting"
-            inHand > 1 -> "Working on $inHand things"
+    /**
+     * Your agent's line in the list that is home (lib/roster.ts homePrimaryLine, held to the vectors): what it is doing
+     * (the step it is at as it answers, "Writing…" before it says one; the turns and runs in hand), an answer of its you
+     * haven't read, else the first line of the latest words of your chat with it, else that chat's title, else "Start a
+     * chat". What waits on you is never said here: the row's count says it, and every other place says it first.
+     */
+    fun homePrimaryLine(here: Boolean, step: String?, turns: List<String?>, runs: List<String>, unread: List<String?>, latest: String?, title: String?): String {
+        if (here) return step?.ifEmpty { null } ?: "Writing…"
+        return inHand(turns, runs) ?: freshLine(unread) ?: firstSaid(latest).ifEmpty { null } ?: title?.trim()?.ifEmpty { null } ?: "Start a chat"
+    }
+
+    private val newline = Regex("[\\n\\r\\u000B\\u000C\\u0085\\u2028\\u2029]")
+    private val marks = Regex("^[#*_`>\\- ]+|[#*_`>\\- ]+$")
+
+    /** The first line of what was said, its Markdown marks at either end aside, as a list shows a message ("## Done": "Done"). */
+    private fun firstSaid(text: String?): String = text.orEmpty().split(newline).firstOrNull { it.isNotBlank() }?.trim()?.replace(marks, "") ?: ""
+
+    /** What it has in hand, in words (lib/now.ts lineParts): the turns and runs it is working on (null: none). */
+    private fun inHand(turns: List<String?>, runs: List<String>): String? {
+        val count = turns.size + runs.size
+        return when {
+            count > 1 -> "Working on $count things"
             turns.isNotEmpty() -> turns[0]?.let { "Working in “$it”" } ?: "Working in a temporary chat"
             runs.isNotEmpty() -> "Working on: ${runs[0].trim().split("\n")[0]}"
             else -> null
         }
-        val fresh = when {
-            unread.size > 1 -> "${unread.size} new answers"
-            unread.isNotEmpty() -> unread[0]?.let { "New answer in “$it”" } ?: "A new answer"
-            else -> null
-        }
+    }
+
+    /** An answer of its you haven't read, in words (lib/now.ts lineParts; null: none). */
+    private fun freshLine(unread: List<String?>): String? = when {
+        unread.size > 1 -> "${unread.size} new answers"
+        unread.isNotEmpty() -> unread[0]?.let { "New answer in “$it”" } ?: "A new answer"
+        else -> null
+    }
+
+    /** What the primary is doing now, in one line (lib/now.ts): idle, working on something, or needing you. */
+    fun primaryNow(step: String? = null, here: Boolean = false, turns: List<String?>, runs: List<String>, needs: Int?, unread: List<String?> = emptyList()): Now {
+        val needsLine = needs?.takeIf { it > 0 }?.let(::needsYou)
+        val doing = if (here) step?.ifEmpty { null } ?: "Starting" else inHand(turns, runs)
+        val fresh = freshLine(unread)
         val text = if (doing != null) listOfNotNull(doing, needsLine).joinToString(" · ") else needsLine ?: fresh ?: if (needs == 0) "Idle · nothing needs you" else "Idle"
         val expression = if (here) "thinking" else if (doing != null) "working" else if (needsLine != null) "asking" else "idle"
         val tone = if (needsLine != null) "warn" else if (doing != null) "accent" else if (fresh != null) "ok" else "neutral"

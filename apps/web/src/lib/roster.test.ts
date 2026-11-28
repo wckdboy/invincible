@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TeamDelivery, TeamRoom, TeamTask, Agent } from "@invincible/core/team";
-import { homeRows, primaryNeeds, rosterRows, agentOfCaller, type RosterInput } from "./roster.ts";
+import { homePrimaryLine, homeRows, primaryNeeds, rosterRows, agentOfCaller, type RosterInput } from "./roster.ts";
 
 const NOW = 1_000_000;
 const person = (id: string, more: Partial<Agent> = {}): Agent => ({ id, name: id[0]!.toUpperCase() + id.slice(1), instructions: `Does ${id}'s job.\nIn detail.`, role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 1, memory: "", repository: null, workspaceNode: null, workspace: null, createdAt: 1, updatedAt: 1, ...more });
@@ -269,5 +269,38 @@ describe("the list that is home on a phone: every agent and room, the latest fir
     });
     const count = (key: string) => got.find((row) => row.key === key)?.count;
     expect([count("room:forge"), count("room:shed"), count("room:yard")]).toEqual([2, 1, 0]);
+  });
+});
+
+describe("your agent's line in the list that is home", () => {
+  const idle = { turns: [], runs: [] };
+  test("what it is doing first: the step it is at as it answers, Writing… before it says one, then the turns and runs in hand", () => {
+    expect(homePrimaryLine({ step: "Reading sync.ts", turns: [{ title: "Fix sync" }], runs: [] }, null, null)).toBe("Reading sync.ts");
+    expect(homePrimaryLine({ step: null, turns: [], runs: [] }, "Earlier words", "Release")).toBe("Writing…");
+    expect(homePrimaryLine({ turns: [{ title: "Fix sync" }], runs: [] }, null, null)).toBe("Working in “Fix sync”");
+    expect(homePrimaryLine({ turns: [{ title: null }], runs: [] }, null, null)).toBe("Working in a temporary chat");
+    expect(homePrimaryLine({ turns: [{ title: "a" }], runs: [{ goal: "b" }] }, null, null)).toBe("Working on 2 things");
+    expect(homePrimaryLine({ turns: [], runs: [{ goal: "  Make sync faster\nand more" }] }, null, null)).toBe("Working on: Make sync faster");
+  });
+
+  test("then an answer of its you haven't read", () => {
+    expect(homePrimaryLine({ ...idle, unread: [{ title: "The release" }] }, "## Done", "Release")).toBe("New answer in “The release”");
+    expect(homePrimaryLine({ ...idle, unread: [{ title: null }] }, null, null)).toBe("A new answer");
+    expect(homePrimaryLine({ ...idle, unread: [{ title: "a" }, { title: "b" }] }, null, null)).toBe("2 new answers");
+  });
+
+  test("else the first line of the latest words of your chat with it, Markdown's marks aside; else its title; else Start a chat", () => {
+    expect(homePrimaryLine(idle, "## Done\nThe board is green.", "Release")).toBe("Done");
+    expect(homePrimaryLine(idle, "\n\n  > Quoted first\nnext", "Release")).toBe("Quoted first");
+    expect(homePrimaryLine(idle, "   \n\t", "Release")).toBe("Release");
+    expect(homePrimaryLine(idle, null, "Release")).toBe("Release");
+    expect(homePrimaryLine(idle, null, "   ")).toBe("Start a chat");
+    expect(homePrimaryLine(idle, null, null)).toBe("Start a chat");
+  });
+
+  test("what waits on you is never said: the row's count says it", () => {
+    // (The work has no word for it here at all; needsFirst says it everywhere else.)
+    expect(homePrimaryLine({ turns: [{ title: "Fix sync" }], runs: [] }, null, null)).not.toContain("need");
+    expect(homePrimaryLine(idle, null, null)).not.toContain("need");
   });
 });

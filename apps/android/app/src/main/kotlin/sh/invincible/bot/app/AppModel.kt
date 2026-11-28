@@ -132,6 +132,8 @@ data class Table(
     val home: List<HomeRow> = emptyList(),
     /** What waits on you that is no agent's (Roster.primaryNeeds): your agent's row in the list counts it. */
     val primaryNeeds: Int = 0,
+    /** The chats your agent is answering in, by their titles (null: a temporary chat), as the node said them last. */
+    val turns: List<String?> = emptyList(),
 ) {
     /**
      * The agents after a look at the node: `team` its answer for the team (null: it couldn't be read), `turns` its
@@ -147,15 +149,16 @@ data class Table(
         val unread = turns?.let { it["unread"].list } ?: this.unread
         // (Your agent says, and its row counts, what of it is no agent's: an agent's ask for approval is its own row's.)
         val owed = Roster.primaryNeeds(inbox, asks, snapshot?.agents?.map { it.id } ?: emptyList())
+        val inHand = (turns?.let { it["turns"].list } ?: emptyList()).map { it["title"].string }
         val primary = Roster.primaryNow(
-            turns = (turns?.let { it["turns"].list } ?: emptyList()).map { it["title"].string },
+            turns = inHand,
             runs = emptyList(),
             needs = owed,
             unread = unread.map { it["title"].string },
         )
         return Table(
             snapshot, snapshot?.let { Roster.rows(it, asks, now) } ?: emptyList(), primary, unread, turns?.get("chats")?.text() ?: chats,
-            tasks = work, home = snapshot?.let { Roster.homeRows(it, asks, now) } ?: emptyList(), primaryNeeds = owed,
+            tasks = work, home = snapshot?.let { Roster.homeRows(it, asks, now) } ?: emptyList(), primaryNeeds = owed, turns = inHand,
         )
     }
 
@@ -169,7 +172,7 @@ data class Table(
             val primary = Roster.primaryNow(turns = kept.turns, runs = emptyList(), needs = owed, unread = kept.unread.map { it["title"].string })
             return Table(
                 snapshot, Roster.rows(snapshot, kept.asks, now), primary, kept.unread, asOf = kept.at, tasks = TeamTask.all(kept.team),
-                home = Roster.homeRows(snapshot, kept.asks, now), primaryNeeds = owed ?: 0,
+                home = Roster.homeRows(snapshot, kept.asks, now), primaryNeeds = owed ?: 0, turns = kept.turns,
             )
         }
     }
