@@ -119,7 +119,7 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
         needs = { rememberWork(app)?.let { work -> NeedsYou(app, work, openTask = openTask, openAll = { go("inbox") }, watch = { go("mac:$it") }, openConnectors = { go("connectors") }, chat = id) } },
         // Its VM, in its menu, as the iPhone offers it: one without a desktop says so (the node's refusal) and how to get one.
         actions = {
-            if (sandbox != null) {
+            if (sandbox != null && app.can("sandbox")) {
                 androidx.compose.foundation.layout.Box {
                     androidx.compose.material3.IconButton(onClick = { vmMenu = true }) { Icon(MoreIcon, contentDescription = "${person?.name ?: id}'s options") }
                     androidx.compose.material3.DropdownMenu(expanded = vmMenu, onDismissRequest = { vmMenu = false }) {

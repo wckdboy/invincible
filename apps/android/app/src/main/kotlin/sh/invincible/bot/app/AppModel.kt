@@ -350,6 +350,13 @@ class AppModel(context: Context) {
     /** This session's proof of which node it speaks to (NodeSession), with the client it was made for. */
     @Volatile private var session: NodeSession? = null
 
+    private val _scopes = MutableStateFlow<List<String>?>(null)
+    /** What this phone may do on its node (its scopes), as whoami says them once its proof holds; null: not said yet. */
+    val scopes: StateFlow<List<String>?> = _scopes.asStateFlow()
+
+    /** Whether this phone may [scope], as far as the node has said: until it has said, the node is left to refuse. */
+    fun can(scope: String): Boolean = _scopes.value?.contains(scope) ?: true
+
     /** A session for [c], made for the pairing [made]: what its proof pins is kept with that pairing, and no other. */
     private fun sessionFor(c: NodeClient, made: PairedNode): NodeSession {
         val same = { node: PairedNode? -> node != null && node.origin == made.origin && node.device == made.device }
@@ -370,6 +377,8 @@ class AppModel(context: Context) {
             refused = { _problem.value = it },
             // (The node refused this phone's whoami: removed there, or its clock out. Said, though all stays held.)
             trouble = { _problem.value = it },
+            // (What this phone may do there, for this pairing only.)
+            scoped = { scopes -> if (same(_paired.value)) _scopes.value = scopes },
             // (Its stream, refused or waiting, opened again once Try again's proof holds.)
             reopen = { reconnect() },
             isCurrent = { same(_paired.value) && client === c },
@@ -391,6 +400,7 @@ class AppModel(context: Context) {
 
     fun paired(node: PairedNode) {
         unkeep()
+        _scopes.value = null
         prefs.edit().putString("paired-node", node.json().text()).apply()
         _paired.value = node
         connect()
@@ -424,6 +434,7 @@ class AppModel(context: Context) {
         _prices.value = null
         _fleet.value = null
         _needsYou.value = 0
+        _scopes.value = null
         // (What each route last answered is the forgotten node's: none of it is drawn for the next.)
         answers.clear()
         session = null

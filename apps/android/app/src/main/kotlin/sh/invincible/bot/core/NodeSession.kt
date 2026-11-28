@@ -40,6 +40,8 @@ class NodeSession(
     private val check: NodeProof.Checker = NodeProof.strict,
     /** The node refused this phone's whoami (a 401 or 403): said ([refusal]'s other half), though everything stays held. */
     private val trouble: (NodeError) -> Unit = {},
+    /** What this device may do, as whoami says it once its proof holds (its scopes); an older node's says none. */
+    private val scoped: (List<String>) -> Unit = {},
 ) {
     /** One whoami at a time: whoever asks meanwhile waits for its judgement. */
     private val asking = Mutex()
@@ -181,6 +183,8 @@ class NodeSession(
         lastHeld = true
         pin.open()
         named(who["primaryName"].string)
+        // (Only where whoami says them: a node that says none leaves what this device may do unknown, never nothing.)
+        (who["scopes"] as? Json.Arr)?.let { scopes -> scoped(scopes.items.mapNotNull { it.string }) }
         return true
     }
 

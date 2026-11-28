@@ -134,7 +134,7 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
                 androidx.compose.material3.DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
                     androidx.compose.material3.DropdownMenuItem(text = { Text("New chat") }, enabled = !live, onClick = { options = false; chat.fresh() })
                     androidx.compose.material3.DropdownMenuItem(text = { Text("All chats") }, onClick = { options = false; listing = true })
-                    if (computer != null) {
+                    if (computer != null && app.can("sandbox")) {
                         androidx.compose.material3.DropdownMenuItem(text = { Text("Its screen") }, onClick = { options = false; watching = true })
                         androidx.compose.material3.DropdownMenuItem(text = { Text("Its terminal") }, onClick = { options = false; inTerminal = true })
                     }

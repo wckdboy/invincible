@@ -27,13 +27,14 @@ class NodeSessionTest {
     private val check = NodeProof.Checker { node, challenge, proof -> proof == "signed:$node:$challenge" }
 
     /** What a node at the address answers whoami with: its id, a proof (or none), and its primary's name. */
-    private fun answer(node: String, challenge: String, proof: Json? = Json.Str("signed:$node:$challenge"), name: String = "Keep"): Json =
-        Json.Obj(linkedMapOf<String, Json>("node" to Json.Str(node), "primaryName" to Json.Str(name)).also { if (proof != null) it["proof"] = proof })
+    private fun answer(node: String, challenge: String, proof: Json? = Json.Str("signed:$node:$challenge"), name: String = "Keep", scopes: List<String> = listOf("chat", "mind:read")): Json =
+        Json.Obj(linkedMapOf<String, Json>("node" to Json.Str(node), "primaryName" to Json.Str(name), "scopes" to Json.arr(scopes)).also { if (proof != null) it["proof"] = proof })
 
     private class Seen {
         var asked = 0
         val kept = mutableListOf<String>()
         val names = mutableListOf<String?>()
+        val scopes = mutableListOf<List<String>>()
         val refusals = mutableListOf<NodeError>()
         var reopened = 0
     }
@@ -51,6 +52,7 @@ class NodeSessionTest {
         keep = { seen.kept += it },
         named = { seen.names += it },
         refused = { seen.refusals += it },
+        scoped = { seen.scopes += it },
         now = now,
         judging = judging,
         reopen = { seen.reopened++ },
@@ -156,6 +158,16 @@ class NodeSessionTest {
         val seen2 = Seen()
         assertTrue(session(pin2, seen2) { challenge -> answer(a, challenge, name = "Keep") }.prove())
         assertEquals(listOf<String?>("Keep"), seen2.names)
+    }
+
+    @Test fun aProofThatHoldsSaysWhatThisDeviceMayDoAndARefusedOneNothing() = runBlocking {
+        // (Its scopes, as whoami says them: what Settings and the menus offer; the iPhone's Session.can.)
+        val seen = Seen()
+        assertTrue(session(NodePin(a, proofFirst = true), seen) { challenge -> answer(a, challenge, scopes = listOf("chat", "sandbox")) }.prove())
+        assertEquals(listOf(listOf("chat", "sandbox")), seen.scopes)
+        val refused = Seen()
+        assertFalse(session(NodePin(a, proofFirst = true), refused) { challenge -> answer(b, challenge) }.prove())
+        assertEquals(emptyList<List<String>>(), refused.scopes)
     }
 
     // ---- L6, rule 4: after the cutoff an unpinned pairing proves first; before it, as today ----
