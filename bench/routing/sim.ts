@@ -1,4 +1,4 @@
-import { type Agent, costOf, type ExecResult, newNodeIdentity, type Prices, type TeamTask } from "../../packages/core/src/index.ts";
+import { type Agent, costOf, type ExecResult, newNodeIdentity, type Prices, type TeamTask, type UsageLine } from "../../packages/core/src/index.ts";
 import { foundFleet, LedgerStore, Vault } from "../../packages/ledger/src/index.ts";
 import { type TeamRunContext, teamRuntime, type TeamRuntimeDeps } from "../../packages/agents/src/index.ts";
 import { intBelow, rng, subSeed } from "../lib.ts";
@@ -21,7 +21,7 @@ import { intBelow, rng, subSeed } from "../lib.ts";
  *
  * Every task has the primary's own budget ($3), so work that goes round is ended when it is spent, as it is on a node.
  * Prices, speeds and capabilities are the stand-ins' own (TIERS), never a vendor's: the lead costs ten times the
- * worker's price and is slower. Time is virtual: each call and command counted at its stand-in seconds.
+ * worker's price and is slower. Each caches a prompt's unchanged beginning as providers do (CACHE_FROM). Time is virtual: each call and command counted at its stand-in seconds.
  */
 
 export type Kind = "gate" | "review" | "stall";
@@ -37,12 +37,30 @@ export interface SimTask {
   fix?: boolean;
 }
 
-/** The stand-ins: what each can do, what it costs (stand-in $ per million tokens) and how long a call takes. */
+/**
+ * The stand-ins: what each can do, what it costs (stand-in $ per million tokens; a prompt's cached beginning at a tenth of
+ * its input's, CACHE_FROM) and how long a call takes.
+ */
 export const TIERS = {
-  worker: { capability: 2, price: { input: 3, output: 12 }, callSeconds: 6 },
-  lead: { capability: 3, price: { input: 30, output: 120 }, callSeconds: 20 },
-  judge: { capability: 0, price: { input: 10, output: 40 }, callSeconds: 15 },
+  worker: { capability: 2, price: { input: 3, output: 12, cached: 0.3 }, callSeconds: 6 },
+  lead: { capability: 3, price: { input: 30, output: 120, cached: 3 }, callSeconds: 20 },
+  judge: { capability: 0, price: { input: 10, output: 40, cached: 1 }, callSeconds: 15 },
 } as const;
+
+/**
+ * A stand-in caches as a provider does: a prompt's beginning that is the same as its last prompt's (in the same task) is
+ * read from its cache, once there are this many tokens of it (Anthropic's and OpenAI's least), and is billed at the
+ * cached price. So a conversation that only grows at its end costs what is new in it, as on a node (run.ts compact).
+ */
+export const CACHE_FROM = 1024;
+
+/** How many characters two prompts begin with alike. */
+const samePrefix = (a: string, b: string): number => {
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a.charCodeAt(i) === b.charCodeAt(i)) i++;
+  return i;
+};
 export type Tier = keyof typeof TIERS;
 
 /** Seconds a command takes in the stand-in VM, and a gate's run (a test suite). */
@@ -109,6 +127,8 @@ export interface TaskResult {
   movedOffPins: number;
   /** Model calls, by tier. */
   calls: Record<Tier, number>;
+  /** Tokens by tier, as its record says them: the prompts' (`input`, of them `cached`: read from a cache) and the answers'. */
+  tokens: Record<Tier, { input: number; cached: number; output: number }>;
   /** Whose models its work began on, as its record kept it (absent: not kept, its work held to models). */
   began?: "engineer" | "planner";
   /** Its kind as its record kept it (core's routing.ts), and why it began where it did. */
@@ -130,6 +150,19 @@ const text = (content: unknown): string =>
 
 /** A stand-in pull request whose checks failed: what makes a task a fix (its agent has no repository here, so only its kind). */
 const SIM_FIX = { connector: "sim", owner: "sim", repo: "sim", branch: "sim-fix", pr: 7, head: "a".repeat(40) } as const;
+
+/** A record's tokens by stand-in tier (its lines are by role and model; a tier's model is `sim/<tier>`). */
+const tokensOf = (spent: readonly UsageLine[]): TaskResult["tokens"] => {
+  const out = { worker: { input: 0, cached: 0, output: 0 }, lead: { input: 0, cached: 0, output: 0 }, judge: { input: 0, cached: 0, output: 0 } };
+  for (const line of spent) {
+    const tier = line.model.replace(/^sim\//, "") as Tier;
+    if (!(tier in out)) continue;
+    out[tier].input += line.input;
+    out[tier].cached += line.cached;
+    out[tier].output += line.output;
+  }
+  return out;
+};
 
 const fenced = (command: string) => `Next.\n\`\`\`sh\n${command}\n\`\`\``;
 
@@ -166,6 +199,8 @@ export async function runPolicy(policy: Policy, tasks: readonly SimTask[], optio
     let task: SimTask = tasks[0]!;
     let state = { solved: false, touched: false, changedSinceAudit: false, commands: 0, gates: 0 };
     let calls: Record<Tier, number> = { worker: 0, lead: 0, judge: 0 };
+    /** Each tier's last prompt in this task: what its cache holds. */
+    let lastPrompt = new Map<Tier, string>();
     let movedOffPins = 0;
 
     /** A stand-in model's answer to one call: from the task's truth and what it has said in this conversation. */
@@ -201,7 +236,12 @@ export async function runPolicy(policy: Policy, tasks: readonly SimTask[], optio
         if (!(tier in TIERS)) throw new Error(`no stand-in for ${body.model}`);
         calls[tier] += 1;
         const reply = answer(tier, body.messages);
-        const usage = { prompt_tokens: Math.ceil(body.messages.reduce((sum, m) => sum + text(m.content).length, 0) / 4), completion_tokens: Math.ceil(reply.length / 4) };
+        const prompt = body.messages.map((m) => text(m.content)).join("");
+        const promptTokens = Math.ceil(prompt.length / 4);
+        // (Its beginning as the tier's last prompt in this task had it: read from the cache, past CACHE_FROM tokens.)
+        const alike = Math.floor(samePrefix(prompt, lastPrompt.get(tier) ?? "") / 4);
+        lastPrompt.set(tier, prompt);
+        const usage = { prompt_tokens: promptTokens, completion_tokens: Math.ceil(reply.length / 4), prompt_tokens_details: { cached_tokens: alike >= CACHE_FROM ? Math.min(alike, promptTokens) : 0 } };
         return new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: reply } }] })}\n\ndata: ${JSON.stringify({ choices: [], usage })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
       }) as typeof fetch,
     };
@@ -246,6 +286,7 @@ export async function runPolicy(policy: Policy, tasks: readonly SimTask[], optio
       agent = agentOf(each.agent ?? AGENT.id);
       state = { solved: false, touched: false, changedSinceAudit: false, commands: 0, gates: 0 };
       calls = { worker: 0, lead: 0, judge: 0 };
+      lastPrompt = new Map();
       movedOffPins = 0;
       const trail: string[] = [];
       const given: TeamTask = { id: each.id, room: "work", assignee: agent.id, title: `A ${each.kind} task at level ${each.level}`, goal: "Fix the total of the new orders, and verify it.", dependsOn: [], gates: ["bun test required-check"], budgetUsd: BUDGET_USD, status: "running", verified: false, progress: "", output: "", error: null, chainId: `chain-${each.id}`, createdAt: 1, updatedAt: 1, ...(each.fix ? { fix: SIM_FIX } : {}) };
@@ -261,7 +302,7 @@ export async function runPolicy(policy: Policy, tasks: readonly SimTask[], optio
       const outcome = await runtime.executeTask(agent, given, context);
       const usd = costOf(outcome.record.spent, PRICES).usd;
       const seconds = (Object.keys(TIERS) as Tier[]).reduce((sum, tier) => sum + calls[tier] * TIERS[tier].callSeconds, 0) + state.commands * COMMAND_SECONDS + state.gates * GATE_SECONDS;
-      results.push({ task: each, verified: outcome.verified, usd, minutes: seconds / 60, escalations: trail.filter((line) => line.startsWith("Escalated ·")).map((line) => line.split("\n")[0]!), movedOffPins, calls: { ...calls }, ...(outcome.record.routing ? { began: outcome.record.routing.began, routed: { kind: outcome.record.routing.kind, because: outcome.record.routing.because } } : {}) });
+      results.push({ task: each, verified: outcome.verified, usd, minutes: seconds / 60, escalations: trail.filter((line) => line.startsWith("Escalated ·")).map((line) => line.split("\n")[0]!), movedOffPins, calls: { ...calls }, tokens: tokensOf(outcome.record.spent), ...(outcome.record.routing ? { began: outcome.record.routing.began, routed: { kind: outcome.record.routing.kind, because: outcome.record.routing.because } } : {}) });
       history.set(agent.id, [{ ...given, status: outcome.verified ? "done" : "failed", verified: outcome.verified, record: outcome.record }, ...(history.get(agent.id) ?? [])]);
     }
     const verified = results.filter((r) => r.verified).length;

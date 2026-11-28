@@ -70,6 +70,10 @@ each task's hidden truth:
   times the worker's price and slower. Nothing does a 4: that task needs you, whoever is asked. A judge on the reviewer's
   role knows the truth: it passes only done work, and an audit steers only work that changed nothing since the last
   one. So what is measured is the routing, never how well a reviewer reads evidence (the reviewer evals do that).
+- **Their caches.** Each reads a prompt's unchanged beginning from its cache, as providers do: against its last prompt
+  in the same task, from 1,024 tokens, at a tenth of its input price (`CACHE_FROM`). The run's compaction keeps the
+  beginning unchanged between batches for that reason. The suite has done this since 28 November 2026; the tables below,
+  up to the memory's, were measured before it, with every prompt priced in full.
 - **Three ways to route the same tasks:**
   - `routed`, as a node does: the ladder may move the work up;
   - `pinned`, the agent pinned to the cheap model, whose work stays there (the all-cheap bound);
@@ -155,6 +159,20 @@ the next tries the worker (`routing.memory.on.probes`). Agent by agent, in stand
 
 Run again, every task begins where it did, for the same reason, and ends the same (`routing.memory.replay.differs`,
 held at 0).
+
+**With the stand-ins' caches** (28 November 2026, the same tasks and seed; per verified task, then as before):
+
+| Measured | $ | Minutes |
+|---|---|---|
+| routed | 0.544 (0.622) | 4.96 (3.27) |
+| all on the lead | 0.548 (0.693) | 5.39 (3.56) |
+| all on the worker | 1.43 (1.46) | 19.06 (7.58) |
+| the memory off / on | 0.116 / 0.087 (0.183 / 0.133) | 2.11 / 1.83 (the same) |
+
+What is verified and what moves up are as they were. Every $ is lower, the lead's most: what it reads again on each
+turn now costs a tenth. Minutes rose where work that can't be done runs until its $3 budget ends it, because cached,
+the budget lasts more calls. On all on the worker, that is every task it can't do. So routed is no longer cheaper than
+all on the lead by much ($0.544 against $0.548), and it is faster (4.96 against 5.39 minutes).
 
 **A plan's pace** (`bench/routing/pace.ts`), in virtual time:
 - Eight agents call one plan for ten minutes, each call followed by a command of its own.
