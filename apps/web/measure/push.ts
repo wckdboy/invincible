@@ -25,6 +25,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { routes } from "../../../packages/core/src/index.ts";
+import { NoScreenshot, screenshot } from "./screenshot.ts";
 
 const REPO = join(import.meta.dir, "../../..");
 const flag = (name: string): string | undefined => {
@@ -151,10 +152,16 @@ try {
   };
   type Shown = { title: string; body: string; tag: string; data: any; silent: boolean | null };
   const shown = () => evaluate<Shown[]>(`navigator.serviceWorker.getRegistration().then((r) => r ? r.getNotifications() : []).then((ns) => ns.map((n) => ({ title: n.title, body: n.body, tag: n.tag, data: n.data, silent: n.silent })))`);
+  // (One that never comes, asked for twice, is said and gone on without: the push is what is checked here.)
   const shot = async (name: string) => {
     if (!SHOTS) return;
     mkdirSync(SHOTS, { recursive: true });
-    writeFileSync(join(SHOTS, `push-${name}.png`), Buffer.from((await send("Page.captureScreenshot", { format: "png" }, page)).data, "base64"));
+    const data = await screenshot(() => send("Page.captureScreenshot", { format: "png" }, page), `push-${name}`).catch((error: unknown) => {
+      if (!(error instanceof NoScreenshot)) throw error;
+      console.error(error.message);
+      return null;
+    });
+    if (data !== null) writeFileSync(join(SHOTS, `push-${name}.png`), Buffer.from(data, "base64"));
   };
 
   // ---------- 1. pair, and turn notifications on from Settings ----------

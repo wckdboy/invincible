@@ -20,7 +20,9 @@
  *                   place the app has (its lib/nav.ts), each as far down as it goes too ("-full"), the sheets and
  *                   forms its places open, and the gallery of its components (apps/web/design/gallery.ts, where the
  *                   checkout has one). The same addresses on any checkout, so an older app is shown at the same places
- *                   (a mode it doesn't have is said, and not shot).
+ *                   (a mode it doesn't have is said, and not shot). A screenshot that doesn't come in 30 s is asked
+ *                   for once more, and one that doesn't come again is said and not taken (screenshot.ts), and counted
+ *                   at the end.
  *     --widths 390,1280,1600  the screenshots' widths instead (under 640 is a phone held upright)
  *     --gallery <dir> only the gallery's screenshots: no node is started
  *     --shifts      also what moves on screen once it is there: each place (and the primary's, an agent's and a room's
@@ -71,6 +73,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { freePort } from "../../../packages/node/test/ports.ts";
+import { NoScreenshot, SCREENSHOT_MS, screenshot } from "./screenshot.ts";
 
 const flag = (name: string): string | undefined => {
   const at = process.argv.indexOf(`--${name}`);
@@ -363,8 +366,10 @@ async function shootGallery(browser: Chrome, page: string, dir: string, repo: st
         }
         await sleep(600);
         const { cssContentSize } = await browser.send("Page.getLayoutMetrics", {}, page);
-        const { data } = await browser.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width, height: Math.ceil(cssContentSize.height), scale: 1 } }, page);
-        const file = join(dir, `gallery-${width}-${theme}.png`);
+        const name = `gallery-${width}-${theme}`;
+        const data = await screenshot(() => browser.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width, height: Math.ceil(cssContentSize.height), scale: 1 } }, page), name).catch(notTaken(name));
+        if (data === null) continue;
+        const file = join(dir, `${name}.png`);
         writeFileSync(file, Buffer.from(data, "base64"));
         files.push(file);
       }
@@ -419,6 +424,22 @@ let chrome: Chrome | null = null;
 let daemon: { stop(): Promise<void> } | null = null;
 let model: ReturnType<typeof Bun.serve> | null = null;
 const held: (() => void)[] = [];
+/** The screenshots that never came, asked for twice: each said where it was missed, and all of them at the end. */
+const missed: string[] = [];
+/** A screenshot's failure, where the screenshots go on without it: one that never came is said and counted; anything
+ * else (Chrome's own refusal) is what it was. */
+const notTaken =
+  (name: string) =>
+  (error: unknown): null => {
+    if (!(error instanceof NoScreenshot)) throw error;
+    console.error(error.message);
+    missed.push(name);
+    return null;
+  };
+/** The last word on the screenshots that never came, where any didn't. */
+const sayMissed = (): void => {
+  if (missed.length) console.log(`${missed.length} not taken: no screenshot came in ${SCREENSHOT_MS / 1000} s, twice (${missed.join(", ")}).`);
+};
 async function tidy(): Promise<void> {
   for (const release of held.splice(0)) release();
   await chrome?.close().catch(() => {});
@@ -438,6 +459,7 @@ if (GALLERY) {
     await chrome.send("Page.enable", {}, sessionId);
     const files = await shootGallery(chrome, sessionId, GALLERY, REPO);
     console.log(`${files.length} screenshots of the gallery in ${resolve(GALLERY)}`);
+    sayMissed();
   } finally {
     await tidy();
   }
@@ -932,7 +954,7 @@ try {
   await browser.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false }, page);
   await navigate(`data:text/html;charset=utf-8,${encodeURIComponent(DESKTOP_PAGE)}`);
   await sleep(400);
-  desktopShot = (await browser.send("Page.captureScreenshot", { format: "jpeg", quality: 72 }, page)).data;
+  desktopShot = await screenshot(() => browser.send("Page.captureScreenshot", { format: "jpeg", quality: 72 }, page), "Rio's desktop's stand-in page");
 
   // The real pairing page: the code it shows is compared with the node's before anything is approved.
   const invite = await admin("createInvite", { kind: "client", origin, scopes: core.CLIENT_DEFAULT_SCOPES });
@@ -1287,8 +1309,10 @@ try {
     const shoot = async (name: string, width: number, theme: string, whole = false): Promise<void> => {
       // As far down as it goes: the page's whole height, at one pixel a point (it can be long).
       const { cssContentSize } = whole ? await browser.send("Page.getLayoutMetrics", {}, page) : { cssContentSize: null };
-      const { data } = await browser.send("Page.captureScreenshot", cssContentSize ? { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width, height: Math.min(Math.ceil(cssContentSize.height), 12_000), scale: 0.5 } } : { format: "png" }, page);
-      const file = join(SHOTS, `${name}-${width}-${theme}${whole ? "-full" : ""}.png`);
+      const shot = `${name}-${width}-${theme}${whole ? "-full" : ""}`;
+      const data = await screenshot(() => browser.send("Page.captureScreenshot", cssContentSize ? { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width, height: Math.min(Math.ceil(cssContentSize.height), 12_000), scale: 0.5 } } : { format: "png" }, page), shot).catch(notTaken(shot));
+      if (data === null) return;
+      const file = join(SHOTS, `${shot}.png`);
       writeFileSync(file, Buffer.from(data, "base64"));
       shots.push(file);
     };
@@ -1508,6 +1532,7 @@ try {
   if (shots.length) console.log(`\n${shots.length} screenshots in ${resolve(SHOTS!)}`);
   if (JSON_OUT) console.log(`Everything measured: ${resolve(JSON_OUT)}`);
   }
+  sayMissed();
 } finally {
   await tidy();
 }
