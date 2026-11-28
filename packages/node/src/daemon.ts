@@ -634,7 +634,10 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       await sandbox.reconcile();
       // Keep the images in use, so pruning (Coolify's nightly cleanup) doesn't take them, and at a new release's first
       // start make them again from its contexts: in the background, a minute on, never holding a start or a stop up.
-      if (opts.sandboxNetworks !== false) void imagesAtStart(sandbox, { home: home.dir, release: primaryRevision(), log }).catch((error) => log(`sandbox images: ${(error as Error).message}`));
+      if (opts.sandboxNetworks !== false) {
+        const host = sandbox;
+        void primaryRevision().then((release) => imagesAtStart(host, { home: home.dir, release, log })).catch((error) => log(`sandbox images: ${(error as Error).message}`));
+      }
     } catch (error) {
       log(`sandbox networks unavailable: ${(error as Error).message}`);
       sandbox = null;

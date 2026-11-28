@@ -392,7 +392,7 @@ async function sandboxOf(deps: DoctorDeps, deep: boolean): Promise<DoctorFacts["
   const start = deep && status.docker && status.image && (!wall || wall.on) ? await startSandboxes(host, deps.governor, () => deps.compute.selfCapacity()).catch(() => null) : null;
   // What the node's start made of its own images for the release it runs (sandbox-images.json).
   const record = readImagesRecord(deps.home.dir);
-  const release = primaryRevision();
+  const release = await primaryRevision();
   const images = { refreshed: record.refreshedFor === release, failed: record.tried?.release === release ? record.tried.failed : [] };
   return {
     host: { docker: status.docker, ...(caps?.sandbox?.engine === "container" ? { engine: "container" as const } : {}), image: status.image, networks: status.networks.gateway && status.networks.online, diskLimited, kvm: !!caps?.vm.kvm, microVMs, firewall, ...macFirewall, start, images },

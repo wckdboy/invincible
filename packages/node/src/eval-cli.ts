@@ -160,7 +160,7 @@ export interface EvalRunOptions {
       /** A role's model couldn't answer and another did: what is measured, and paid for, is the one that answered. Once for each. */
       | ({ type: "fallback" } & PassedOver)
       /** How the run will go: evals at once, and why (the slots there are). */
-      | { type: "plan"; parallel: number; effort: EffortLevel | null; why: string }
+      | { type: "plan"; parallel: number; effort: EffortLevel | null; why: string; /** The revision each eval of it is recorded at. */ version: string }
       /** Before the first eval: the budget, and roughly what the run will cost going by past runs of the same problems. */
       | { type: "budget"; budget: EvalBudget; byDefault: boolean; estimate: RunEstimate }
       /** The budget is spent: what was finished, and what wasn't started or was stopped. */
@@ -419,7 +419,7 @@ export interface RunResult {
 /** A run: every problem (repeated), a few at a time, within its budget. */
 export async function runEvals(node: NodeClient, options: EvalRunOptions): Promise<RunResult> {
   const run = options.run ?? freshRunId();
-  const version = primaryRevision();
+  const version = await primaryRevision();
   const jobs = options.problems.flatMap((problem) =>
     Array.from({ length: options.repeat }, (_, i) => ({ problem, seed: options.seed === undefined ? freshSeed() : (options.seed + i) >>> 0 })),
   );
@@ -443,7 +443,7 @@ export async function runEvals(node: NodeClient, options: EvalRunOptions): Promi
   const tight = (limit: number | undefined, expected: number | null): boolean => limit !== undefined && (expected === null || expected * 2 > limit);
   const guessing = !byDefault && estimate.known < estimate.of && (tight(budget.usd, estimate.usd) || tight(budget.tokens, estimate.tokens));
   const plan = guessing && asked.parallel > 1 ? { parallel: 1, why: "some have never been tried, and the budget is close to what they're expected to cost: a stop at it cuts one short, not all" } : asked;
-  options.progress?.({ type: "plan", parallel: Math.max(1, Math.min(plan.parallel, jobs.length)), effort: effort ?? null, why: plan.why });
+  options.progress?.({ type: "plan", parallel: Math.max(1, Math.min(plan.parallel, jobs.length)), effort: effort ?? null, why: plan.why, version });
   options.progress?.({ type: "budget", budget, byDefault, estimate });
 
   // The run's settings are on record before its first eval, so its evals can be told apart by them.
@@ -682,7 +682,7 @@ export async function evalRunFromCli(node: NodeClient, options: Omit<EvalRunOpti
           ].filter(Boolean);
           console.log(
             dim(
-              `[${total} eval(s) from the ${options.suite} suite, ${event.parallel} at a time (${event.why})${event.effort ? `, effort ${event.effort}${event.effort > 1 ? `: ${event.effort} attempts each, ${total * (event.effort - 1)} extra attempts in all` : ""}` : ""}, ${where} · network ${options.network} · revision ${primaryRevision()}]` +
+              `[${total} eval(s) from the ${options.suite} suite, ${event.parallel} at a time (${event.why})${event.effort ? `, effort ${event.effort}${event.effort > 1 ? `: ${event.effort} attempts each, ${total * (event.effort - 1)} extra attempts in all` : ""}` : ""}, ${where} · network ${options.network} · revision ${event.version}]` +
                 (held.length ? `\n[${held.join(" · ")}]` : ""),
             ),
           );

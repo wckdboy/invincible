@@ -3665,7 +3665,7 @@ export function createApp(ctx: AppContext) {
       // Which models it trusts with what is yours to have measured; it costs your models' allowance.
       if (!isOwner(p)) throw new HttpError(403, "only you have a model checked");
       return longRunning((async () => {
-        const check = await checkModel(brainFor(p), input.model, { version: primaryRevision(), ...(input.parts ? { parts: input.parts } : {}) });
+        const check = await checkModel(brainFor(p), input.model, { version: await primaryRevision(), ...(input.parts ? { parts: input.parts } : {}) });
         ctx.store.emit(ctx.identity, "model.checked", { model: input.model, check: JSON.parse(JSON.stringify(check)) });
         return { model: input.model, check };
       })());

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { type ChatStreamEvent, type RouteName, routes, spendTotal, EvalRecord, EvalRunId, type EvalRunsView, type EvalView, type Usage, VARIANTS } from "@invincible/core";
 import { ENGINEERING_SUITE, pose, type EvalProblem } from "@invincible/models";
 import { DEFAULT_TOKENS_PER_ATTEMPT, describeCost, describeDone, describeFallback, describeEval, estimateLabel, estimateRun, freshRunId, runEvals, type EvalUnit } from "../src/eval-cli.ts";
@@ -200,6 +200,19 @@ describe("a run's budget", () => {
     const b = await runEvals(blind.node, { suite: "engineering", problems: [cantilever], repeat: 2, parallel: 1, network: "gateway", seed: 11, budget: { usd: 5 }, prices: { "fake/planner": { input: 1, output: 1 } } });
     expect(b.evals).toHaveLength(0);
     expect(b.budgetEnded!.why).toMatch(/needs a price for every model that answers, and there's none for fake\/engineer/);
+  });
+
+  test("a run holds no process waiting on a child: it spawns nothing synchronously (the check's hang of 28 November 2026)", async () => {
+    // (Its revision was git's describe in Bun.spawnSync, which once lost its child's end and spun a worker for 58 minutes.)
+    const sync = spyOn(Bun, "spawnSync");
+    try {
+      const { node } = fakeNode();
+      const { evals } = await runEvals(node, { suite: "engineering", problems: [cantilever], repeat: 1, parallel: 1, network: "gateway", seed: 11 });
+      expect(evals).toHaveLength(1);
+      expect(sync).not.toHaveBeenCalled();
+    } finally {
+      sync.mockRestore();
+    }
   });
 
   test("two runs begun in the same millisecond are two runs (seen on Ultra: a sweep's second run took the first's id)", () => {
