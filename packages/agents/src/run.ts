@@ -40,8 +40,14 @@ export const escalatedWhy = (event: { why: EscalationWhy }): string =>
  * typecheck) changes nothing; an edit, or a script that could have, starts the count again. The first real outcome's
  * agent read two files in 44 of its first 82 commands, writing nothing, while its audits said it was getting closer
  * (19 November 2026).
+ *
+ * Eight, from six real trails, replayed command by command through this count (28 November 2026; docs/BENCHMARKS.md,
+ * routing):
+ * - the three tasks that went round reached 10, 9 and 21 re-reads in a row; at 8 all three move up, at commands 33, 16
+ *   and 24, from 1 to 6 minutes in; at 10 the second is missed, and at 15 two of them are;
+ * - the three that were verified (52, 40 and 54 commands) never read again what they had read with nothing changed.
  */
-export const REREADS = 10;
+export const REREADS = 8;
 
 export interface RunDeps {
   /**

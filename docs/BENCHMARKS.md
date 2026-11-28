@@ -102,8 +102,27 @@ steered it.
 
 Seen in its commands instead, the work moves after `REREADS` reads of files it had read, nothing changed since: about a
 third of those turns. Routed is then cheaper and faster per verified task than all on the lead, with the same tasks
-verified. The stand-in that goes round reads its three files in turn, so it is caught as soon as the count allows. How
-soon a real agent going round is caught is what its threshold is checked against: the first real outcome's trail.
+verified. The stand-in that goes round reads its three files in turn, so it is caught as soon as the count allows.
+
+**The threshold, against real work.** Six real trails were replayed command by command through the same count (shell
+paths' `changesOf` and `contentsOf`), on 28 November 2026:
+- the first real outcome's four tasks on the old system (19 November): three went round, one was verified;
+- the only two Invincible agents' tasks finished on Ultra, both verified.
+
+A command the count can't vouch for (`uname`, `id`, a test run by an absolute path) is taken as a change and starts it
+again: the count can only be late, never early.
+
+| Task | How it ended | Most re-reads, nothing changed | At 8 | At 10 | At 15 |
+|---|---|---|---|---|---|
+| the first try (113 commands) | failed after 69 minutes | 10 | command 33, 6 min in | command 36 | not reached |
+| the second (40) | stopped by its audit after 5 minutes | 9 | command 16, 1 min in | not reached | not reached |
+| the third (76) | failed after 36 minutes | 21 | command 24, 4 min in | command 26 | command 33 |
+| the verified one (52) | done | 0 | not reached | not reached | not reached |
+| Invincible's two (40, 54) | done | 0 | not reached | not reached | not reached |
+
+`REREADS` is 8: every task that went round moves up within six minutes, and none of the verified ones does. Six trails
+are a thin base, and the verified ones re-read nothing, so how close right work comes to the threshold isn't known yet.
+Each new finished task's trail is more evidence.
 
 **The memory, by kind of task.** Three agents' tasks run in turn, 12 each, routed as a node does:
 - `ada`'s are all ones its worker can do;
