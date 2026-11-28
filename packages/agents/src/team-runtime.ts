@@ -1196,7 +1196,9 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           }
           if (!ready.ready) throw broken(probe) && !onSeat ? notReady(probe) : new Error(`${driver.title} can't work in this VM yet: ${ready.reason}`);
           if (onSeat) sessionAt = `${sessionFile}.${onSeat.seat.id}`;
-          const saved = (await exec(`cat ${quote(sessionAt)} 2>/dev/null || true`, 10)).stdout.trim();
+          // (None is read for a tool whose every run is a new one, Antigravity's: it saves none, and one there is a run's
+          // own, which would have its work told a revision's words without its briefing. The fourth re-check's I1b.)
+          const saved = driver.capabilities.steer === "anew" ? "" : (await exec(`cat ${quote(sessionAt)} 2>/dev/null || true`, 10)).stdout.trim();
           coding = { driver, models: ready.models, workdir: root, ...(/^[A-Za-z0-9_.:-]{1,160}$/.test(saved) ? { session: saved } : {}) };
           // The account its work begins on, kept with the task: taken up again, it goes on on that one alone.
           const began: TaskAccount | null = onSeat ? { seat: onSeat.seat.id, kind: onSeat.seat.kind } : kind && ready.models[0] === OWN_SIGN_IN ? { seat: null, kind } : null;

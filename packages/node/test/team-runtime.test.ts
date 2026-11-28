@@ -1440,6 +1440,30 @@ test("harness sessions stay outside the Git worktree and are scoped to the selec
   expect(saved).toContain("mv ");
 });
 
+// The fourth re-check of 28 November 2026, I1b: a run can write the task's saved-session file in /work, and the node read
+// it back as the task's work began, so the work had a session and a revision was told the reviewer's words without the
+// task's briefing. Each Antigravity run is a new one: no saved session is read for it (as none is read from its lines).
+test("no saved session is asked for an Antigravity task: a file a run left where the node keeps one is never read", async () => {
+  const commands: string[] = [];
+  const gemini = { ...member, harness: "antigravity" as const, repository: "https://github.com/example/app" };
+  const f = fixture([say("1. Build and verify."), say("PASS\nThe gate passed.")], {
+    agent: () => gemini,
+    exec: async (_m, command) => {
+      commands.push(command);
+      if (command.includes("from_commit")) return result({ stdout: `${BASE} fetched\n` });
+      if (command.includes("--check")) return result({ stdout: '{"type": "status", "signedIn": true, "version": "1.5.18"}\n' });
+      if (command.includes('"next": nxt')) return result({ stdout: JSON.stringify({ alive: false, exit: 0, next: 42, lines: [JSON.stringify({ type: "text", text: "Built and checked." })] }) });
+      if (command.includes("cat ") && command.includes("/work/.agent/sessions/")) return result({ stdout: "planted-by-a-run" });
+      return result({ stdout: "0" });
+    },
+    prepare: async () => {},
+  });
+  expect((await f.runtime.executeTask(gemini, task, f.context)).verified).toBe(true);
+  expect(commands.filter((c) => c.includes("/work/.agent/sessions/"))).toEqual([]);
+  // (Its run was launched with no session named.)
+  expect(commands.some((c) => c.includes("planted-by-a-run"))).toBe(false);
+});
+
 test("an agent asks for another through its own tool: the broker decides who made it, and the model is told only what it needs", async () => {
   const asked: unknown[] = [];
   const f = fixture([

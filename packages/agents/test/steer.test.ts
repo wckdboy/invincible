@@ -209,7 +209,7 @@ describe("what is said of a steer", () => {
  * `during(i)` runs as that look is made (a steer said then). Its last look finds it ended of itself. Each look moves the
  * run's clock `minutes`.
  */
-function harness(looks: object[][], reviewer: string[], during: (look: number, held: ReturnType<typeof inbox>) => void = () => {}, minutes = 1, options: { audit?: boolean; repeat?: boolean; cut?: number; capabilities?: Partial<AgentDriver["capabilities"]>; judged?: (held: ReturnType<typeof inbox>) => void } = {}) {
+function harness(looks: object[][], reviewer: string[], during: (look: number, held: ReturnType<typeof inbox>) => void = () => {}, minutes = 1, options: { audit?: boolean; repeat?: boolean; cut?: number; capabilities?: Partial<AgentDriver["capabilities"]>; judged?: (held: ReturnType<typeof inbox>) => void; session?: string } = {}) {
   const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false, ...options.capabilities }, check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
   const queues: Record<RunRole, string[]> = { planner: ["1. Write the parser.\nDone when: its test passes."], engineer: [], reviewer: [...reviewer] };
   const events: RunEvent[] = [];
@@ -220,7 +220,7 @@ function harness(looks: object[][], reviewer: string[], during: (look: number, h
   let stopped = 0;
   let now = 1_000_000;
   const run = runLoop(
-    { goal: "write the parser", environment: "a test sandbox", ...(options.audit ? { audit: true } : {}), agent: { driver, models: [{ provider: "p", model: "m" }], workdir: "/work" } },
+    { goal: "write the parser", environment: "a test sandbox", ...(options.audit ? { audit: true } : {}), agent: { driver, models: [{ provider: "p", model: "m" }], workdir: "/work", ...(options.session ? { session: options.session } : {}) } },
     {
       ask: async (role, messages) => {
         if (role === "reviewer") asked.push(messages.at(-1)!.content);
@@ -397,6 +397,17 @@ describe("steers that must still reach the work (the independent review, 27 Nove
     expect(q.prompts[1]).toContain("what it did is in the workspace as it left it");
     expect(q.prompts[1]).toContain("The owner says, while you work: Use the new schema.");
     expect(q.asked[0]).toContain("1. The owner, at step 2: Use the new schema.");
+  });
+
+  // The fourth re-check of 28 November 2026, I1b: a session the work is given as it begins again (team-runtime reads the
+  // task's saved one, a file a run can write) made it one with a session, so its revision was told the reviewer's words
+  // without its briefing. One that starts each run anew takes none, whatever it is given.
+  test("one that starts each run anew, given a session as it begins, takes none: its revision is told its briefing", async () => {
+    const q = harness([[tool(1), { type: "text", text: "Written." }]], ["REVISE\nThe parser has no test.", "PASS\nNow it has one."], () => {}, 1, { repeat: true, capabilities: ANEW, session: "planted-by-a-run" });
+    expect((await q.run).status).toBe("done");
+    expect(q.prompts).toHaveLength(2);
+    expect(q.prompts[1]).toStartWith(q.prompts[0]!);
+    expect(q.prompts[1]).toContain("The parser has no test.");
   });
 
   test("one that starts each run anew, steered as it is judged, is told the steer in its next run with the reviewer's words, as N2 made it", async () => {

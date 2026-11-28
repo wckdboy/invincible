@@ -1855,7 +1855,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     /** What its first run was told: a run that keeps no session starts again from it. */
     const briefing = agentBriefing(o, plan, gates, before, [...locked.keys()]);
     let prompt = briefing;
-    let session: string | null = agent.session ?? null;
+    // (A tool whose every run is a new one, Antigravity's, takes no session it is given: the work began again with one a run
+    // could have left where the node keeps it would be told its words without its briefing. The fourth re-check's I1b.)
+    let session: string | null = agent.driver.capabilities.steer === "anew" ? null : (agent.session ?? null);
     let current = 0;
     // How much of the trail the reviewer has judged, and what it said: work it sent back is judged again only once
     // there is more of it (a second look at the same work could pass what was just sent back).
