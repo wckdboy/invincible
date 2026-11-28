@@ -1045,6 +1045,14 @@ class Halted extends Error {
 class Unread extends Error {}
 
 /**
+ * A check of the run's own on what the gates judge (the digests of the test files they name) couldn't be made where they
+ * run (another node's task's: its gates' copy or VM, or the check's own command): never read as "no change" (the eleventh
+ * fabric review's R11-2). Before any work nothing is locked without it, so the run ends; on a submission the work goes
+ * back; a contract's test it can't lock isn't kept.
+ */
+export class CheckRefused extends Error {}
+
+/**
  * With tools: the reply ran out of its model's room for output while it called one (a file written whole, past the
  * provider's limit), so nothing of it can be run or kept. Asking again would run out the same way: the engineer is told.
  */
@@ -1604,7 +1612,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       let now: Map<string, string> | null = null;
       try {
         now = digestsOf((await deps.exec(digestCommand([...locked.keys()]), 30, "check")).stdout);
-      } catch {
+      } catch (error) {
+        // (A check that can't be made where the gates run sends the work back: what it would have found is unknown.)
+        if (error instanceof CheckRefused) return { verdict: "revise", notes: `The check that the test${locked.size === 1 ? " a gate runs is" : "s the gates run are"} as they were couldn't be made (${error.message}), so the gates weren't run. Submit again.`, by: "gates" };
         /* the sandbox can't be asked: the gates, which run there too, decide */
       }
       const changed = now ? [...locked].filter(([path, hash]) => now.get(path) !== hash).map(([path]) => path) : [];
@@ -2049,7 +2059,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     if (named.length) {
       try {
         locked = digestsOf((await deps.exec(digestCommand(named), 30, "check")).stdout);
-      } catch {
+      } catch (error) {
+        // (Where the gates run elsewhere, a check that can't be made there would leave the work free to change them.)
+        if (error instanceof CheckRefused) throw new CheckRefused(`the tests the gates run couldn't be locked before the work: ${error.message}`);
         /* the sandbox can't be asked: nothing is locked, and the gates decide as ever */
       }
     }
@@ -2070,11 +2082,20 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       // (What it sends to a device, /dev/null and the like, is no file of its.)
       const writes = block ? [...new Set(writesOf(block))].filter((path) => !/^\/(dev|proc|sys)\//.test(path)) : [];
       const none = (why: string) => emit({ type: "contract", kept: false, why });
-      const digests = async (paths: readonly string[]): Promise<Map<string, string>> => {
+      const digests = async (paths: readonly string[], what?: "check"): Promise<Map<string, string>> => {
         try {
-          return digestsOf((await deps.exec(digestCommand(paths), 30)).stdout);
-        } catch {
+          return digestsOf((await deps.exec(digestCommand(paths), 30, what)).stdout);
+        } catch (error) {
+          if (error instanceof CheckRefused) throw error;
           return new Map();
+        }
+      };
+      /** Its test's files locked, as they are where the gates run (another node's task's: its gates' copy), or why they can't be. */
+      const lockContract = async (files: readonly string[]): Promise<Map<string, string> | { why: string }> => {
+        try {
+          return await digests(files, "check");
+        } catch (error) {
+          return { why: `its test couldn't be locked: ${(error as Error).message}` };
         }
       };
       if (/^\W*NONE\b/i.test(text)) none("the planner found no test that could show it");
@@ -2104,6 +2125,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         // (Its gate runs on the workspace as it wrote it: where the gates run on a copy, one made now.)
         if (wrote?.exitCode === 0) await deps.beforeGates?.();
         const now = wrote?.exitCode === 0 ? (await runGate(gate, rules)).result : null;
+        // The files it wrote are its tests: locked as a gate's are, so the work can't change what it is judged by.
+        const files = [...new Set([...writes, ...testFilesOf(command)])];
+        const lock = now && now.exitCode !== 0 && !couldNotRun(now) ? await lockContract(files) : null;
         const why = there.length
           ? `its test would change ${there.join(", ")}, which is there already`
           : found
@@ -2114,7 +2138,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
                 ? "its test passed before any work, so it would show nothing"
                 : couldNotRun(now)
                   ? `its command couldn't run here (exit ${now.exitCode}), so it would show nothing`
-                  : "";
+                  : lock && "why" in lock
+                    ? lock.why
+                    : "";
         if (why) {
           // What it wrote goes again (none of it was there before), so the work starts as it would have without it.
           if (wrote) {
@@ -2128,9 +2154,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         } else {
           gates = [...gates, gate];
           before = [...(before ?? []), now!];
-          // The files it wrote are its tests: locked as a gate's are, so the work can't change what it is judged by.
-          const files = [...new Set([...writes, ...testFilesOf(command)])];
-          for (const [path, digest] of await digests(files)) locked.set(path, digest);
+          for (const [path, digest] of lock as Map<string, string>) locked.set(path, digest);
           emit({ type: "contract", kept: true, command, files });
           emit({ type: "gates", gates });
         }
@@ -2685,6 +2709,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     if (error instanceof Stopped) return finish({ status: "stopped", summary: "Stopped at your request." });
     if (error instanceof Halted) return finish({ status: "stopped", summary: haltedSummary(error.trip, error.command) });
     if (error instanceof Unread) return finish({ status: "stopped", summary: `Stopped: your tripwires could not be read (${error.message}), so no command ran unchecked.` });
+    if (error instanceof CheckRefused) return finish({ status: "stopped", summary: `Stopped: ${error.message}, so the work couldn't be held to them.` });
     throw error;
   }
 }

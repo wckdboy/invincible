@@ -19,6 +19,8 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
   let listed = 0;
   for (const id of options.left ?? []) vms.set(id, { createdAt: STARTED - 60_000, run: `handed.task-${id}` });
   const asked: unknown[] = [], ran: { vm: string; cmd: string[]; as?: "gates" }[] = [], removed: string[] = [];
+  /** Each round's VM as it was asked for, and each sweep of one. */
+  const rounds: unknown[] = [], swept: string[] = [];
   /** Each pipe between two VMs, as the host was asked for it: from which VM's command to which. */
   const piped: { from: { id: string; cmd: string[] }; to: { id: string; cmd: string[] }; maxBytes: number }[] = [];
   /** Each step of a removal, in order: a lease ended, a VM removed. */
@@ -40,6 +42,17 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
       const id = `vm-${++made}`;
       vms.set(id, { createdAt: STARTED + made, run: (input as { run: string }).run });
       return { id } as SandboxView;
+    },
+    createGateVm: async (input: unknown, signal?: AbortSignal) => {
+      rounds.push(input);
+      signals.push(signal);
+      const id = `gate-${++made}`;
+      vms.set(id, { createdAt: STARTED + made, run: (input as { run: string }).run });
+      return { id } as SandboxView;
+    },
+    sweepGates: async (vm: string) => {
+      swept.push(vm);
+      return done();
     },
     // (A command that takes `slow` ms, as one in flight does: it returns then, whatever became of its VM meanwhile.)
     exec: async (vm: string, cmd: string[], _timeoutSec?: number, _check?: unknown, as?: "gates") => {
@@ -73,7 +86,7 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
       return { from: done(), to: done(), bytes: 0, cut: false };
     },
   };
-  return { fake, vms, asked, ran, removed, steps, signals, piped, listed: () => listed };
+  return { fake, vms, asked, rounds, swept, ran, removed, steps, signals, piped, listed: () => listed };
 }
 
 const ask = { vm: "agent-vm", task: "task-abcdefghijkl", providers: ["anthropic"], models: ["anthropic/claude-paid"] };
@@ -90,15 +103,54 @@ describe("another node's task's VM, on this node", () => {
     await vm.exec("echo one", 30, new AbortController().signal);
     // (A shell that reads no profile of the task's: its HOME is the task's to write. R8-3.)
     expect(h.ran).toEqual([{ vm: "vm-1", cmd: ["bash", "--noprofile", "--norc", "-c", "echo one"] }]);
-    // Its gates and the node's checks, as their own user, in their own folder, by no profile either.
-    await vm.gates("test -f x", 30, new AbortController().signal);
-    expect(h.ran.at(-1)).toEqual({ vm: "vm-1", cmd: ["bash", "--noprofile", "--norc", "-c", "test -f x"], as: "gates" });
     await vm.release();
     // Its run stopped (the same cleanup as a seat's), then its VM removed; released again, nothing more.
     expect(h.ran.at(-1)!.cmd.slice(0, 4)).toEqual(["bash", "--noprofile", "--norc", "-c"]);
     expect(h.removed).toEqual(["vm-1"]);
     await vm.release();
     expect(h.removed).toEqual(["vm-1"]);
+  });
+
+  test("each round of its gates in a VM of the round's own beside it: given its tree through this host, its gates there as their own user, swept there, and gone with the next round and with the task (R11-1)", async () => {
+    const h = host();
+    const vms = new TaskVms({ host: () => h.fake as never, now: () => STARTED });
+    const work = new AbortController();
+    const vm = await vms.open(ask, work.signal);
+    const live = new AbortController().signal;
+    const first = await vm.round("take-the-tree", "keep-the-tree", 900, live);
+    // (Made for its task, from its VM, beside its agent's: with its work's own signal, as its VM was.)
+    expect(h.rounds).toEqual([{ task: ask.task, of: "vm-1", beside: "agent-vm", run: `handed.${ask.task}`, ttlMinutes: TASK_VM_MINUTES }]);
+    expect(h.signals.at(-1)).toBe(live);
+    // Its tree from the task's VM to the round's, through this host, by no profile on either side.
+    expect(h.piped).toEqual([{ from: { id: "vm-1", cmd: ["bash", "--noprofile", "--norc", "-c", "take-the-tree"] }, to: { id: "gate-2", cmd: ["bash", "--noprofile", "--norc", "-c", "keep-the-tree"] }, maxBytes: Number.POSITIVE_INFINITY }]);
+    expect(first.taken.from.exitCode).toBe(0);
+    // Its gates and the node's checks there, as their own user, in their own folder; its sweep there; none in the task's VM.
+    await first.gates("test -f x", 30, live);
+    expect(h.ran.at(-1)).toEqual({ vm: "gate-2", cmd: ["bash", "--noprofile", "--norc", "-c", "test -f x"], as: "gates" });
+    await first.sweep(live);
+    expect(h.swept).toEqual(["gate-2"]);
+    expect(h.ran.filter((r) => r.as === "gates" && r.vm === "vm-1")).toEqual([]);
+    // The next round's VM takes its place: the first is gone, and what is asked of it is refused.
+    const second = await vm.round("take-the-tree", "keep-the-tree", 900, live);
+    expect(h.removed).toEqual(["gate-2"]);
+    await expect(first.gates("test -f x", 30, live)).rejects.toThrow("its work has stopped");
+    await expect(first.sweep(live)).rejects.toThrow("its work has stopped");
+    await second.sweep(live);
+    expect(h.swept).toEqual(["gate-2", "gate-3"]);
+    // The task's end takes the round's VM with it.
+    await vm.release();
+    expect(h.removed).toEqual(["gate-2", "gate-3", "vm-1"]);
+  });
+
+  test("its brake takes its gates' round's VM at once, with its own", async () => {
+    const h = host();
+    const vms = new TaskVms({ host: () => h.fake as never, now: () => STARTED });
+    const work = new AbortController();
+    const vm = await vms.open(ask, work.signal);
+    await vm.round("take", "keep", 900, new AbortController().signal);
+    work.abort();
+    await Bun.sleep(10);
+    expect(h.removed.sort()).toEqual(["gate-2", "vm-1"]);
   });
 
   test("one an earlier process left is removed before the first is made; one this process made is not", async () => {

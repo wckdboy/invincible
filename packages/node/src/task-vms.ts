@@ -1,4 +1,4 @@
-import { agentCleanupCommand, FOLLOW_SECONDS, followArgv, HANDED_CHANGES_BYTES, type FollowedRun, type HandedVm } from "@invincible/agents";
+import { agentCleanupCommand, FOLLOW_SECONDS, followArgv, HANDED_CHANGES_BYTES, type FollowedRun, type HandedRound, type HandedVm } from "@invincible/agents";
 import { redact } from "@invincible/core";
 import type { SandboxHost } from "@invincible/sandbox";
 
@@ -10,13 +10,18 @@ import type { SandboxHost } from "@invincible/sandbox";
  * task's run ended with that process) is removed before the next is made. Its lease ends first, whatever becomes of the
  * VM (the fourth fabric review's R4-7): one that can't be removed spends nothing more of yours, is never renewed with its
  * agent's again, and is tried again on a timer until it is gone, as well as before the next is made.
+ *
+ * Each round of its gates runs in a VM of the round's own beside it (host.createGateVm, the eleventh fabric review's
+ * ruling): no network, no lease, nothing of the task's VM in it, and no process of the task's ever run there. It is given
+ * the task's tree through this host as the round begins, and goes when the next round begins, or with the task, as the
+ * task's VM does.
  */
 
 /** How long after a removal that failed it is tried again, at first; each one that fails waits twice as long, up to RETRY_MAX_MS. */
 const RETRY_MS = 60_000;
 const RETRY_MAX_MS = 15 * 60_000;
 
-type Host = Pick<SandboxHost, "createTaskVm" | "exec" | "destroy" | "stream" | "taskVms" | "get" | "endLease" | "pipe" | "makesSandboxes">;
+type Host = Pick<SandboxHost, "createTaskVm" | "createGateVm" | "sweepGates" | "exec" | "destroy" | "stream" | "taskVms" | "get" | "endLease" | "pipe" | "makesSandboxes">;
 
 /**
  * A command of the node's in a task's VM: a shell that reads no profile of the task's (the eighth fabric review's R8-3).
@@ -93,9 +98,17 @@ export class TaskVms {
     // (Its work's own signal: a task that ends while its VM waits for room has none made.)
     const vm = (await host.createTaskVm({ task: ask.task, beside: ask.vm, run, providers: ask.providers, models: ask.models, ttlMinutes: TASK_VM_MINUTES }, signal)).id;
     let released = false;
+    /** The VM of its gates' round under way: the next round's, and the task's end, remove it. */
+    let gating: string | null = null;
+    const endRound = async () => {
+      const was = gating;
+      gating = null;
+      if (was) await this.remove(host, was, run);
+    };
     // When its work's signal ends (its hand-off revoked: your brake), its lease ends and its VM goes at once, and the
     // command in flight with it: none keeps model access until it returns. The fifth fabric review's I-1.
     const brake = () => {
+      void endRound();
       // (Released already, its stop may still be running before its removal: its lease ends now all the same.)
       if (released) return host.endLease(vm);
       released = true;
@@ -112,11 +125,32 @@ export class TaskVms {
         if (signal.aborted) throw new Error("its work has stopped");
         return host.exec(vm, shell(command), timeoutSec);
       },
-      // Its gates and the node's checks of its work, as their own user in their own folder (R8-3: execArgs, VM_GATES): no
-      // process of the task's, which all run as the VMs' user, can signal, trace or write anything of theirs.
-      gates: async (command, timeoutSec, signal) => {
+      // A round of its gates, in a VM of its own (the eleventh fabric review's ruling): made new, the round before's gone
+      // first, and given the task's tree as `take` prints it here to `store` there (its own user's, through this host,
+      // never kept here). Its gates and the node's checks then run there as their own user in their own folder (execArgs,
+      // VM_GATES), and every process of theirs is ended there from an exec of its own before each copy (sweepGates).
+      round: async (take, store, timeoutSec, signal): Promise<HandedRound> => {
         if (signal.aborted) throw new Error("its work has stopped");
-        return host.exec(vm, shell(command), timeoutSec, undefined, "gates");
+        await endRound();
+        const gate = (await host.createGateVm({ task: ask.task, of: vm, beside: ask.vm, run, ttlMinutes: TASK_VM_MINUTES }, signal)).id;
+        gating = gate;
+        // (A task that ended while it was made has it removed now: its end removed the round it knew of.)
+        if (signal.aborted || released) {
+          await endRound();
+          throw new Error("its work has stopped");
+        }
+        const taken = await host.pipe({ id: vm, cmd: shell(take) }, { id: gate, cmd: shell(store) }, { timeoutSec, maxBytes: Number.POSITIVE_INFINITY });
+        return {
+          taken,
+          gates: async (command, timeoutSec, signal) => {
+            if (signal.aborted || gating !== gate) throw new Error("its work has stopped");
+            return host.exec(gate, shell(command), timeoutSec, undefined, "gates");
+          },
+          sweep: async (signal) => {
+            if (signal.aborted || gating !== gate) throw new Error("its work has stopped");
+            return host.sweepGates(gate);
+          },
+        };
       },
       follow: async (offset, signal): Promise<FollowedRun> => {
         if (signal.aborted) throw new Error("its work has stopped");
@@ -140,6 +174,8 @@ export class TaskVms {
       stop: stopped,
       release: async () => {
         signal.removeEventListener("abort", brake);
+        // (Its gates' round's VM goes with it.)
+        await endRound();
         if (released) return;
         released = true;
         // (Its VM goes, and with it everything the task started there: its stop first, so its coding tool ends as it would.)

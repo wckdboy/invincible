@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { type ActionClass, COMPUTER_START, type Decision, decide, type ExecResult, isReservedGatewayScope, LEASE_FILE, MAC_VM_OVERHEAD, NOTES_DIR, randomBytes, redact, type SandboxNetwork, type SandboxView, type SeatKind, TeamWorkspaceRun, VM_OVERHEAD, type VmOverhead, WORKSPACE_OWN } from "@invincible/core";
+import { gateSweepArgs } from "./gate.ts";
 import { layoutPath, MOVE_PY, WORK_TREE } from "./layout.ts";
 import {
   CONTAINER_MAJOR,
@@ -398,6 +399,8 @@ export interface CreateOptions {
   /** A VM made for another node's task (createTaskVm's alone): the task it is for, and the agent's VM it is beside. */
   task?: string;
   beside?: string;
+  /** A VM for a round of that task's gates, beside its task's VM (createGateVm's alone). */
+  gate?: true;
 }
 
 /** A VM for a seat (createSeatVm): which seat, how many VMs its home may be in at once, and an agent's VM whose /work it shares. */
@@ -432,6 +435,18 @@ export interface TaskVmInput {
   /** Its lease: the providers its models are on, and those models alone (the task's paid ones: never a key, never a repository). */
   providers: readonly string[];
   models: readonly string[];
+  ttlMinutes: number;
+}
+
+/**
+ * A VM for a round of another node's task's gates (createGateVm): the task, its own VM here (whose image and size it is
+ * made with, sharing nothing of it), the agent's VM both are beside, and how long it may live.
+ */
+export interface GateVmInput {
+  task: string;
+  of: string;
+  beside: string;
+  run: string;
   ttlMinutes: number;
 }
 
@@ -1080,6 +1095,7 @@ export class SandboxHost {
       ...(seated.shares ? { shares: seated.shares } : {}),
       ...(seated.task ? { task: seated.task } : {}),
       ...(seated.beside ? { beside: seated.beside } : {}),
+      ...(seated.gate ? { gate: true as const } : {}),
       // One that shares an agent's workspace, and another node's task's, has a HOME of its own, empty and in memory: never the
       // agent's, nor its /work (a Linux host's alone).
       ...((seated.shares || seated.task) && !this.apple ? { ownHome: { path: await this.imagePath(image) } } : {}),
@@ -2449,7 +2465,7 @@ export class SandboxHost {
     if (!sandbox) throw new SandboxError("no such sandbox on this node", 404);
     check?.(sandbox);
     if (sandbox.status !== "running") throw new SandboxError(`sandbox is ${sandbox.status}`, 409);
-    if (as === "gates" && (this.apple || !sandbox.task)) throw new SandboxError("only a VM made for another node's task has its gates' own user", 409);
+    if (as === "gates" && (this.apple || !sandbox.gate)) throw new SandboxError("only a VM made for a round of another node's task's gates has its gates' own user", 409);
     const started = performance.now();
     let result: Run | null = null;
     if (!as && cmd[0] === "desktop" && cmd.length > 1 && sandbox.image.includes("desktop")) {
@@ -2604,6 +2620,42 @@ export class SandboxHost {
     const hash = this.tokenStore.take(id);
     if (hash) this.opts.tokens.revoke(hash);
     this.leased.delete(id);
+  }
+
+  /**
+   * A VM for a round of another node's task's gates (the eleventh fabric review's ruling, 28 November 2026): from its task's
+   * VM's image, as big as it, with no network at all and no lease, and nothing of the task's VM in it. Nothing of the
+   * task's runs there: it is given the task's tree through a pipe (pipe), and its gates run there one by one, as their own
+   * user, each on a copy of that tree of its own, with every process of that user ended between them (sweepGates). Labelled
+   * with its task and beside the agent's VM, as the task's VM is, so a node that starts again removes one an earlier
+   * process left. It goes when its round is over (destroy). On a Linux host with Docker alone.
+   */
+  async createGateVm(input: GateVmInput, signal?: AbortSignal): Promise<SandboxView> {
+    if (this.apple) throw new SandboxError("another node's task is taken only on a Linux host with Docker", 424);
+    const of = await this.get(input.of);
+    if (!of || of.task !== input.task || of.gate) throw new SandboxError("a round of another node's task's gates is made beside that task's own VM on this host, and that one is not here", 404);
+    // (Its disk as big as its task's VM's, where this host holds a VM's disk to a size: its copies of the tree are in it.)
+    return this.create(
+      { network: "isolated", image: of.image, cpus: of.cpus, memoryGb: of.memoryGb, ...(of.disk ? { diskGb: of.disk.limitGb } : {}), ttlMinutes: input.ttlMinutes, persistent: false, run: input.run, isolation: of.isolation },
+      { task: input.task, beside: input.beside, gate: true, ...(signal ? { signal } : {}) },
+    );
+  }
+
+  /**
+   * Every process of the gates' own user in a round's VM ended, until none is left (gate.ts GATE_SWEEP_PY): run as the
+   * exec's only process of that user, with no deadline or shell of theirs above it, since `kill(-1)` reaches every
+   * process of its user but its own. Bounded by itself (its rounds), and by this host's wait for its client. Exit 0: none
+   * is left. A gate VM's alone.
+   */
+  async sweepGates(id: string): Promise<ExecResult> {
+    const sandbox = await this.forCommand(id);
+    if (!sandbox) throw new SandboxError("no such sandbox on this node", 404);
+    if (this.apple || !sandbox.gate) throw new SandboxError("only a VM made for a round of another node's task's gates is swept", 409);
+    if (sandbox.status !== "running") throw new SandboxError(`sandbox is ${sandbox.status}`, 409);
+    const started = performance.now();
+    const ran = await this.docker(gateSweepArgs(containerName(id)), 60_000);
+    this.opts.ledger({ class: "modify", resource: "sandbox.exec", target: sandbox.name, verdict: "allow", run: sandbox.run, detail: `every process of its gates' user ended → exit ${ran.code}` });
+    return { exitCode: ran.code, stdout: ran.stdout, stderr: ran.stderr, durationMs: Math.round(performance.now() - started), truncated: ran.truncated };
   }
 
   /**
@@ -3042,5 +3094,6 @@ function toView(labels: Record<string, string>, image: string, status: string, u
     // (Its seat's label is set by createSeatVm alone: never by a route.)
     ...(labels[`${LABEL}.seat`] ? { seat: labels[`${LABEL}.seat`] } : {}),
     ...(labels[`${LABEL}.task`] ? { task: labels[`${LABEL}.task`] } : {}),
+    ...(labels[`${LABEL}.gate`] === "1" ? { gate: true } : {}),
   };
 }

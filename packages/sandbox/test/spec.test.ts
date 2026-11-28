@@ -147,12 +147,24 @@ describe("sandbox hardening", () => {
     expect(execArgs("0123456789", ["cat"], 30, { input: true })).toEqual(["exec", "--interactive", "--workdir", "/work", "invincible-sbx-0123456789", "timeout", "--signal=KILL", "30s", "cat"]);
   });
 
-  test("another node's task's gates run as their own user, from their own folder: a filesystem in memory of theirs alone, which a task's VM alone has (R8-3)", () => {
+  test("another node's task's gates run as their own user, from their own folder: a filesystem in memory of theirs alone, which a round of its gates' VM alone has, and says so (R8-3, R11-1)", () => {
     expect(execArgs("0123456789", ["test", "-f", "x"], 30, { as: "gates" }).slice(0, 6)).toEqual(["exec", "--user", "65534:65534", "--workdir", "/gates", "invincible-sbx-0123456789"]);
     const tmpfs = (args: string[]) => args.filter((_, i) => args[i - 1] === "--tmpfs");
-    // (Mounted exec, unlike /tmp and HOME: a gate runs a tree's scripts. Its user's alone, mode 0700: the task's can't list it.)
-    expect(tmpfs(runArgs({ ...base, task: "task-abcdefghijkl", beside: "9876543210", ownHome: { path: "/usr/bin:/bin" } }))).toContain("/gates:rw,exec,nosuid,nodev,size=2g,uid=65534,gid=65534,mode=0700");
-    expect(tmpfs(runArgs(base)).some((mount) => mount.startsWith("/gates"))).toBe(false);
+    const envs = (args: string[]) => args.filter((_, i) => args[i - 1] === "--env");
+    const marks = (args: string[]) => args.filter((_, i) => args[i - 1] === "--label");
+    const gate = runArgs({ ...base, network: "isolated", task: "task-abcdefghijkl", beside: "9876543210", gate: true, ownHome: { path: "/usr/bin:/bin" } });
+    // (Mounted exec, unlike /tmp and HOME: a gate runs a tree's scripts. Its user's alone, mode 0700.)
+    expect(tmpfs(gate)).toContain("/gates:rw,exec,nosuid,nodev,size=2g,uid=65534,gid=65534,mode=0700");
+    // Its environment says it is a round's VM, which the sweep between its gates asks; its label says so to the node.
+    expect(envs(gate)).toContain("INVINCIBLE_GATE_VM=1");
+    expect(marks(gate)).toContain("dev.invincible.gate=1");
+    expect(gate.slice(gate.indexOf("--network"), gate.indexOf("--network") + 2)).toEqual(["--network", "none"]);
+    // The task's own VM has none of it: its gates never run there. Nor any other.
+    for (const args of [runArgs({ ...base, task: "task-abcdefghijkl", beside: "9876543210", ownHome: { path: "/usr/bin:/bin" } }), runArgs(base)]) {
+      expect(tmpfs(args).some((mount) => mount.startsWith("/gates"))).toBe(false);
+      expect(envs(args).some((env) => env.startsWith("INVINCIBLE_GATE_VM="))).toBe(false);
+      expect(marks(args).some((label) => label.startsWith("dev.invincible.gate="))).toBe(false);
+    }
   });
 
   test("requests default to the safe gateway mode, ephemeral, bounded TTL", () => {

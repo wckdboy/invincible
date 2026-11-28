@@ -1760,6 +1760,8 @@ export interface SandboxView {
   seat?: string;
   /** A VM made for another node's task (the fabric's hand-offs): the task it is for. No route reaches into one either. */
   task?: string;
+  /** One made for a round of that task's gates (createGateVm), where nothing of the task's runs. */
+  gate?: true;
 }
 
 export interface ExecResult {

@@ -5,7 +5,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
-import { handedApply, handedDrop, handedGates, handedGive, handedNonce, handedReceive, handedSend, handedSweep, handedTake, handedTree } from "../src/handed-repo.ts";
+import { handedApply, handedCopy, handedDrop, handedGive, handedNonce, handedReceive, handedRoundStore, handedRoundTake, handedSend, handedSweep, handedTake, handedTree } from "../src/handed-repo.ts";
 import { changesCommand } from "../src/team-runtime.ts";
 
 // Every test here makes repositories and runs git on them, as processes of their own, so its time is the machine's to
@@ -921,11 +921,25 @@ describe("what runs of other nodes' tasks cut off leaves on their agent's side, 
 });
 
 /*
- * Another node's task's gates' copy of its tree (the eighth fabric review's R8-3): made by their own user in their own
- * folder of the task's VM, so nothing of the task's reaches it. Here that folder is a temporary one, and the user is this
- * test's; that another user's can't be reached is held on real VMs (handed-real.integration.test.ts).
+ * A round of another node's task's gates (the eleventh fabric review's ruling): the task's tree, packed (or with no
+ * repository tarred) in its VM, kept in a store of the round's VM's own user, and each gate's copy made from that store by
+ * the gates' own user. Here the task's VM's /work, the round's store and the gates' folder are temporary folders, the
+ * pipe between the VMs a file, and every user this test's; that the gates' user can't write the store, that no process of
+ * the task's reaches the round's VM, and the sweep between gates, are held on real VMs (handed-real.integration.test.ts,
+ * gate-sweep.integration.test.ts).
  */
-describe("the copy of its tree another node's task's gates run on (R8-3)", () => {
+describe("the round of another node's task's gates: its tree, its store, and each gate's copy of its own", () => {
+  /** The task's side of the pipe into the store: each side's end, as a file between them. */
+  function given(root: string, tree: string) {
+    const at = temp("handed-round-");
+    const store = join(at, "round");
+    const piped = join(at, "piped");
+    const take = sh(`${handedRoundTake(root, tree)} > ${q(piped)}`);
+    const kept = sh(`${handedRoundStore(tree, store)} < ${q(piped)}`);
+    const gates = join(at, "gates");
+    mkdirSync(gates);
+    return { take, kept, store, gates, copy: (held: string, kind: "repo" | "folder", on = join(gates, handedNonce())) => ({ on, made: sh(handedCopy(held, on, kind, store, gates)) }) };
+  }
   /** The task's clone with its work in it, and its tree as the freeze reads it: a change, a new file, and what git ignores. */
   function worked() {
     const s = setUp();
@@ -938,13 +952,14 @@ describe("the copy of its tree another node's task's gates run on (R8-3)", () =>
     writeFileSync(join(s.theirs, "node_modules", "tool", "index.js"), "installed by the task\n");
     const read = sh(handedTree(s.theirs, s.base, "task-x", s.keep.task));
     expect(read.status).toBe(0);
-    const gates = temp("handed-gates-");
-    return { ...s, tree: read.stdout.trim(), gates, copy: (tree: string, on = join(gates, handedNonce())) => ({ on, made: sh(handedGates(s.theirs, tree, on, gates)) }) };
+    return { ...s, tree: read.stdout.trim() };
   }
 
-  test("it is that tree alone, checked out by a repository of its own: nothing git ignores in the worktree, and HEAD a commit of it with no history", () => {
+  test("in a repository its copy is that tree alone, from the store: nothing git ignores in the worktree, and HEAD a commit of it with no history", () => {
     const w = worked();
-    const { on, made } = w.copy(w.tree);
+    const r = given(w.theirs, w.tree);
+    expect([r.take.status, r.take.stderr, r.kept.status, r.kept.stderr, r.kept.stdout.trim()]).toEqual([0, "", 0, "", w.tree]);
+    const { on, made } = r.copy(w.tree, "repo");
     expect([made.status, made.stderr]).toEqual([0, ""]);
     const tree = join(on, "tree");
     expect(readdirSync(tree).sort()).toEqual([".git", ".gitignore", "README.md", "app.txt", "new.txt"]);
@@ -953,87 +968,128 @@ describe("the copy of its tree another node's task's gates run on (R8-3)", () =>
     expect(w.git(tree, "rev-parse", "HEAD^{tree}").stdout.trim()).toBe(w.tree);
     expect(w.git(tree, "rev-list", "--count", "HEAD").stdout.trim()).toBe("1");
     expect(w.git(tree, "status", "--porcelain").stdout).toBe("");
-    // A HOME and a temporary folder of its own beside it, its own user's alone.
+    // A HOME and a temporary folder of its own beside it, its own user's alone; the store, its readers' to read alone.
     for (const sub of ["home", "tmp", "tree"]) expect((lstatSync(join(on, sub)).mode & 0o777).toString(8)).toBe("700");
+    expect((lstatSync(r.store).mode & 0o777).toString(8)).toBe("755");
     expect(made.stdout.trim()).toBe(`4 ${["the agent's repository\n", "two\n", "made by the task\n", "ignored.txt\nnode_modules/\n"].reduce((n, text) => n + text.length, 0)} ${w.tree}`);
-    // The next run's copy takes the place of every earlier one.
-    const next = w.copy(w.tree);
+    // The next gate's copy takes the place of every earlier one.
+    const next = r.copy(w.tree, "repo");
     expect(next.made.status).toBe(0);
-    expect(readdirSync(w.gates)).toEqual([next.on.slice(w.gates.length + 1)]);
+    expect(readdirSync(r.gates)).toEqual([next.on.slice(r.gates.length + 1)]);
   });
 
-  test("what is checked out is that tree, whatever its clone holds by then: an object of it changed there is no copy", () => {
+  test("the store holds that tree, whatever the task's VM does: an object of it changed in the clone isn't taken, and what the clone does after it is taken reaches no copy", () => {
     const w = worked();
-    // The task's new file's object, as its clone keeps it, made to hold other content (as a process of the task's could).
     const blob = w.git(w.theirs, "rev-parse", `${w.tree}:new.txt`).stdout.trim();
     const object = join(w.theirs, ".git", "objects", blob.slice(0, 2), blob.slice(2));
     expect(existsSync(object)).toBe(true);
+    // Taken first, then the clone's object of it changed (as a process of the task's could): the copy is the tree all the same.
+    const r = given(w.theirs, w.tree);
+    expect(r.kept.status).toBe(0);
     const other = Buffer.from("not what the tree says\n");
     chmodSync(object, 0o644);
     writeFileSync(object, deflateSync(Buffer.concat([Buffer.from(`blob ${other.length}\0`), other])));
-    const { on, made } = w.copy(w.tree);
-    expect(made.status).not.toBe(0);
-    expect(made.stderr).toMatch(/its tree could not be (taken from its clone|checked out)/);
-    expect(existsSync(join(on, "tree", "new.txt")) && readFileSync(join(on, "tree", "new.txt"), "utf8")).not.toBe("not what the tree says\n");
+    const { on, made } = r.copy(w.tree, "repo");
+    expect(made.status).toBe(0);
+    expect(readFileSync(join(on, "tree", "new.txt"), "utf8")).toBe("made by the task\n");
+    // Changed before it is taken: the store hashes what it is given, and the tree's own object is not there.
+    const again = given(w.theirs, w.tree);
+    expect(again.kept.status).not.toBe(0);
+    expect(again.take.stderr + again.kept.stderr).toMatch(/its tree (could not be packed|could not be taken|is not all there)/);
   });
 
-  test("a link out of the tree is refused, an absolute one or one up past its top; one inside it is kept", () => {
-    for (const [name, to, kept] of [["inside", "app.txt", true], ["absolute", "/etc/hostname", false], ["up", "../../outside", false], ["deep/up", "../../x", false]] as const) {
+  test("a store is made once, new: one there already, or a tree that isn't a tree's id, isn't one", () => {
+    const w = worked();
+    const r = given(w.theirs, w.tree);
+    expect(r.kept.status).toBe(0);
+    expect(sh(`${handedRoundStore(w.tree, r.store)} < /dev/null`).stderr.trim()).toBe("not a store for its gates");
+    expect(() => handedRoundStore("HEAD")).toThrow("not a tree");
+    expect(() => handedRoundTake(w.theirs, "HEAD")).toThrow("not a tree");
+  });
+
+  test("a link out of the tree is refused: an absolute one, one up past its top, and one that resolves out of it through others; one inside it is kept", () => {
+    for (const [name, to, kept] of [["inside", "app.txt", true], ["absolute", "/etc/hostname", false], ["up", "../../outside", false], ["deep/up", "../../x", false], ["deep/through", "here/here/here/here/../../../outside", false]] as const) {
       const w = worked();
       mkdirSync(join(w.theirs, "deep"), { recursive: true });
+      symlinkSync(".", join(w.theirs, "deep", "here"));
       symlinkSync(to, join(w.theirs, name));
       const tree = sh(handedTree(w.theirs, w.base, "task-x", w.keep.task)).stdout.trim();
-      const { on, made } = w.copy(tree);
+      const { on, made } = given(w.theirs, tree).copy(tree, "repo");
       expect([name, made.status === 0]).toEqual([name, kept]);
       if (kept) expect(lstatSync(join(on, "tree", name)).isSymbolicLink()).toBe(true);
       else expect(made.stderr).toContain(`its tree has a link out of it, ${name} -> ${to}`);
     }
   });
 
-  test("with no repository, its folder is copied as it is: its files, folders and links, and nothing else", () => {
+  test("with no repository, its folder is taken as it is: its files, folders and links and nothing else, hashed in the store, and each gate's copy is that", () => {
     const folder = temp("handed-folder-");
     mkdirSync(join(folder, "sub"));
     writeFileSync(join(folder, "report.md"), "the report\n");
     writeFileSync(join(folder, "sub", "run.sh"), "#!/bin/sh\necho ran\n", { mode: 0o755 });
     symlinkSync("report.md", join(folder, "latest.md"));
     expect(spawnSync("mkfifo", [join(folder, "pipe")]).status).toBe(0);
-    const gates = temp("handed-gates-");
-    const on = join(gates, handedNonce());
-    const made = sh(handedGates(folder, "", on, gates));
+    const r = given(folder, "");
+    expect([r.take.status, r.take.stderr, r.kept.status, r.kept.stderr]).toEqual([0, "", 0, ""]);
+    const hashed = r.kept.stdout.trim();
+    expect(hashed).toMatch(/^[0-9a-f]{40}$/);
+    const { on, made } = r.copy(hashed, "folder");
     expect([made.status, made.stderr]).toEqual([0, ""]);
     const tree = join(on, "tree");
     expect(readdirSync(tree).sort()).toEqual(["latest.md", "report.md", "sub"]);
     expect(readFileSync(join(tree, "report.md"), "utf8")).toBe("the report\n");
     expect(lstatSync(join(tree, "latest.md")).isSymbolicLink()).toBe(true);
     expect(lstatSync(join(tree, "sub", "run.sh")).mode & 0o111).not.toBe(0);
-    const [files, bytes, hashed] = made.stdout.trim().split(" ");
-    expect([files, bytes]).toEqual(["2", String("the report\n".length + "#!/bin/sh\necho ran\n".length)]);
-    expect(hashed).toMatch(/^[0-9a-f]{40}$/);
-    // Each gate's copy is checked to be that folder as its gates began: the same is copied again, a changed one isn't.
-    const again = join(gates, handedNonce());
-    expect(sh(handedGates(folder, "", again, gates, hashed!)).stdout.trim().split(" ")[2]).toBe(hashed);
+    expect(made.stdout.trim()).toBe(`2 ${"the report\n".length + "#!/bin/sh\necho ran\n".length} ${hashed}`);
+    // What the folder becomes after it was taken reaches no copy of this round's.
     writeFileSync(join(folder, "report.md"), "changed after its gates began\n");
-    const changed = sh(handedGates(folder, "", join(gates, handedNonce()), gates, hashed!));
-    expect([changed.status, changed.stderr.trim()]).toEqual([1, "its folder isn't what it was as its gates began"]);
+    expect(readFileSync(join(r.copy(hashed, "folder").on, "tree", "report.md"), "utf8")).toBe("the report\n");
+    // The same folder taken again is the same tree.
+    expect(given(folder, "").kept.stdout.trim()).not.toBe(hashed);
+    writeFileSync(join(folder, "report.md"), "the report\n");
+    expect(given(folder, "").kept.stdout.trim()).toBe(hashed);
   });
 
-  test("with no repository, a file its gates' user can't read is no part left out: the copy, and so its gates, fail and say which (the ninth review's I-2)", () => {
+  test("with no repository, a file its VM's user can't read is no part left out: the round's tree, and so its gates, fail and say which (the ninth review's I-2)", () => {
     const folder = temp("handed-folder-");
     writeFileSync(join(folder, "report.md"), "the report\n");
     writeFileSync(join(folder, "secret.txt"), "not for its gates\n", { mode: 0o000 });
-    const gates = temp("handed-gates-");
-    const made = sh(handedGates(folder, "", join(gates, handedNonce()), gates));
+    const r = given(folder, "");
     chmodSync(join(folder, "secret.txt"), 0o600);
-    expect([made.status, made.stderr.trim()]).toEqual([1, "its folder couldn't be copied as its gates' user reads it: secret.txt: Permission denied"]);
+    // (Its side of the pipe fails, and says which: a round is taken only when that side ended well, as every pipe's is.)
+    expect([r.take.status, r.take.stderr.trim()]).toEqual([1, "its folder couldn't be read: secret.txt: Permission denied"]);
+  });
+
+  test("with no repository, the store takes files, folders and links inside the folder alone: a name out of it, a link out of it, a hard link, a device or a name twice is refused", () => {
+    const build = (body: string) => {
+      const at = temp("handed-tar-");
+      const tar = join(at, "given.tar");
+      const made = spawnSync("python3", ["-I", "-c", `import io, sys, tarfile\nout = tarfile.open(sys.argv[1], "w", format=tarfile.PAX_FORMAT)\ndef add(name, kind=tarfile.REGTYPE, data=b"", link=""):\n    info = tarfile.TarInfo(name)\n    info.type, info.size, info.linkname, info.mode = kind, len(data), link, 0o644\n    out.addfile(info, io.BytesIO(data) if kind == tarfile.REGTYPE else None)\n${body}\nout.close()`, tar], { encoding: "utf8" });
+      expect(made.stderr).toBe("");
+      return { tar, store: join(at, "round") };
+    };
+    const cases: [string, string, RegExp][] = [
+      ["a name up out of it", `add("../escaped", data=b"x")`, /is no new name inside it/],
+      ["an absolute name", `add("/tmp/escaped", data=b"x")`, /is no new name inside it/],
+      ["a link out of it", `add("out", tarfile.SYMTYPE, link="../../outside")`, /its tree has a link out of it, out -> \.\.\/\.\.\/outside/],
+      ["a link out of it through others, a later one making an earlier one point out", `add("a", tarfile.SYMTYPE, link="x/y/../..")\nadd("x", tarfile.SYMTYPE, link=".")`, /its tree has a link out of it, a -> x\/y\/\.\.\/\.\./],
+      ["a file written through a link", `add("d", tarfile.SYMTYPE, link=".")\nadd("d/f", data=b"x")\nadd("e", tarfile.SYMTYPE, link="/tmp")\nadd("e/f", data=b"x")`, /e\/f is no new name inside it|its tree has a link out of it/],
+      ["a hard link", `add("f", data=b"x")\nadd("g", tarfile.LNKTYPE, link="f")`, /g is no file, folder or link/],
+      ["a device", `add("dev", tarfile.CHRTYPE)`, /dev is no file, folder or link/],
+      ["a name twice", `add("f", data=b"x")\nadd("f", data=b"y")`, /f is no new name inside it/],
+    ];
+    for (const [what, body, said] of cases) {
+      const { tar, store } = build(body);
+      const kept = sh(`${handedRoundStore("", store)} < ${q(tar)}`);
+      expect([what, kept.status]).toEqual([what, 1]);
+      expect([what, kept.stderr.trim()]).toEqual([what, expect.stringMatching(said)]);
+      expect(existsSync(join(store, "..", "escaped")) || existsSync("/tmp/escaped")).toBe(false);
+    }
   });
 
   test("its copy's folder is one of the gates' folder's, named by a nonce, and its tree a tree's id", () => {
-    const gates = "/gates";
-    for (const on of ["/gates/x", "/tmp/0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a", `/gates/${"0a".repeat(16)}/..`, "/gatesx/0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"]) expect(() => handedGates("/work/tasks/t", "", on, gates)).toThrow("not a copy for its gates");
-    expect(() => handedGates("/work/tasks/t", "HEAD", `/gates/${"0a".repeat(16)}`)).toThrow("not a copy for its gates");
-    // (What a folder's copy must be is a tree's id, and a repository's copy is of its tree alone.)
-    expect(() => handedGates("/work/tasks/t", "", `/gates/${"0a".repeat(16)}`, "/gates", "HEAD")).toThrow("not a copy for its gates");
-    expect(() => handedGates("/work/tasks/t", "1".repeat(40), `/gates/${"0a".repeat(16)}`, "/gates", "2".repeat(40))).toThrow("not a copy for its gates");
-    expect(handedGates("/work/tasks/t", "1".repeat(40), `/gates/${"0a".repeat(16)}`)).toContain(`'/gates/${"0a".repeat(16)}'`);
+    for (const on of ["/gates/x", "/tmp/0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a", `/gates/${"0a".repeat(16)}/..`, "/gatesx/0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"]) expect(() => handedCopy("1".repeat(40), on, "repo")).toThrow("not a copy for its gates");
+    expect(() => handedCopy("HEAD", `/gates/${"0a".repeat(16)}`, "repo")).toThrow("not a copy for its gates");
+    expect(() => handedCopy("", `/gates/${"0a".repeat(16)}`, "folder")).toThrow("not a copy for its gates");
+    expect(handedCopy("1".repeat(40), `/gates/${"0a".repeat(16)}`, "folder")).toContain(`'/gates/${"0a".repeat(16)}' 'folder'`);
   });
 });

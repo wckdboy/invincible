@@ -6,11 +6,11 @@ import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed
 import { seatVmClearCommand } from "./agent-process.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
 import { apartMatches, chat, choreRole, roleModels, sameModel, workRole, type ModelsContext, type ChatTools, type ToolImage, type ToolSpec } from "@invincible/models";
-import { commandsRun, DESKTOP_EVIDENCE, escalatedWhy, runLoop, stepsNamed, type RunEvent, type RunSteer } from "./run.ts";
+import { CheckRefused, commandsRun, DESKTOP_EVIDENCE, escalatedWhy, runLoop, stepsNamed, type RunEvent, type RunSteer } from "./run.ts";
 import { type Trip } from "./tripwires.ts";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
 import { HELD_GIT, heldGit } from "./held-git.ts";
-import { handedApply, handedDrop, handedGates, handedGive, handedNonce, handedReceive, handedSend, handedSweep, handedTake, handedTree } from "./handed-repo.ts";
+import { handedApply, handedCopy, handedDrop, handedGive, handedNonce, handedReceive, handedRoundStore, handedRoundTake, handedSend, handedSweep, handedTake, handedTree } from "./handed-repo.ts";
 import { runEvidence, runTrail } from "./skills-run.ts";
 
 /** What one run of an agent is given by the team service (node/team.ts) that starts it. */
@@ -70,10 +70,12 @@ const releasing = (vm: HandedVm) => ({ vm, [Symbol.asyncDispose]: () => vm.relea
 export interface HandedVm {
   exec(command: string, timeoutSec: number, signal: AbortSignal): Promise<ExecResult>;
   /**
-   * A command as its gates' own user, in their own folder (core's VM_GATES): its gates and the node's checks of its work,
-   * on a copy of its tree that user made (the eighth fabric review's R8-3). Nothing of the task's can reach either.
+   * A round of its gates (the eleventh fabric review's ruling, 28 November 2026): a VM of its own, made now from its
+   * image, with no network and no lease, where nothing of the task's runs, given its tree as `take` prints it in this VM
+   * to `store` there (as that VM's own user). Its gates and the node's checks of its work run there, as their own user,
+   * each on a copy of that tree of its own. The round before goes as this one is made, and the last with the task.
    */
-  gates(command: string, timeoutSec: number, signal: AbortSignal): Promise<ExecResult>;
+  round(take: string, store: string, timeoutSec: number, signal: AbortSignal): Promise<HandedRound>;
   follow?(offset: number, signal: AbortSignal): Promise<FollowedRun>;
   /**
    * What `fromAgent` prints in its agent's VM, given to `intoTask` in this one as its input, and the other way round
@@ -84,6 +86,16 @@ export interface HandedVm {
   send(fromTask: string, intoAgent: string, timeoutSec: number, signal: AbortSignal): Promise<HandedPipe>;
   stop(): Promise<void>;
   release(): Promise<void>;
+}
+
+/** A round of another node's task's gates, in a VM of its own (HandedVm.round). */
+export interface HandedRound {
+  /** Its tree's way there: the task's VM's side, and the round's VM's, which prints the tree it holds. */
+  taken: HandedPipe;
+  /** A command as its gates' own user, in their own folder (core's VM_GATES), in the round's VM. */
+  gates(command: string, timeoutSec: number, signal: AbortSignal): Promise<ExecResult>;
+  /** Every process of its gates' user in the round's VM ended, from an exec of its own (sandbox gate.ts): exit 0, none is left. */
+  sweep(signal: AbortSignal): Promise<ExecResult>;
 }
 
 /** The most another node's task's changes may come to, as a patch or as its binary parts inflate: 512 MiB. */
@@ -1032,48 +1044,77 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       let moved: string | null = null;
       const lastMoved = (): typeof moved => moved;
       /**
-       * The tree another node's task's gates judge (the eighth fabric review's R8-3), read in its VM as each run of them
-       * begins (beforeGates): its clone's, or with no repository its folder's as their own user copied it then; or why there
-       * is none. Each gate, each check of the node's on what they judge (the digests of the test files they name) and, with
-       * no repository, its review's evidence then runs on a copy of that tree of its own, made by that user in their own
-       * folder and checked to be that tree: nothing of the task's reaches it, nor anything a gate before it left, as CI
-       * runs each job on a checkout of the tree that comes back.
+       * The tree another node's task's gates judge, and the round of them that holds it (the eleventh fabric review's
+       * ruling): as each run of them begins (beforeGates), its clone's tree is read in its VM, or with no repository its
+       * folder is taken as it is then, and given to a VM of the round's own (HandedVm.round), where nothing of the task's
+       * runs; or why there is none. Each gate, each check of the node's on what they judge (the digests of the test files
+       * they name) and, with no repository, its review's evidence then runs there on a copy of that tree of its own, made
+       * by the gates' user once every process of theirs there has been ended: nothing of the task's reaches it, nor
+       * anything a gate before it left, as CI runs each job on a checkout of the tree that comes back.
        */
       let judged: { tree: string } | { why: string } | null = null;
+      let round: HandedRound | null = null;
       const failed = (error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false });
       const said = (r: ExecResult) => redact(r.stderr || r.stdout).trim().split("\n").at(-1)?.slice(0, 200) || "no reason given";
-      /** A copy of its tree, `was` (none yet: its folder as it is), made by its gates' own user and checked: where, and what it took. */
-      const copied = async (was: string): Promise<{ on: string; tree: string; ms: number } | { why: string; ms: number }> => {
-        const on = `${VM_GATES}/${handedNonce()}`;
-        const made = await own!.vm.gates(agent.repository ? handedGates(root, was, on) : handedGates(root, "", on, VM_GATES, was), 600, ctx.signal).catch(failed);
-        const tree = made.stdout.trim().split(" ")[2] ?? "";
-        if (made.exitCode !== 0 || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(tree) || (was !== "" && tree !== was)) return { why: `its gates' copy of its tree couldn't be made: ${said(made)}`, ms: made.durationMs };
-        return { on, tree, ms: made.durationMs };
+      const treeId = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+      /** A copy of the round's tree, made by its gates' own user once every process of theirs in its VM is ended: where, and what it took. */
+      const copied = async (on: HandedRound, tree: string): Promise<{ on: string; ms: number } | { why: string; ms: number }> => {
+        const swept = await on.sweep(ctx.signal).catch(failed);
+        if (swept.exitCode !== 0) return { why: `what its gates' user left running in its gates' VM couldn't all be ended: ${said(swept)}`, ms: swept.durationMs };
+        const at = `${VM_GATES}/${handedNonce()}`;
+        const made = await on.gates(handedCopy(tree, at, agent.repository ? "repo" : "folder"), 600, ctx.signal).catch(failed);
+        const ms = swept.durationMs + made.durationMs;
+        if (made.exitCode !== 0 || made.stdout.trim().split(" ")[2] !== tree) return { why: `its gates' copy of its tree couldn't be made: ${said(made)}`, ms };
+        return { on: at, ms };
       };
-      /** What its gates judge, as their run begins: its clone's tree read in its VM; with no repository, its folder's, copied. */
+      /** What its gates judge, as their run begins: its clone's tree read in its VM, or its folder, given to a round's VM of its own. */
       const gatesBegin = async (): Promise<void> => {
         judged = null;
+        round = null;
+        let tree = "";
         if (agent.repository) {
           const read = await own!.vm.exec(handedTree(root, base, task.id), 300, ctx.signal).catch(failed);
-          const tree = read.stdout.trim();
-          judged = gated = read.exitCode === 0 && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(tree) ? { tree } : { why: `its workspace's tree couldn't be read in its VM as its gates began: ${said(read)}` };
+          tree = read.stdout.trim();
+          gated = read.exitCode === 0 && treeId.test(tree) ? { tree } : { why: `its workspace's tree couldn't be read in its VM as its gates began: ${said(read)}` };
+          if ("why" in gated) {
+            judged = gated;
+            return;
+          }
+        }
+        let made: HandedRound;
+        try {
+          made = await own!.vm.round(handedRoundTake(root, tree), handedRoundStore(tree), 900, ctx.signal);
+        } catch (error) {
+          judged = { why: `its gates' VM couldn't be made: ${redact(String((error as Error)?.message ?? error)).slice(0, 200)}` };
           return;
         }
-        const made = await copied("");
-        judged = "why" in made ? { why: made.why } : { tree: made.tree };
+        const { from, to, cut } = made.taken;
+        const held = to.stdout.trim();
+        if (from.exitCode !== 0 || to.exitCode !== 0 || cut || !treeId.test(held) || (tree !== "" && held !== tree)) {
+          judged = { why: `its tree couldn't be given to its gates' VM: ${from.exitCode !== 0 ? said(from) : cut ? "it was cut short" : said(to)}` };
+          return;
+        }
+        round = made;
+        judged = { tree: held };
       };
       /** A gate, a check of the node's or the evidence of a task with no repository: on a copy of what its gates judge of its own. */
       const onCopy = async (command: string, limit: number, what: "gate" | "check" | "evidence"): Promise<ExecResult> => {
         // (Every run of its gates begins with beforeGates: one that didn't takes its tree as it is now.)
         if (!judged) await gatesBegin();
         const on = judged!;
-        const made = "why" in on ? { why: on.why, ms: 0 } : await copied(on.tree);
+        const there = round;
+        const made = "why" in on || !there ? { why: "why" in on ? on.why : "its gates have no VM", ms: 0 } : await copied(there, on.tree);
         if ("why" in made) {
-          // (A check that can't be run finds no change: the gates, which can't run either, decide.)
-          if (what === "check") throw new Error(made.why);
+          // A check of the node's that can't be made sends the work back, never "no change" (the eleventh review's R11-2).
+          if (what === "check") throw new CheckRefused(made.why);
           return { exitCode: -1, stdout: "", stderr: made.why, durationMs: made.ms, truncated: false };
         }
-        const ran = await own!.vm.gates(handedCommand(command, { task: task.id, limitSec: limit, ends: "gate", on: made.on }), limit + HANDED_MARGIN_SECONDS, ctx.signal);
+        const ran = await there!.gates(handedCommand(command, { task: task.id, limitSec: limit, ends: "gate", on: made.on }), limit + HANDED_MARGIN_SECONDS, ctx.signal).catch((error: Error) => {
+          if (what === "check") throw new CheckRefused(`its check couldn't be run in its gates' VM: ${redact(String(error?.message ?? error)).slice(0, 200)}`);
+          throw error;
+        });
+        // (A check whose command didn't end as it does, reading every file it names, is no answer of what changed.)
+        if (what === "check" && ran.exitCode !== 0) throw new CheckRefused(`its check exited ${ran.exitCode}: ${said(ran)}`);
         // (Its copy's time is its own: what all of its gates may take in all counts it.)
         return { ...ran, durationMs: ran.durationMs + made.ms };
       };

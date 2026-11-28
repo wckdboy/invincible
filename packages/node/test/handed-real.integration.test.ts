@@ -96,8 +96,9 @@ if [ "$RUNTIME" = runc ] && [ "\${args[0]}" = run ]; then
 fi
 all="$*"
 kind=\${args[0]}
-[ "$kind" = run ] && case $all in *"${LABEL}.task="*) kind=run-task;; esac
-[ "$kind" = run ] || [ "$kind" = run-task ] || case $all in
+[ "$kind" = run ] && case $all in *"${LABEL}.gate=1"*) kind=run-gate;; *"${LABEL}.task="*) kind=run-task;; esac
+[ "$kind" = run ] || [ "$kind" = run-task ] || [ "$kind" = run-gate ] || case $all in
+  *"not a store for its gates"*) kind=store;; *"this sweep runs only as the gates"*) kind=sweep;; *"its tree could not be packed"*) kind=pack;; *"its folder is not there"*) kind=tar;;
   *given.bundle*) kind=take;; *"its workspace as it was given"*) kind=give;; *send-index*) kind=send;; *apply-index*) kind=apply;;
   *tree-index*) kind=tree;; *"no such receive"*) kind=receive;; *"tagged()"*) kind=pipe-end;; *"its gates run on the tree alone"*) kind=copy;;
   *gate-faker*|*PROFILE*|*zz-work*) kind=work;; *"test -f result-real.txt"*) kind=gate;; *"> result-real.txt"*) kind=work;;
@@ -183,6 +184,131 @@ while True:
 fi
 ZZ
 echo written`,
+  // The eleventh review's R11-1 (zz-rc11-gate-zombie): as the daemon above, but the process its test leaves is a thread
+  // group whose leader thread has exited (SYS_exit, that thread alone) while its other thread runs on: /proc says "Z" of
+  // it, and the sweep at 6d23bf9f passed it by as a zombie. It ends no helper: it needs nothing of the kind.
+  TASK_ZOMBIE: String.raw`# zz-work
+cat > zz.test.ts <<'ZZ'
+import { expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+test("the work", () => {
+  spawnSync("bash", ["zz-daemon.sh"], { stdio: "ignore" });
+  expect(1 + 1).toBe(2);
+});
+ZZ
+cat > zz-daemon.sh <<'ZZ'
+setsid /usr/bin/python3 -c 'import ctypes, glob, os, platform, threading, time
+libc = ctypes.CDLL(None)
+def work():
+    while True:
+        for d in glob.glob("/gates/*/tree"):
+            try:
+                if not os.path.exists(os.path.join(d, "result-real.txt")):
+                    open(os.path.join(d, "result-real.txt"), "w").close()
+            except OSError:
+                pass
+        time.sleep(0.002)
+threading.Thread(target=work).start()
+time.sleep(0.2)
+libc.syscall(93 if platform.machine() == "aarch64" else 60, 0)' </dev/null >/dev/null 2>&1 &
+sleep 0.5
+ZZ
+echo written`,
+  // R11-1 with one gate (zz-rc11-gate-zombie-locked): her locked check.test.ts imports app.ts, which the task changes to
+  // start the same thread group when a gate imports it, and still says 1, so round 1's gate fails as it should. Its
+  // thread then writes an app.ts that says 2 into each later copy it finds.
+  TASK_ZOMBIE_APP: String.raw`# zz-work
+cat > zz-daemon.sh <<'ZZ'
+setsid /usr/bin/python3 -c 'import ctypes, glob, os, platform, threading, time
+libc = ctypes.CDLL(None)
+want = "export const value = () => 2;
+"
+def work():
+    while True:
+        for d in glob.glob("/gates/*/tree"):
+            p = os.path.join(d, "app.ts")
+            try:
+                if os.path.exists(p) and open(p).read() != want:
+                    with open(p, "w") as f:
+                        f.write(want)
+            except OSError:
+                pass
+        time.sleep(0.002)
+threading.Thread(target=work).start()
+time.sleep(0.2)
+libc.syscall(93 if platform.machine() == "aarch64" else 60, 0)' </dev/null >/dev/null 2>&1 &
+sleep 0.5
+ZZ
+cat > app.ts <<'ZZ'
+import { spawnSync } from "node:child_process";
+spawnSync("bash", ["zz-daemon.sh"], { stdio: "ignore" });
+export const value = () => 1;
+ZZ
+echo written`,
+  // R11-1's second road (zz-rc11-gate-chain): a chain of processes, each forking its next and exiting, which outran a
+  // sweep that listed pids and then signalled them.
+  TASK_CHAIN: String.raw`# zz-work
+cat > zz.test.ts <<'ZZ'
+import { expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+test("the work", () => {
+  spawnSync("bash", ["zz-daemon.sh"], { stdio: "ignore" });
+  expect(1 + 1).toBe(2);
+});
+ZZ
+cat > zz-daemon.sh <<'ZZ'
+setsid /usr/bin/python3 -c 'import glob, os
+while True:
+    for d in glob.glob("/gates/*/tree"):
+        try:
+            if not os.path.exists(os.path.join(d, "result-real.txt")):
+                open(os.path.join(d, "result-real.txt"), "w").close()
+        except OSError:
+            pass
+    if os.fork():
+        os._exit(0)' </dev/null >/dev/null 2>&1 &
+sleep 0.5
+ZZ
+echo written`,
+  // The eleventh review's R11-2 (zz-rc11-locked-check), its control: her locked.test.ts rewritten to pass whatever
+  // app.txt says, and nothing else.
+  TASK_LOCKED_PLAIN: String.raw`# zz-work
+printf '%s
+' 'import { expect, test } from "bun:test";' 'test("the work", () => expect(1).toBe(1));' > locked.test.ts
+echo written`,
+  // R11-2: the same, and a process its helper's end misses (it ends its helper, as TASK_SURVIVOR does) that closes the
+  // clone's .git to every user but its own until the first gates' copy of the round has begun and ended. (The phrase it
+  // looks for is the copy's, split here so that no command line of this task's has it whole.)
+  TASK_LOCKED: String.raw`# zz-work
+printf '%s
+' 'import { expect, test } from "bun:test";' 'test("the work", () => expect(1).toBe(1));' > locked.test.ts
+cat > "$TMPDIR/locker.py" <<'ZZ'
+import os, sys, time
+g = os.path.join(sys.argv[1], ".git")
+if os.path.isfile(g):
+    g = os.path.join(sys.argv[1], open(g).read().split("gitdir:", 1)[1].strip())
+os.chmod(g, 0o700)
+phrase = b"its gates run on the tree " + b"alone"
+def copying():
+    for p in os.listdir("/proc"):
+        if p.isdigit():
+            try:
+                with open("/proc/%s/cmdline" % p, "rb") as f:
+                    if phrase in f.read():
+                        return True
+            except OSError:
+                pass
+    return False
+while not copying():
+    time.sleep(0.002)
+while copying():
+    time.sleep(0.002)
+os.chmod(g, 0o755)
+ZZ
+setsid /usr/bin/python3 "$TMPDIR/locker.py" "$PWD" </dev/null >/dev/null 2>&1 &
+sleep 0.2
+p=$PPID; while [ "$p" -gt 1 ]; do if grep -qa 'PR_SET_CHILD_[S]UBREAPER' /proc/$p/cmdline 2>/dev/null; then kill -KILL $p; break; fi; p=$(cut -d' ' -f4 /proc/$p/stat); done
+echo written`,
 } as const;
 type Work = keyof typeof WORK;
 const fence = "```";
@@ -258,7 +384,9 @@ for (const runtime of ["kata", "runc"] as const) {
         expect(workspace).toMatchObject({ network: "isolated", isolation: "vm" });
         const made = Date.now();
         const herVm = `${PREFIX}sbx-${workspace.id}`;
-        const seeded = docker("exec", "--workdir", "/work", herVm, "bash", "-lc", "set -e; git init -q -b main /work/repo; cd /work/repo; printf 'the project\\n' > README.md; printf 'one\\n' > app.txt; git add -A; git -c user.name=Owner -c user.email=owner@example.test commit -q -m first; git remote add origin https://github.com/you/project; git rev-parse HEAD");
+        // (With two tests of hers that the R11 cases' gates run, each failing until the work is done: check.test.ts until
+        // app.ts says 2, locked.test.ts until app.txt says "two".)
+        const seeded = docker("exec", "--workdir", "/work", herVm, "bash", "-lc", "set -e; git init -q -b main /work/repo; cd /work/repo; printf 'the project\\n' > README.md; printf 'one\\n' > app.txt; printf '%s\\n' 'export const value = () => 1;' > app.ts; printf '%s\\n' 'import { expect, test } from \"bun:test\";' 'import { value } from \"./app.ts\";' 'test(\"the work\", () => expect(value()).toBe(2));' > check.test.ts; printf '%s\\n' 'import { expect, test } from \"bun:test\";' 'import { readFileSync } from \"node:fs\";' 'test(\"the work\", () => expect(readFileSync(\"app.txt\", \"utf8\")).toBe(\"two\\n\"));' > locked.test.ts; git add -A; git -c user.name=Owner -c user.email=owner@example.test commit -q -m first; git remote add origin https://github.com/you/project; git rev-parse HEAD");
         expect([seeded.status, seeded.stderr.trim()]).toEqual([0, ""]);
         return { herVm, madeMs: made - began, seededMs: Date.now() - made };
       })());
@@ -286,6 +414,9 @@ for (const runtime of ["kata", "runc"] as const) {
         ["task VM asked (run)", taskVm?.at],
         ["clone given (give)", first("give", handedAt)],
         ["clone made in it (take)", first("take", handedAt)],
+        ["first round's VM asked (run)", first("run-gate", handedAt)],
+        ["its tree kept there (store)", first("store", handedAt)],
+        ["its first sweep (sweep)", first("sweep", handedAt)],
         ["first gates' copy (copy)", first("copy", handedAt)],
         ["first gate, before the work", first("gate", handedAt)],
         ["the work's command", first("work", handedAt)],
@@ -317,7 +448,18 @@ for (const runtime of ["kata", "runc"] as const) {
       expect(workIn.length).toBeGreaterThan(0);
       expect(workIn.every((line) => !line.includes(herVm))).toBe(true);
       expect(docker("ps", "-a", "--filter", `label=${LABEL}.node=${pair.b.identity.id}`, "--filter", `label=${LABEL}.task`, "--format", "{{.Names}}").stdout.trim()).toBe("");
-      return { done, herVm, gates: done.trail.filter((t) => t.text.startsWith("Gate ")).map((t) => t.text.split("\n").slice(0, 2).join(" / ").slice(0, 200)) };
+      // Where each ran: the task's VM, and each round's VM (the eleventh review's ruling), by the names Docker was asked.
+      const named = (line: string) => new RegExp(`${PREFIX}sbx-[0-9a-f]+`).exec(line)?.[0] ?? "";
+      const taskName = named(taskVm!.line);
+      const roundNames = new Set(calls.filter((c) => c.kind === "run-gate" && c.at >= handedAt).map((c) => named(c.line)));
+      const placed = (kinds: string[]) => [...new Set(calls.filter((c) => c.at >= handedAt && kinds.includes(c.kind)).map((c) => (named(c.line) === taskName ? "task's" : roundNames.has(named(c.line)) ? "round's" : "other")))];
+      console.log(`  rounds: ${roundNames.size}; its gates, copies and sweeps ran in: ${placed(["gate", "copy", "sweep"]).join(", ") || "none"}; its work in: ${placed(["work"]).join(", ")}`);
+      const placement = () => {
+        expect(roundNames.size).toBeGreaterThan(0);
+        expect(placed(["gate", "copy", "sweep", "store"])).toEqual(["round's"]);
+        expect(placed(["work", "pack", "tar"]).filter((p) => p !== "task's")).toEqual([]);
+      };
+      return { done, herVm, placement, gates: done.trail.filter((t) => t.text.startsWith("Gate ")).map((t) => t.text.split("\n").slice(0, 2).join(" / ").slice(0, 200)) };
     }
 
     test("a task handed to beta's agent runs in a VM of its own beside hers, through its gates, review and bring-back, and comes back Proven", async () => {
@@ -330,6 +472,12 @@ for (const runtime of ["kata", "runc"] as const) {
       expect(there).toMatchObject({ status: "done", verified: true, assignee: "ada" });
       expect(docker("exec", herVm, "cat", `/work/tasks/${done.task}/result-real.txt`).stdout).toBe("real\n");
       expect(done.output).toContain("Changes: 1 file");
+    });
+
+    test("its gates run in a VM of each round's own, never in the task's, and its work in the task's, never in a round's", async () => {
+      const { done, placement } = await handOff("TASK_REAL");
+      expect(done.proof).toMatchObject({ state: "checked", verified: true });
+      placement();
     });
 
     /*
@@ -361,12 +509,74 @@ for (const runtime of ["kata", "runc"] as const) {
      * of that user but its own, and a gate whose processes can't all be ended doesn't pass.
      */
     test("R9-2: a process a gate's run of the task's code leaves behind can't pass a later gate: each copy and each gate's end end every process of the gates' user", async () => {
-      const { done, herVm, gates } = await handOff("TASK_DAEMON", ["bun test", "test -f result-real.txt"]);
+      const { done, herVm, gates, placement } = await handOff("TASK_DAEMON", ["bun test zz", "test -f result-real.txt"]);
       console.log(`  its gates, as its trail says them:\n    ${gates.join("\n    ")}`);
       // (Checked against beta's signature: what beta says is that its second gate failed each time, so not verified.)
       expect(done.proof).toMatchObject({ state: "checked", verified: false });
       expect((done.proof as { proof: { after: number[] } }).proof.after[1]).not.toBe(0);
       expect(docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`).status).not.toBe(0);
+      placement();
+    });
+
+    /*
+     * The eleventh review's R11-1: the sweep between gates passed by a process whose leader thread had exited while
+     * another ran on ("Z" in /proc), and a chain of processes each forking its next outran it; either way the task's test,
+     * run by a first gate, left what wrote a later gate's file into its copy, and the task came back Proven. And with one
+     * ordinary gate: round 1's run of the task's code left what wrote a passing app.ts into round 2's copy. Now each round
+     * runs in a VM of its own, and every process of the gates' user there is ended before each copy by kill(-1).
+     */
+    test("R11-1: a group whose leader thread has exited, left by a gate's run of the task's code, passes no later gate", async () => {
+      const { done, herVm, gates, placement } = await handOff("TASK_ZOMBIE", ["bun test zz", "test -f result-real.txt"]);
+      console.log(`  its gates, as its trail says them:\n    ${gates.join("\n    ")}`);
+      console.log(`  ${runtime}, R11-1: proof ${JSON.stringify(done.proof)}`);
+      expect(done.proof).toMatchObject({ state: "checked", verified: false });
+      expect((done.proof as { proof: { after: number[] } }).proof.after[1]).not.toBe(0);
+      expect(docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`).status).not.toBe(0);
+      placement();
+    });
+
+    test("R11-1 with one gate: what round 1's run of the task's code left passes no gate of round 2, and her locked test is as it was", async () => {
+      const { done, herVm, gates, placement } = await handOff("TASK_ZOMBIE_APP", ["bun test check.test.ts"]);
+      console.log(`  its gates, as its trail says them:\n    ${gates.join("\n    ")}`);
+      console.log(`  ${runtime}, R11-1 (one gate): proof ${JSON.stringify(done.proof)}`);
+      expect(done.proof).toMatchObject({ state: "checked", verified: false });
+      const cat = (file: string) => docker("exec", herVm, "cat", `/work/tasks/${done.task}/${file}`).stdout;
+      expect(cat("app.ts")).toContain("value = () => 1");
+      expect(cat("check.test.ts")).toContain("toBe(2)");
+      placement();
+    });
+
+    test("R11-1's second road: a chain of processes each forking its next passes no later gate", async () => {
+      const { done, herVm, gates, placement } = await handOff("TASK_CHAIN", ["bun test zz", "test -f result-real.txt"]);
+      console.log(`  its gates, as its trail says them:\n    ${gates.join("\n    ")}`);
+      console.log(`  ${runtime}, R11-1 (chain): proof ${JSON.stringify(done.proof)}`);
+      expect(done.proof).toMatchObject({ state: "checked", verified: false });
+      expect((done.proof as { proof: { after: number[] } }).proof.after[1]).not.toBe(0);
+      expect(docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`).status).not.toBe(0);
+      placement();
+    });
+
+    /*
+     * The eleventh review's R11-2: the node's check that its locked test is as it was ran on a gates' copy, and one it
+     * couldn't make was taken as no change: a process the freeze missed closed the clone's .git to the gates' user until
+     * the check's copy had failed, the gate then ran the rewritten test, and the task came back Proven. Now the round's
+     * tree is taken by the task's VM's own user, hashed as the round's VM keeps it, and a check that can't be made sends the
+     * work back. The control first: the rewrite alone is found.
+     */
+    test("R11-2, its control: a task that rewrites its locked test is sent back by the check, and isn't verified", async () => {
+      const { done, placement } = await handOff("TASK_LOCKED_PLAIN", ["bun test locked.test.ts"]);
+      console.log(`  ${runtime}, R11-2 control: proof ${JSON.stringify(done.proof)}; locked: ${done.trail.filter((t) => /changed locked\.test\.ts|Tests changed/.test(t.text)).length}`);
+      expect(done.proof).toMatchObject({ state: "checked", verified: false });
+      placement();
+    });
+
+    test("R11-2: the same task with a process the freeze misses, closing its .git around the check's copy, is sent back all the same", async () => {
+      const { done, herVm, gates, placement } = await handOff("TASK_LOCKED", ["bun test locked.test.ts"]);
+      console.log(`  its gates, as its trail says them:\n    ${gates.join("\n    ")}`);
+      console.log(`  ${runtime}, R11-2: proof ${JSON.stringify(done.proof)}; locked: ${done.trail.filter((t) => /changed locked\.test\.ts|Tests changed/.test(t.text)).length}`);
+      expect(done.proof).toMatchObject({ state: "checked", verified: false });
+      expect(docker("exec", herVm, "cat", `/work/tasks/${done.task}/app.txt`).stdout).toBe("one\n");
+      placement();
     });
   });
 }

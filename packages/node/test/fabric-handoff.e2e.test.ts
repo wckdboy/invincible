@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { randomBytes } from "node:crypto";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bodyFingerprint, ceilingThreads, FABRIC, type HandedView, KERNEL, newNodeIdentity, REFERENCE_SINGLE, runGrantPolicy, signQdt, type TeamSnapshot } from "@invincible/core";
 import { MAC_TAKES_NO_TASK } from "../src/fabric/handoff.ts";
@@ -33,12 +35,12 @@ let hold: { tag: string; entered: boolean; release: () => void; done: Promise<vo
 const docker = fakeDocker({ engine: "27.3.1" });
 docker.onExec = async (_container, command) => {
   const text = command.join("\n");
-  // Its gates' copy of its tree (handed-repo.ts handedGates, as their own user: R8-3), made: its files, its bytes, and the
-  // tree it was asked for (its agent has no repository: the folder's, the one it was told, or else one of its own).
-  if (text.includes("its gates run on the tree alone")) {
-    const [, tree, , was] = [...text.matchAll(/ '([^']*)'/g)].map((m) => m[1]!).slice(-4);
-    return { code: 0, stdout: `1 1 ${tree || was || "c".repeat(40)}` };
-  }
+  // Its gates' round (handed-repo.ts, the eleventh fabric review's ruling): its tree kept in the round's VM's store (its
+  // agent has no repository: a folder's tree of its own), and each gate's copy of it, made as their own user: its files,
+  // its bytes, and that tree.
+  const words = [...text.matchAll(/ '([^']*)'/g)].map((m) => m[1]!);
+  if (text.includes("not a store for its gates")) return { code: 0, stdout: words.at(-1) || "c".repeat(40) };
+  if (text.includes("not a copy for its gates")) return { code: 0, stdout: `1 1 ${words.at(-3)}` };
   const gate = /gate-([a-z]+)/.exec(text)?.[1];
   if (gate) return written.has(gate) ? { code: 0, stdout: "the file is there" } : { code: 1, stdout: "", stderr: "no such file" };
   const write = /write-([a-z]+)/.exec(text)?.[1];
@@ -52,6 +54,28 @@ docker.onExec = async (_container, command) => {
   }
   return { code: 0, stdout: "command completed" };
 };
+
+/**
+ * The binary a host spawns a pipe's sides with (SandboxHost.pipe): here a stand-in, so nothing reaches a real Docker. The
+ * sending side (its folder's tar, in its task's VM) gives nothing; the receiving side (the round's store) keeps it and
+ * prints its tree. Anything else asked of it is refused, and kept, and the test fails on it.
+ */
+const pipes = (() => {
+  const at = mkdtempSync(join(tmpdir(), "handoff-pipes-"));
+  const binary = join(at, "docker");
+  const refused = join(at, "refused");
+  writeFileSync(binary, `#!/bin/bash
+all="$*"
+case $1 in exec) ;; *) printf '%s\\n' "$1" >> ${JSON.stringify(refused)}; exit 125;; esac
+case $all in
+  *"not a store for its gates"*) cat > /dev/null; printf '%s\\n' ${"c".repeat(40)};;
+  *INVINCIBLE_PIPE=*) ;;
+  *) printf 'exec\\n' >> ${JSON.stringify(refused)}; exit 125;;
+esac
+`);
+  chmodSync(binary, 0o755);
+  return { binary, refused: () => (existsSync(refused) ? readFileSync(refused, "utf8") : ""), done: () => rmSync(at, { recursive: true, force: true }) };
+})();
 
 /** What each model was asked, by the task's tag. */
 const prompts: { tag: string; model: string; text: string }[] = [];
@@ -88,6 +112,8 @@ describe.skipIf(!HAVE_QAMP)(`a task handed from one node to another's agents${HA
       // Alpha's grants to runs last 4 s here (300 s otherwise), so every run below lives across their renewals.
       a: { fabricGrantTtlSecs: 4 },
       b: {
+        // (The binary a pipe's sides are spawned with: the round's tree given to its gates' VM, which this stand-in answers.)
+        dockerBinary: pipes.binary,
         // (Room for an agent's VM and, beside it, the VM of a task another node hands it, as big as the agent's: on a node
         // that can't hold both, the task waits for room as any sandbox does.)
         capabilities: { ...sandboxCaps("beta"), cores: 16, memoryGb: 32 },
@@ -114,6 +140,9 @@ describe.skipIf(!HAVE_QAMP)(`a task handed from one node to another's agents${HA
     hold?.release();
     await pair?.stop();
     models.stop(true);
+    // (Nothing but a pipe's two sides reached the stand-in binary.)
+    expect(pipes.refused()).toBe("");
+    pipes.done();
   });
 
   const handed = (id: string, after = 0) => pair.callA<HandedView>("handedTask", { id, after });

@@ -26,21 +26,30 @@ const say = (text: string) => ({ content: text });
 const HANG = { hang: true };
 const call = (name: string, input: unknown) => ({ tool_calls: [{ index: 0, id: name, function: { name, arguments: JSON.stringify(input) } }] });
 
-/** Another node's task's VM as a test gives it: with no gates' exec of its own, its gates' commands go where its commands go. */
-type GivenVm = Omit<HandedVm, "gates"> & Partial<Pick<HandedVm, "gates">>;
+/** Another node's task's VM as a test gives it: with no round of its gates of its own, its round's commands go where its commands go. */
+type GivenVm = Omit<HandedVm, "round"> & Partial<Pick<HandedVm, "round">>;
 /**
- * What a fake task VM's gates' user answers to the node's copy of its tree (handedGates): its files, its bytes, and the tree
- * it was asked for (a folder's, with no repository: the one it was told, or else one of its own). Anything else: null.
+ * What a fake round's VM answers to the node's store and copies of its tree (handedRoundStore, handedCopy): the store, the
+ * tree it was given (with no repository, a folder's of its own); a copy, its files, its bytes, and its tree. Else null.
  */
-const gatesCopy = (command: string): ExecResult | null => {
-  if (!command.includes("its gates run on the tree alone")) return null;
-  const [, tree, , was] = [...command.matchAll(/ '([^']*)'/g)].map((m) => m[1]!).slice(-4);
-  return result({ stdout: `1 1 ${tree || was || "c".repeat(40)}` });
+const roundAnswer = (command: string): ExecResult | null => {
+  const words = [...command.matchAll(/ '([^']*)'/g)].map((m) => m[1]!);
+  if (command.includes("not a store for its gates")) return result({ stdout: words.at(-1) || "c".repeat(40) });
+  if (command.includes("not a copy for its gates")) return result({ stdout: `1 1 ${words.at(-3)}` });
+  return null;
 };
-/** A fake task VM's gates' exec: its commands go where `exec` sends them, and the copy of its tree is answered as made. */
-const gatesOf = (exec: HandedVm["exec"]): HandedVm["gates"] => async (command, timeout, signal) => {
-  const ran = await exec(command, timeout, signal);
-  return gatesCopy(command) ?? ran;
+/** A fake round of its gates: its commands go where `exec` sends them, its store and copies answered as made, its sweep finding none. */
+const roundOf = (exec: HandedVm["exec"]): HandedVm["round"] => async (take, store, timeout, signal) => {
+  const from = await exec(take, timeout, signal);
+  const kept = await exec(store, timeout, signal);
+  return {
+    taken: { from, to: roundAnswer(store) ?? kept, bytes: 0, cut: false },
+    gates: async (command, t, s) => {
+      const ran = await exec(command, t, s);
+      return roundAnswer(command) ?? ran;
+    },
+    sweep: async () => result({ stdout: "" }),
+  };
 };
 type Overrides = Partial<Omit<TeamRuntimeDeps, "handedVm">> & { handedVm?: (...asked: Parameters<NonNullable<TeamRuntimeDeps["handedVm"]>>) => Promise<GivenVm> };
 
@@ -72,7 +81,7 @@ function fixture(script: object[], given: Overrides = {}, usage?: object) {
   };
   if (givenVm) deps.handedVm = async (...asked) => {
     const vm = await givenVm(...asked);
-    return { ...vm, gates: vm.gates ?? gatesOf(vm.exec) };
+    return { ...vm, round: vm.round ?? roundOf(vm.exec) };
   };
   // Another node's task's VM, made here as one of the fixture's (its commands go where the fixture's go, its `exec`); each
   // one made, with the models it was leased, and whether it was let go, kept.
@@ -84,7 +93,7 @@ function fixture(script: object[], given: Overrides = {}, usage?: object) {
       // (Its clone and its changes go between two commands as the fixture's commands go: each run, the first's words to the second.)
       const pipe = async (from: string, to: string, timeout: number, signal: AbortSignal) => ({ from: await deps.exec(m, from, timeout, signal), to: await deps.exec(m, to, timeout, signal), bytes: 0, cut: false });
       const exec = (command: string, timeout: number, signal: AbortSignal) => deps.exec(m, command, timeout, signal);
-      return { exec, gates: gatesOf(exec), receive: pipe, send: pipe, stop: () => deps.stopWorker(m), release: async () => void (vm.released = true) };
+      return { exec, round: roundOf(exec), receive: pipe, send: pipe, stop: () => deps.stopWorker(m), release: async () => void (vm.released = true) };
     };
   }
   const context: TeamRunContext = { signal: new AbortController().signal, chainId: task.chainId, send: () => { throw new Error("unexpected send"); }, remember: () => { throw new Error("unexpected local note"); }, delegate: () => { throw new Error("unexpected task"); }, recruit: () => { throw new Error("unexpected agent"); }, emit: () => {} };
@@ -1129,14 +1138,17 @@ function gatedFixture(opts: { outlives: boolean; changes: "during its gates" | "
 }
 
 /*
- * The eighth fabric review's R8-3: a task's gates ran where its own processes and its own profile could answer for them.
- * Now each gate runs as its own user (the VM's gates' exec) on a copy of its own of the tree its gates judge, read as they
- * began, after the task's end: no gate sees what the one before it left, and a copy that can't be made is a gate that fails.
+ * The eighth fabric review's R8-3 and the eleventh's ruling: a task's gates ran where its own processes and its own profile
+ * could answer for them, and then in its VM as a user of their own, where a process a gate's run of its code left lived
+ * on (R11-1). Now each run of its gates is a round of its own, in a VM of its own given its tree once as the round
+ * begins, after the task's end; each gate runs there as its own user on a copy of its own of that tree, every process of
+ * that user there ended just before the copy: no gate sees what the one before it left, and a copy that can't be made is
+ * a gate that fails.
  */
-test("another node's task's gates each run on a copy of their own, made by their own user after its end, of the tree read as they began (R8-3)", async () => {
+test("another node's task's gates each run in their round's own VM, on a copy of their own made after every process of their user there is ended, of the tree read as they began (R8-3, R11-1)", async () => {
   const HANDED_BASE = "89abcdef0123456789abcdef0123456789abcdef";
   const agent = { ...member, repository: "https://github.com/you/project" };
-  const said: { via: "exec" | "gates"; command: string }[] = [];
+  const said: { via: "exec" | "take" | "store" | "gates" | "sweep"; command: string }[] = [];
   const f = fixture([say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("PASS\nFine.")], {
     agent: () => agent,
     models: () => [{ provider: "paid", model: "m" }],
@@ -1150,9 +1162,16 @@ test("another node's task's gates each run on a copy of their own, made by their
     },
     handedVm: async () => ({
       exec: async (command: string) => (said.push({ via: "exec", command }), result(command.includes(".tree-index") ? { stdout: "7".repeat(40) } : {})),
-      gates: async (command: string) => {
-        said.push({ via: "gates", command });
-        return gatesCopy(command) ?? result({ exitCode: command.includes("bun test required-check") && said.some((c) => plain(c.command).includes("echo one")) ? 0 : 1 });
+      round: async (take: string, store: string) => {
+        said.push({ via: "take", command: take }, { via: "store", command: store });
+        return {
+          taken: { from: result(), to: roundAnswer(store)!, bytes: 1, cut: false },
+          gates: async (command: string) => {
+            said.push({ via: "gates", command });
+            return roundAnswer(command) ?? result({ exitCode: command.includes("bun test required-check") && said.some((c) => plain(c.command).includes("echo one")) ? 0 : 1 });
+          },
+          sweep: async () => (said.push({ via: "sweep", command: "" }), result({ stdout: "" })),
+        };
       },
       receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }),
       send: async () => ({ from: result(), to: result({ stdout: "0" }), bytes: 0, cut: false }),
@@ -1162,23 +1181,29 @@ test("another node's task's gates each run on a copy of their own, made by their
   });
   f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
   const done = await f.runtime.executeTask(agent, { ...handedTask, gates: ["bun test required-check", "test -f built.txt"] }, f.context);
-  // Every gate as their own user, none in the task's: each on a copy of its own (its folder, by a nonce) made just before it.
+  // Every gate as their own user in their round's VM, none in the task's: each on a copy of its own (its folder, by a
+  // nonce) made just before it, every process of theirs there ended just before that.
   const gates = said.filter((c) => c.command.includes("sys.argv[4:6]))' gate "));
   expect(gates.length).toBe(4);
   expect(said.filter((c) => c.via === "exec").some((c) => c.command.includes("sys.argv[4:6]))' gate "))).toBe(false);
   expect(gates.every((c) => c.via === "gates")).toBe(true);
-  const copies = said.filter((c) => c.command.includes("its gates run on the tree alone"));
+  const copies = said.filter((c) => c.command.includes("not a copy for its gates"));
   const ons = gates.map((c) => / (\/gates\/[0-9a-f]{32})$/.exec(c.command)![1]!);
   expect(new Set(ons).size).toBe(4);
   for (const [i, on] of ons.entries()) {
     const at = said.indexOf(gates[i]!);
-    expect(said[at - 1]!.command).toContain(` '${on}' `);
-    expect(said[at - 1]!.command).toContain(` '${"7".repeat(40)}' '${on}' ''`);
+    expect(said[at - 1]!.command).toContain(` '${"7".repeat(40)}' '${on}' 'repo'`);
+    expect(said[at - 2]!.via).toBe("sweep");
   }
   expect(copies.length).toBe(4);
-  // Before each run of them, the task's end, then its tree read: the baseline's and the submission's.
-  for (const first of [0, 2]) {
-    const at = said.indexOf(copies[first]!);
+  // Two rounds, the baseline's and the submission's: each after the task's end and its tree read, the tree given to the
+  // round's VM as a pack of that tree, kept there in its store.
+  const takes = said.filter((c) => c.via === "take");
+  expect(takes.length).toBe(2);
+  for (const take of takes) {
+    const at = said.indexOf(take);
+    expect(take.command).toContain(` '${"7".repeat(40)}'`);
+    expect(said[at + 1]!.command).toContain(` '/work/round' '${"7".repeat(40)}'`);
     expect(said.slice(0, at).map((c) => (c.command.includes("sys.exit(end_task(") ? "end" : c.command.includes(".tree-index") ? "tree" : "")).filter(Boolean).slice(-2)).toEqual(["end", "tree"]);
   }
   // Its own command under the helper, which comes first, its login shell inside the gateway's after it.
@@ -1187,6 +1212,66 @@ test("another node's task's gates each run on a copy of their own, made by their
   // The second gate's file never came: it fails, honestly, and the task isn't verified.
   expect(done.verified).toBe(false);
 });
+
+/*
+ * The eleventh fabric review's R11-2: the node's check that the tests its gates run are as they were took a check it
+ * couldn't make as no change, and the gates then ran the rewritten test. Now a check that can't be made sends the work
+ * back: a round whose tree can't be given, a sweep that can't end what was left, a copy that can't be made, or a check
+ * that didn't end as it does.
+ */
+for (const [what, breaks] of [
+  ["its round's tree can't be given to its VM", { take: true }],
+  ["what its gates' user left can't all be ended", { sweep: true }],
+  ["its copy can't be made", { copy: true }],
+  ["its check doesn't end as it does", { check: true }],
+] as const) {
+  test(`another node's task's check of its locked tests sends the work back when ${what}, and the gates never run on it (R11-2)`, async () => {
+    const HANDED_BASE = "89abcdef0123456789abcdef0123456789abcdef";
+    const agent = { ...member, repository: "https://github.com/you/project" };
+    let submitted = false;
+    const gated: string[] = [];
+    const lines: string[] = [];
+    const f = fixture([say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("DONE\nBuilt."), say("DONE\nBuilt."), say("PASS\nFine.")], {
+      agent: () => agent,
+      models: () => [{ provider: "paid", model: "m" }],
+      paid: (ref: string) => ref === "paid/m",
+      keep: async () => "artifact-r11-2",
+      exec: async (_m: Agent, command: string) => {
+        if (command.includes("from_commit")) return result({ stdout: `${HANDED_BASE} fetched` });
+        if (command.includes("--allow-empty")) return result({ stdout: `0 ${"7".repeat(40)}` });
+        if (command.includes(".tree-index")) return result({ stdout: "7".repeat(40) });
+        return result({ stdout: "0" });
+      },
+      handedVm: async () => ({
+        exec: async (command: string) => {
+          if (plain(command).includes("echo one")) submitted = true;
+          return result(command.includes(".tree-index") ? { stdout: "7".repeat(40) } : {});
+        },
+        round: async (_take: string, store: string) => ({
+          // (Once the work is done, the round it is submitted to breaks as asked: its baseline's round is sound.)
+          taken: { from: result(submitted && "take" in breaks ? { exitCode: 1, stderr: "its tree could not be packed: gone" } : {}), to: roundAnswer(store)!, bytes: 1, cut: false },
+          gates: async (command: string) => {
+            if (command.includes("not a copy for its gates")) return submitted && "copy" in breaks ? result({ exitCode: 1, stderr: "its tree could not be checked out: denied" }) : roundAnswer(command)!;
+            if (command.includes("sha256sum")) return submitted && "check" in breaks ? result({ exitCode: 137, stdout: "" }) : result({ stdout: `${"a".repeat(64)}  required-check.test.ts\n` });
+            gated.push(submitted ? "after" : "before");
+            return result({ exitCode: submitted ? 0 : 1 });
+          },
+          sweep: async () => (submitted && "sweep" in breaks ? result({ exitCode: 1, stderr: "processes of the gates' user are still running: 1" }) : result({ stdout: "" })),
+        }),
+        receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }),
+        send: async () => ({ from: result(), to: result({ stdout: "0" }), bytes: 0, cut: false }),
+        stop: async () => {},
+        release: async () => {},
+      }),
+    });
+    f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+    const done = await f.runtime.executeTask(agent, { ...handedTask, gates: ["bun test required-check.test.ts"] }, { ...f.context, emit: (line: string) => void lines.push(line) });
+    // The baseline's gate ran and failed; no gate ran on the work: each submission went back, said so, and it isn't verified.
+    expect(gated).toEqual(["before"]);
+    expect(JSON.stringify(f.bodies)).toContain("couldn't be made");
+    expect(done.verified).toBe(false);
+  });
+}
 
 test("another node's task's processes are ended before its submission's gates: what one would change under them, or after, never is (I-b's gates)", async () => {
   for (const changes of ["during its gates", "after them"] as const) {
