@@ -69,7 +69,7 @@ What the owner uses every day, built on the carried engine around the new model.
 ## Phase 2: the fabric 🔨
 
 Q-AMP between the nodes and the agents ([FABRIC.md](FABRIC.md)). On main and dormant, and off on every node until its
-own setting says so (`invincible fabric on`), and pinned to Q-AMP 0.2.0, the first release with the sidecar.
+own setting says so (`invincible fabric on`), and pinned to Q-AMP 0.3.0, after 0.2.0, the first release with the sidecar.
 
 - 🔨 Q-AMP: the sidecar socket API ✅ (Q-AMP main); grants that renew themselves: the giver renews a run's grant and sends
   it in on the hand-off's call, and Q-AMP's own, holder-driven renewal, spec first, is next.
@@ -87,7 +87,7 @@ own setting says so (`invincible fabric on`), and pinned to Q-AMP 0.2.0, the fir
     Within its minute it could replay it to a third node as the full node, and read the answer.
   - Over Q-AMP the door already holds the signer to the transport key's node.
   - The target's id goes into the signing input. It is a contract change, with fixtures for the old form and the new.
-- ✅ The pin: Q-AMP 0.2.0, the first release with the sidecar (`scripts/qamp-pin.sh`).
+- ✅ The pin: Q-AMP 0.3.0, after 0.2.0, the first release with the sidecar (`scripts/qamp-pin.sh`).
 - 🔜 The owner's pair switched on (FABRIC.md, the runbook).
 - 🔜 Coding plans for another node's tasks, bounded by calls or tokens a day (the lead, 28 November 2026). A hand-off
   runs only on models its budget counts above $0, so that its budget bounds its spend (`handedLease`, `paidFor`).

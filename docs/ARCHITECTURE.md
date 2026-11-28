@@ -98,7 +98,7 @@ out QAMP"). What runs over it, in order:
 daemon holds the vault, so no native QUIC stack is loaded into it (the reasoning is in the carried Q-AMP design, 25
 November 2026). The sidecar holds no secret but the node's transport key.
 
-**As built** (26 November 2026, [FABRIC.md](FABRIC.md); pinned to Q-AMP 0.2.0, the first release with the sidecar, and
+**As built** (26 November 2026, [FABRIC.md](FABRIC.md); pinned to Q-AMP 0.3.0, after 0.2.0, the first release with the sidecar, and
 off on each node until its own setting says so):
 - **The sidecar.** Each node starts its sidecar on UDP 7410, under a transport key of its own that its signed profile
   names, and watches and restarts it.

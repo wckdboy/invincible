@@ -5,7 +5,7 @@ Phase 2 of [PLAN.md](PLAN.md), as built (26 November 2026). [ARCHITECTURE](ARCHI
 protocol for proof across nodes, the numbers, and how to switch it on.
 
 **State:** on main, dormant. It is off on every node until that node's own setting says so (`invincible fabric on`). The
-pin is Q-AMP 0.2.0, its first release with the sidecar (`scripts/qamp-pin.sh`): a node with that binary and its setting
+pin is Q-AMP 0.3.0 (`scripts/qamp-pin.sh`), whose sidecar the node speaks as it does 0.2.0's, the first release with one: a node with that binary and its setting
 on runs its sidecar, and one without either stays on HTTP with signed requests, its Doctor saying why.
 
 ## The sidecar under every node
@@ -472,7 +472,7 @@ second (192.0.2.20); every address here is a documentation address. Do it only o
 answered and a Q-AMP release with the sidecar is pinned.
 
 1. **The pin.** `scripts/qamp-pin.sh` names the release and the SHA-256 of its binary for each platform a node runs on
-   (linux-x64, darwin-arm64), from the release's SHA256SUMS.
+   (linux-x64, linux-arm64, darwin-arm64), from the release's SHA256SUMS.
 2. **The binary, on each node.** Either way the binary is checked against the pin and put at `<home>/bin/qamp` by a
    rename, so a sidecar running the old one keeps running.
    - **With a deploy:** `scripts/deploy.sh <host> --qamp <the release's binary for that machine>`. The node is restarted
@@ -481,6 +481,13 @@ answered and a Q-AMP release with the sidecar is pinned.
      ~/.invincible/bin`. The node needs no restart.
 
    The binary alone switches nothing on.
+
+   **From Q-AMP 0.2.0 to 0.3.0, keep the way back.** Before the new binary goes in, copy the sidecar's state file aside:
+   `state.json` beside its socket (`<home>/run/state.json`), its grants and revocations. 0.3.0 soon writes that file as
+   its version 2: at its first change (a grant made, renewed or revoked) while it holds 0.2.0's grants, and at a token's
+   revocation in any case. 0.2.0's sidecar refuses to start on version 2 ("state file …: unknown version 2"). To go back
+   to 0.2.0, put the copy back with 0.2.0's binary. Every revocation made since is lost with it: a token revoked since is
+   taken again until it expires, a day at most (the sidecar's `--max-ttl`).
 3. **Switch it on, on each node:** `invincible fabric on`. A running node starts its sidecar at once (and asks the binary
    whether it has one); a stopped one does when it starts. A node that takes other nodes' tasks is a Linux one with
    Docker (a Mac takes none), and it needs no other setting: layout 2 isn't one of the fabric's.
