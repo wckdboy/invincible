@@ -125,15 +125,15 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
             else -> ({})
         }
         // As Grok Bot's (the owner's word, 28 November 2026): back, your agent's face and name in a pill (the chat's title
-        // said with it), and one menu: a new chat, your past chats, its own computer, a task to give. A side question is
-        // "/btw" in the box.
+        // said with it), and one menu: a new chat, all your chats ("All chats", the iPhone's word too), its own computer, a
+        // task to give. A side question is "/btw" in the box.
         PageBar(Primary.name, back, navigation = lead, titleContent = { ChatPill(Primary.name, line = title ?: "New chat", open = null) { PrimaryMark(24.dp) } }) {
             var options by remember { mutableStateOf(false) }
             androidx.compose.foundation.layout.Box {
                 androidx.compose.material3.IconButton(onClick = { options = true }) { Icon(MoreIcon, contentDescription = "Chat options") }
                 androidx.compose.material3.DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
                     androidx.compose.material3.DropdownMenuItem(text = { Text("New chat") }, enabled = !live, onClick = { options = false; chat.fresh() })
-                    androidx.compose.material3.DropdownMenuItem(text = { Text("Past chats") }, onClick = { options = false; listing = true })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("All chats") }, onClick = { options = false; listing = true })
                     if (computer != null) {
                         androidx.compose.material3.DropdownMenuItem(text = { Text("Its screen") }, onClick = { options = false; watching = true })
                         androidx.compose.material3.DropdownMenuItem(text = { Text("Its terminal") }, onClick = { options = false; inTerminal = true })
