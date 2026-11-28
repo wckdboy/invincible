@@ -749,17 +749,27 @@ print(json.dumps({"starts": P.starts, "new": fresh is not old, "kept": again is 
   });
 
   test("a screen isn't settled while a page is loading, however still it looks: the picture after a click that navigates is the new page's (C0's F6)", () => {
+    // On a clock of the test's own, which a busy machine can't stretch: the page loads for 300 ms on a screen quiet for
+    // 10 s, and the settle ends as the load does, never sooner and no more than one of its 10 ms looks after. (Read on
+    // the real clock, "under a second" got 1,008 ms at 2 % of a core, 28 November 2026.)
     const got = py(`
+import threading
+clock = [50.0]
+waited = []
+def sleep(s):
+    waited.append(s)
+    clock[0] += max(s, 1e-6)  # (a real sleep takes some time, however short it is asked to be)
 class W:
-    lock = __import__("threading").Lock(); last_change = time.monotonic() - 10
+    lock = threading.Lock(); last_change = 40.0
 class B:
-    ws = True; until = time.monotonic() + 0.3
-    def loading(self): return time.monotonic() < B.until
-desk = d.Desk(pieces=object(), display=object(), watch=W(), browser=B())
-print(json.dumps(desk.settle(cap=2)))`) as { settled: boolean; settled_ms: number };
+    ws = True
+    def loading(self): return clock[0] < 50.3
+desk = d.Desk(pieces=object(), display=object(), watch=W(), browser=B(), now=lambda: clock[0], sleep=sleep)
+print(json.dumps(dict(desk.settle(cap=2), waited_ms=sum(waited) * 1000)))`) as { settled: boolean; settled_ms: number; waited_ms: number };
     expect(got.settled).toBe(true);
-    expect(got.settled_ms).toBeGreaterThanOrEqual(290);
-    expect(got.settled_ms).toBeLessThan(1000);
+    expect(got.settled_ms).toBeGreaterThanOrEqual(300);
+    expect(got.settled_ms).toBeLessThanOrEqual(310);
+    expect(got.waited_ms).toBeCloseTo(got.settled_ms, 0);
   });
 });
 
