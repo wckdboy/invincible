@@ -19,7 +19,7 @@ export const SEAT_HARNESS: Readonly<Partial<Record<SeatKind, string>>> = { "clau
  */
 export const SEAT_TERMS: Readonly<Partial<Record<SeatKind, { says: string; terms: string; allows: { native: boolean; tools: "unattended" | "interactive" } }>>> = {
   "google-antigravity": {
-    says: 'Google: "Using third party software, tools, or services to access the Service (e.g. using OpenClaw with Antigravity OAuth) is a breach of this Agreement." "Such actions may be grounds for suspension or termination of your Antigravity and/or Gemini CLI accounts." The owner chose this on 27 November 2026, accepting the risk to their Google account (as T3 Code drives agy).',
+    says: 'Google: "Using third party software, tools, or services to access the Service (e.g. using OpenClaw with Antigravity OAuth) is a breach of this Agreement." "Such actions may be grounds for suspension or termination of your Antigravity and/or Gemini CLI accounts." The owner chose this on 27 November 2026, accepting the risk to their Google account (as T3 Code drives agy). And: "We use Interactions to evaluate, develop, and improve Google and Alphabet research, products, services and machine learning technologies." "Google employees and contractors may access, view, review and use Interactions." "Please don’t submit confidential information or any data you wouldn’t want a reviewer to see."',
     terms: "https://antigravity.google/terms",
     allows: { native: false, tools: "unattended" },
   },

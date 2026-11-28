@@ -29,11 +29,11 @@ describe("seats in words", () => {
       title: "Sign in on Google's page",
       open: "Open Google's page",
       steps: ["Open the page and sign in to the account this seat is for.", "Paste the code its last page shows you here."],
-      first: "Google's Antigravity terms call reaching it through another tool, as Invincible does, a breach that may get your Antigravity and Gemini CLI accounts suspended: you chose this on 27 November 2026, accepting that risk to your Google account.",
+      first: "Google's Antigravity terms call reaching it through another tool, as Invincible does, a breach that may get your Antigravity and Gemini CLI accounts suspended: you chose this on 27 November 2026, accepting that risk to your Google account. The same terms let Google use what the seat sends (your code, your words and what its tools print) to improve its products and models, and let its staff read it; Antigravity's own settings have an opt-out.",
     });
     // What it rests on: Google's own words, where Google says them, and what that lets its agents do.
     expect(SEAT_TERMS["google-antigravity"]).toEqual({
-      says: 'Google: "Using third party software, tools, or services to access the Service (e.g. using OpenClaw with Antigravity OAuth) is a breach of this Agreement." "Such actions may be grounds for suspension or termination of your Antigravity and/or Gemini CLI accounts." The owner chose this on 27 November 2026, accepting the risk to their Google account (as T3 Code drives agy).',
+      says: 'Google: "Using third party software, tools, or services to access the Service (e.g. using OpenClaw with Antigravity OAuth) is a breach of this Agreement." "Such actions may be grounds for suspension or termination of your Antigravity and/or Gemini CLI accounts." The owner chose this on 27 November 2026, accepting the risk to their Google account (as T3 Code drives agy). And: "We use Interactions to evaluate, develop, and improve Google and Alphabet research, products, services and machine learning technologies." "Google employees and contractors may access, view, review and use Interactions." "Please don’t submit confidential information or any data you wouldn’t want a reviewer to see."',
       terms: "https://antigravity.google/terms",
       allows: { native: false, tools: "unattended" },
     });
