@@ -978,12 +978,19 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
           twice. The lockfile's workspaces' dependencies, its catalogs and its overrides, which bun never reads there,
           are held as strictly: each a table of npm names, asked of the default registry by a version, a range, a tag or
           an `npm:` alias of one.
-        - It fills from the lockfile's packages alone, by a manifest of its own asking for each by name and version.
-          Bun resolves that manifest from the registry's metadata to a lockfile of the fill's own, which must name each
-          of them by the tree's hash, before any tarball is fetched; then it installs that lockfile, checking each
-          tarball against its hash, and runs no script.
+        - It fills from the lockfile's packages alone, by a manifest of its own asking for each by name and version. Bun
+          resolves that manifest to a lockfile of the fill's own with a cache of the fill's own, in its memory
+          (`/tmp/resolve`): what bun acts on as it resolves never reaches the node's cache. Before, the resolve step ran
+          in the node's cache, and a registry package's own git dependency was cloned into it before the check below
+          refused the fill (the thirteenth re-review's I-13b; its reach was the proxy's, the registry alone, and the
+          filler's own files). That lockfile must name each of the tree's packages by the tree's hash, and nothing that
+          isn't the registry's; only then does bun install it into the node's cache, checking each tarball against its
+          hash, and it runs no script (`install-cache.test.ts` runs the filler's steps with a stand-in bun that says
+          which cache each wrote).
         - A gate that needs a package that wasn't filled fails offline, saying why. Bun doesn't check a hash of what it
-          takes from its cache, which holds what the registry gave alone, each package checked as it was fetched.
+          takes from its cache, which holds the registry's packages alone, each checked as it was fetched; a fill the
+          check refuses leaves the node's cache as it was (`install-cache.integration.test.ts`). Each fill reads the
+          registry's metadata afresh.
         - The filler runs in runc, not Kata: what bun does with the registry's tarballs is the filler's to contain, with
           no capability, no network and the cache its one writable mount.
       - A gate whose command runs the task's code runs it as its own user, for that run alone, and that code can make

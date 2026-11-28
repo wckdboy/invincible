@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cacheMount, FILL_CHECK_PY, fillerArgs, LOCK_CHECK_PY, runArgs, type SandboxSpec } from "../src/index.ts";
+import { gzipSync } from "node:zlib";
+import { cacheMount, FILL_CHECK_PY, FILLER_SCRIPT, fillerArgs, fillerEnv, LOCK_CHECK_PY, runArgs, type SandboxSpec } from "../src/index.ts";
 
 /*
  * The node's install cache for rounds of other nodes' tasks' gates (install-cache.ts). The filler's check of what it is
@@ -225,6 +226,36 @@ describe("the filler's check of the lockfile bun resolved its own manifest to (F
     expect(resolved(p0)).toEqual({ code: 1, said: refusedFor("the registry has no is-odd@3.0.1, which its bun.lock names") });
     expect(resolved(`${p0}\n    "p1": ["is-odd@3.0.1", "", {}, "${ODD}"],\n    "x": ["x@https://example.test/x.tgz", {}],`)).toEqual({ code: 1, said: refusedFor("bun would fetch x@https://example.test/x.tgz, which isn't the default registry's") });
     expect(resolved(`${p0}\n    "p1": ["is-odd@3.0.1", "https://registry.example.test/", {}, "${ODD}"],`)).toEqual({ code: 1, said: refusedFor("bun would fetch is-odd@3.0.1, which isn't the default registry's") });
+  });
+});
+
+/*
+ * The thirteenth fabric review's I-13b: the filler's resolve step (`--lockfile-only`) ran with the node's cache as bun's,
+ * and bun acted there on what a registry package's own dependencies name (a git one was cloned into /cache) before
+ * FILL_CHECK_PY could refuse it. Now the resolve step has a cache of its own in the filler's memory, and the node's cache
+ * is bun's only for the checked install.
+ */
+describe("the filler's steps (FILLER_SCRIPT), with a stand-in bun that says which cache each step wrote", () => {
+  test("I-13b: the resolve step writes a cache of its own in the filler's memory; only the install FILL_CHECK_PY passed writes the node's", () => {
+    const at = temp();
+    // (The script's own steps, in a folder of this test's for its /tmp, a free port for its way out unused: its forwarder
+    // here only says it listens, and the stand-in bun reaches nothing.)
+    const script = FILLER_SCRIPT.replaceAll("/tmp/", `${at}/`);
+    mkdirSync(join(at, "bin"));
+    writeFileSync(join(at, "bin", "bun"), `#!/bin/bash\nprintf '%s %s\\n' "$BUN_INSTALL_CACHE_DIR" "$*" >> ${JSON.stringify(join(at, "bun.log"))}\ncase " $* " in *" --lockfile-only "*) cp ${JSON.stringify(join(at, "resolved.lock"))} bun.lock;; esac\nexit 0\n`);
+    chmodSync(join(at, "bin", "bun"), 0o755);
+    // What bun resolves the fill's own manifest to: each package by the tree's hash.
+    writeFileSync(join(at, "resolved.lock"), lock(`"p0": ["is-number@6.0.0", "", {}, "${NUMBER}"],\n    "p1": ["is-odd@3.0.1", "", { "dependencies": { "is-number": "^6.0.0" } }, "${ODD}"],`, `"": { "name": "fill", "optionalDependencies": { "p0": "npm:is-number@6.0.0", "p1": "npm:is-odd@3.0.1" } },`));
+    mkdirSync(join(at, "given"));
+    writeFileSync(join(at, "given", "bun.lock"), lock(REGISTRY));
+    const given = gzipSync(spawnSync("tar", ["-c", "-C", join(at, "given"), "bun.lock"]).stdout);
+    const env = { ...fillerEnv(`${join(at, "bin")}:/usr/bin:/bin`), HOME: join(at, "home"), BUN_INSTALL_CACHE_DIR: join(at, "cache"), FORWARD: "import sys\nopen(sys.argv[3], 'w').close()" };
+    const ran = spawnSync("/bin/bash", ["--noprofile", "--norc", "-c", script], { input: given, encoding: "utf8", env, timeout: 30_000 });
+    expect([ran.status, ran.stderr.trim()]).toEqual([0, ""]);
+    const steps = readFileSync(join(at, "bun.log"), "utf8").trim().split("\n");
+    expect(steps).toHaveLength(2);
+    expect(steps[0]).toStartWith(`${join(at, "resolve")} install --lockfile-only`);
+    expect(steps[1]).toStartWith(`${join(at, "cache")} install --frozen-lockfile`);
   });
 });
 

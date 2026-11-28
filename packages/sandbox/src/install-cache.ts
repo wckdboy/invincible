@@ -12,10 +12,12 @@ import { BUN_LOCK_PY, VM_BUN_CACHE } from "@invincible/core";
  * It is given the tree's bun.lock alone, nothing else of the tree's (no package.json, bunfig.toml, .npmrc or script). It
  * checks the lockfile (LOCK_CHECK_PY), and fills from the lockfile's packages alone: it writes a manifest of its own that
  * asks for each of the registry's packages the lockfile names, by name and version (`npm:<name>@<version>`). Bun
- * resolves that manifest from the registry to a lockfile of the fill's own, which must name each package by the
- * lockfile's own hash (FILL_CHECK_PY). Then bun installs from that lockfile, checking each tarball against its hash, and
- * runs no package's script. So a tree's catalogs, overrides and workspaces never reach bun, and nothing of its own
- * manifests does.
+ * resolves that manifest from the registry to a lockfile of the fill's own, in a cache of the fill's own in its memory
+ * (what it acts on while it resolves, a registry package's own git dependency among it, never reaches the node's: the
+ * thirteenth fabric re-review's I-13b). That lockfile must name each package by the lockfile's own hash, and nothing
+ * but the registry's (FILL_CHECK_PY). Then bun installs from it into the node's cache, checking each tarball against
+ * its hash, and runs no package's script. So a tree's catalogs, overrides and workspaces never reach bun, nothing of its
+ * own manifests does, and the node's cache gets what the registry gave alone.
  *
  * A gate's `bun install --frozen-lockfile` then takes from the cache, offline. One that needs a package that wasn't
  * filled fails, and its gate says why. Bun doesn't check a hash of what it takes from its cache: the cache holds what the
@@ -218,8 +220,9 @@ while True:
  * The filler's own command, in its container: the tree's bun.lock (a gzipped tar on its input, unpacked here and never
  * by the node: what it inflates to is held to the container's memory and its /tmp) checked, and the fill's own manifest
  * written from it (LOCK_CHECK_PY); its forwarder to the node's proxy started; that manifest resolved to a lockfile of
- * the fill's own, fetching the registry's metadata alone, and checked (FILL_CHECK_PY); then bun's install of that
- * lockfile into the cache, each tarball checked against its hash, with no script of any package run.
+ * the fill's own, with a cache of its own in its memory (/tmp/resolve: I-13b), and checked (FILL_CHECK_PY); then bun's
+ * install of that lockfile into the node's cache, each tarball checked against its hash, with no script of any package
+ * run.
  */
 export const FILLER_SCRIPT = `set -o pipefail
 mkdir -p /tmp/m /tmp/home && cd /tmp/m || exit 1
@@ -230,7 +233,7 @@ tar -x -z --no-same-owner --no-same-permissions -f - || { echo "its manifests co
 for _ in {1..200}; do [ -e /tmp/forwarding ] && break; sleep 0.05; done
 [ -e /tmp/forwarding ] || { echo "its way to the registry couldn't be opened, so nothing is filled" >&2; exit 1; }
 cd /tmp/fill || exit 1
-bun install --lockfile-only --ignore-scripts --no-progress > /tmp/out 2>&1 || { tail -n 5 /tmp/out >&2; exit 1; }
+BUN_INSTALL_CACHE_DIR=/tmp/resolve bun install --lockfile-only --ignore-scripts --no-progress > /tmp/out 2>&1 || { tail -n 5 /tmp/out >&2; exit 1; }
 /usr/bin/python3 -I -c "$FILL_CHECK" /tmp/fill /tmp/hashes.json || exit 1
 bun install --frozen-lockfile --ignore-scripts --no-progress > /tmp/out 2>&1
 code=$?

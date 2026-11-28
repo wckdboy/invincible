@@ -285,11 +285,14 @@ transport keys carries all of it:
            catalogs and its overrides as strictly, though bun never reads them there: each a table of npm names, asked
            of the default registry by a version, a range, a tag or an `npm:` alias.
          - It fills from the lockfile's packages alone: it writes a manifest of its own that asks for each of them by
-           name and version. Bun resolves that manifest from the registry's metadata to a lockfile of the fill's own,
-           which must name each of them by the tree's hash before any tarball is fetched. Bun then installs it, checking
-           each tarball against that hash, and runs no package's script.
+           name and version. Bun resolves that manifest to a lockfile of the fill's own with a cache of the fill's own,
+           in its memory, so nothing bun acts on as it resolves reaches the node's cache (a registry package's own git
+           dependency is cloned as bun resolves: the thirteenth re-review's I-13b). That lockfile must name each of the
+           tree's packages by the tree's hash, and nothing that isn't the registry's. Only then does bun install it into
+           the node's cache, checking each tarball against that hash, and it runs no package's script.
          - A gate that needs a package that wasn't filled fails offline, and says why. Bun doesn't check a hash of what
-           it takes from its cache, which holds what the registry gave, each package checked as it was fetched;
+           it takes from its cache, which holds the registry's packages alone, each checked as it was fetched. Each fill
+           reads the registry's metadata afresh;
        - A `.git` of its own, whose HEAD is a commit of that tree with no history.
 
        A link in the tree that points out of it, by its words or by where it resolves through other links, is refused.

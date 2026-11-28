@@ -156,14 +156,15 @@ describe.skipIf(!available)("the node's install cache, on a real Docker", () => 
     expect(readdirSync(fresh)).toEqual([]);
   });
 
-  test("a lockfile whose hash isn't the registry's is refused before any tarball is fetched, and nothing of it is kept", async () => {
+  test("a lockfile whose hash isn't the registry's is refused before any tarball is fetched, and the cache is left as it was: not a package, nor the registry's word of one (I-13b)", async () => {
     const fresh = cacheFolder();
     const hash = /"is-odd@3\.0\.1", "",[^\n]*?"(sha512-[^"]+)"/.exec(honest()["bun.lock"])?.[1];
     expect(hash).toBeDefined();
     const wrong = `sha512-${"A".repeat(86)}==`;
     const ran = await fill(fresh, manifests({ "bun.lock": honest()["bun.lock"].replace(hash!, wrong) }));
     expect([ran.code, ran.said.split("\n").at(-1)]).toEqual([1, "its bun.lock's hash of is-odd@3.0.1 isn't the registry's, so nothing is filled"]);
-    expect(readdirSync(fresh).some((e) => e.includes("@@@"))).toBe(false);
+    // (Its resolve step had a cache of its own, in the filler's memory: the node's has nothing of it.)
+    expect(readdirSync(fresh)).toEqual([]);
   });
 
   /*
