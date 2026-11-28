@@ -46,6 +46,16 @@ describe("the team's routing, on the agents' page at a desk's width: a quiet lin
     expect(routingReport(tasks, {}).kinds.map((k) => k.kind)).toEqual(["fix", "code"]);
   });
 
+  test("how many needed you (tasks you stepped in on, however often), only where any did", () => {
+    const tasks = [
+      { ...finished(1, { began: "engineer", kind: "code" }), interventions: { steer: 1 } },
+      { ...finished(2, { began: "engineer", moved: "rereads", kind: "code" }, false), interventions: { message: 2, stop: 1 } },
+      finished(3, { began: "engineer", kind: "code" }),
+      finished(4, { began: "engineer", kind: "fix" }),
+    ];
+    expect(teamRoutingLines(tasks)).toEqual(["Fixes: 1 of 1 verified", "Code tasks: 2 of 3 verified · 1 moved up · 2 needed you"]);
+  });
+
   test("none routed, nothing to say: the page leaves it out", () => {
     expect(teamRoutingLines([])).toEqual([]);
     expect(teamRoutingLines([finished(1, undefined), { id: "task-running0001", status: "running", verified: false }])).toEqual([]);

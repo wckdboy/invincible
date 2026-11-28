@@ -15,8 +15,8 @@ export function beginLines(tasks: readonly RoutedTaskRead[]): { text: string; wh
 /**
  * The team's routing on the agents' page, at a desk's width and never on a phone: a quiet line each kind its node's
  * finished tasks were routed as (core's routingReport, what `invincible agents routing` says in full): how many were
- * verified, began on the planner's models, moved up, and went round on both tiers, leaving out what is none. No money:
- * each agent's row says what its week cost.
+ * verified, began on the planner's models, moved up, went round on both tiers, and needed you (you stepped in on them,
+ * however often), leaving out what is none. No money: each agent's row says what its week cost.
  */
 export function teamRoutingLines(tasks: readonly RoutingReportTask[]): string[] {
   return routingReport(tasks, {}).kinds.map((kind) => {
@@ -30,6 +30,7 @@ export function teamRoutingLines(tasks: readonly RoutingReportTask[]): string[] 
       planner ? `${planner} began on the planner's` : "",
       moved ? `${moved} moved up` : "",
       round ? `${round} went round on both tiers` : "",
+      kind.neededYou ? `${kind.neededYou} needed you` : "",
     ]
       .filter(Boolean)
       .join(" · ");
