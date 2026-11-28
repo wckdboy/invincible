@@ -48,6 +48,7 @@ import { evalsView } from "./views/evals.ts";
 import { teamView } from "./views/team.ts";
 import { homeView } from "./views/home.ts";
 import { openRoster, type Sidebar, sidebarNav } from "./views/sidebar.ts";
+import { deskNav } from "./views/desk-nav.ts";
 import { taskView } from "./views/task.ts";
 import { giveToAgents, openDirect } from "./views/team-forms.ts";
 import { tableOf } from "./views/roster.ts";
@@ -98,6 +99,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   // (Whether this device sees the work at all: a device that may not chat has no sidebar of it, and opens on its Inbox.)
   const hasWork = visible.some((spec) => spec.id === "home");
   const narrow = matchMedia("(max-width: 767px)");
+  const desk = matchMedia("(min-width: 1024px)");
   const home = (): Route => homeOf(visible, { narrow: narrow.matches });
 
   let current: Route | null = null;
@@ -170,19 +172,23 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   // Made only where it shows (from 768 px), and again as the screen grows to that: a phone's roster is its drawer, made as
   // it opens, so a phone does none of the sidebar's work (its faces, its table kept true; it was made there and hidden, and
   // a phone's first render paid for it).
+  // From 1024 px it is a desk's: T3 Code's projects and their threads (views/desk-nav.ts); between 768 and 1023 px the rail.
   let sidebar: Sidebar | null = null;
+  let sidebarKind: "desk" | "rail" | null = null;
   let sidebarAt: Parameters<Sidebar["at"]>[0] | null = null;
   const syncSidebar = (): void => {
-    const shows = hasWork && !narrow.matches;
-    if (shows && !sidebar) {
-      sidebar = sidebarNav(ctx, { toggle: () => toggleSidebar() });
-      shell.prepend(sidebar.el);
-      if (sidebarAt) sidebar.at(sidebarAt);
-    } else if (!shows && sidebar) {
+    const kind = hasWork && !narrow.matches ? (desk.matches ? "desk" : "rail") : null;
+    if (kind === sidebarKind) return;
+    if (sidebar) {
       sidebar.dispose();
       sidebar.el.remove();
       sidebar = null;
     }
+    sidebarKind = kind;
+    if (!kind) return;
+    sidebar = kind === "desk" ? deskNav(ctx, { toggle: () => toggleSidebar() }) : sidebarNav(ctx, { toggle: () => toggleSidebar() });
+    shell.prepend(sidebar.el);
+    if (sidebarAt) sidebar.at(sidebarAt);
   };
   // A sidebar folded away comes back from the top of the page, as T3 Code's does.
   const expand = button("Show the sidebar", { variant: "ghost", size: "sm", iconOnly: true, icon: "sidebar", title: "Show the sidebar  ( [ )", onClick: () => toggleSidebar() });
@@ -367,6 +373,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
    * (Home, a task, the agents), slowly while it is only the sidebar, never when nothing shows it. */
   const watch = (): void => live.watchTeam(!hasWork ? null : current === "home" || current === "task" || current === "team" ? 2000 : narrow.matches ? null : 6000);
   narrow.addEventListener("change", () => (watch(), syncSidebar()), { signal: lifetime.signal });
+  desk.addEventListener("change", () => syncSidebar(), { signal: lifetime.signal });
 
   function render(): void {
     const route = routeFromHash() ?? home();

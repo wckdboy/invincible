@@ -376,6 +376,53 @@
       }
       @media (min-width: 1024px) { :root { --sidebar-w: 268px; } }
 
+      /* ---------- a desk's sidebar, from 1024 px (views/desk-nav.ts): T3 Code's projects and their threads, one line a
+         thread (its face and dot, its title, how long ago), your agent and its chats first, your agents last ---------- */
+      .sidebar.desk { padding: var(--sp-2) var(--sp-2) var(--sp-2); }
+      .desk-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; display: flex; flex-direction: column; gap: 1px; padding: var(--sp-2) 0 var(--sp-3); }
+      .desk-group, .desk-section { display: flex; flex-direction: column; gap: 1px; }
+      .desk-section:empty { display: none; }
+      .desk-row {
+        display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-width: 0; height: 30px; padding: 0 var(--sp-2); border: 0; border-radius: var(--r-sm);
+        background: none; color: var(--text); font: inherit; font-size: var(--fs-13); text-align: left; text-decoration: none; cursor: pointer;
+        -webkit-user-select: none; user-select: none; transition: background-color var(--d-1) var(--ease-out);
+      }
+      .desk-row[data-depth="1"] { padding-left: 26px; }
+      .desk-row[aria-current="page"] { background: var(--surface-3); }
+      @media (hover: hover) { .desk-row:hover, .desk-more:hover, .desk-foot-link:hover { background: var(--surface-3); } }
+      .desk-face { flex: none; display: grid; place-items: center; width: 18px; height: 18px; color: var(--text-3); }
+      .desk-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .desk-meta { flex: none; color: var(--text-3); font-size: var(--fs-12); }
+      /* What is new to you, and what waits on you, in weight; a failure's word in the red. */
+      .desk-row:is([data-state="unread"], [data-state="verified"], [data-state="needs"]) .desk-title { font-weight: 600; }
+      .desk-row[data-state="failed"] .desk-meta { color: var(--failed); }
+      .desk-group-head { display: flex; align-items: center; gap: 2px; min-width: 0; min-height: 28px; padding: 0 0 0 2px; color: var(--text-2); font-size: var(--fs-13); font-weight: 550; }
+      .desk-group-head.desk-primary { margin-bottom: 1px; }
+      .desk-group-head.desk-primary > .desk-row { flex: 1; padding-left: 4px; font-weight: 550; }
+      .desk-group-head > .desk-meta { padding-right: var(--sp-2); font-weight: 400; }
+      .desk-fold {
+        flex: none; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-3); cursor: pointer;
+      }
+      .desk-fold svg { transition: transform var(--d-1) var(--ease-out); }
+      .desk-fold[aria-expanded="true"] svg { transform: rotate(90deg); }
+      .desk-fold:hover { color: var(--text); }
+      .desk-group-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 4px; border-radius: var(--r-sm); color: inherit; text-decoration: none; }
+      .desk-group-name > svg { flex: none; color: var(--text-3); }
+      a.desk-group-name:hover { color: var(--text); }
+      .desk-heading { display: flex; align-items: center; justify-content: space-between; min-height: 28px; margin-top: var(--sp-3); padding: 0 0 0 var(--sp-2); color: var(--text-3); font-size: var(--fs-12); font-weight: 550; }
+      .desk-heading > a { color: inherit; text-decoration: none; }
+      .desk-heading > a:hover { color: var(--text); }
+      .desk-more { display: flex; align-items: center; width: 100%; height: 26px; padding: 0 var(--sp-2) 0 26px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-3); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; }
+      .desk-empty { margin: 0; padding: 2px var(--sp-2) 4px 26px; color: var(--text-3); font-size: var(--fs-12); }
+      .desk-needs[data-count="none"] { color: var(--text-2); }
+      .desk-needs > .roster-count { flex: none; }
+      .desk-foot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-2) 0 0 var(--sp-1); border-top: 1px solid var(--border); }
+      .desk-foot > .side-pill { flex: 0 1 auto; }
+      .desk-foot-links { flex: none; display: flex; gap: 1px; }
+      .desk-foot-link { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 var(--sp-2); border-radius: var(--r-sm); color: var(--text-2); font-size: var(--fs-13); text-decoration: none; }
+      .desk-foot-link > svg { flex: none; color: var(--text-3); }
+      .desk-foot-link[aria-current="page"] { background: var(--surface-3); color: var(--text); }
+
       /* ---------- the work's rows (views/work-rows.ts): a task in three lines, as T3 Code's sidebar has it ---------- */
       .work-row {
         display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 7px 9px 8px; border-radius: var(--r-md); color: var(--text); text-decoration: none;
