@@ -97,6 +97,16 @@ describe("the app icon: the I-beam, one solid form in one ink", () => {
     for (const at of [0, 255, 256 * 255, 256 * 256 - 1]) expect(dark[at * 4 + 3]).toBeLessThanOrEqual(1);
   });
 
+  // The owner's, 28 November 2026: the icon follows light and dark wherever the platform can. iOS can: its light form is
+  // the page's own ground in its ink, its dark and tinted forms the bare I-beam, as they were.
+  test("iOS's icon, byte for byte: light, the ink on white; dark, the white I-beam on nothing; tinted, that in grey", () => {
+    const set = join(ROOT, "apps/apple/Invincible/Assets.xcassets/AppIcon.appiconset");
+    const bare = renderMark(1024, { tile: null, ink: MARK_FORMS.dark.mark });
+    expect(readFileSync(join(set, "AppIcon.png"))).toEqual(Buffer.from(png(renderMark(1024, { tile: MARK_FORMS.light.tile, ink: MARK_FORMS.light.mark }), 1024)));
+    expect(readFileSync(join(set, "AppIcon-dark.png"))).toEqual(Buffer.from(png(bare, 1024)));
+    expect(readFileSync(join(set, "AppIcon-tinted.png"))).toEqual(Buffer.from(png(greyscale(bare), 1024)));
+  });
+
   test("the pages and the manifest name only icons that are there, and the favicon is the mark", () => {
     const manifest = JSON.parse(readFileSync(join(ROOT, "apps/web/src/manifest.webmanifest"), "utf8")) as { icons: { src: string; type: string }[] };
     for (const icon of manifest.icons) {

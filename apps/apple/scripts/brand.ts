@@ -2,10 +2,11 @@
 /*
  * Writes the Apple app's brand assets, so they can't drift from the web app's:
  *   - the app icon, the I-beam (scripts/mark.ts, the owner's choice of 26 November 2026, "minimal bold monochrome"; it
- *     replaced Field · Aurum), the same mark as the web app's and the Android app's icons. iOS's "any" form is the tile,
- *     1024 px edge to edge and opaque, white on near black (iOS rounds the corners itself); its dark form is the mark
- *     alone on nothing, which iOS backs itself; its tinted form is that mark in grey, for the system to colour. The Mac's
- *     is the tile drawn at each size a Mac draws an icon at (macOS clips it to its own shape);
+ *     replaced Field · Aurum), the same mark as the web app's and the Android app's icons. It follows light and dark (the
+ *     owner's word, 28 November 2026): iOS's "any" form, its light one, is the page's own ground in its ink, near black
+ *     on white, 1024 px edge to edge and opaque (iOS rounds the corners itself); its dark form is the white mark alone on
+ *     nothing, which iOS backs itself; its tinted form is that mark in grey, for the system to colour. The Mac's is the
+ *     tile, white on near black, drawn at each size a Mac draws an icon at (macOS clips it to its own shape);
  *   - the app's colours, monochrome (the owner's word, 26 November 2026: black, white and greys, colour kept for the
  *     agents): the ink (black on light, white on dark, as the web app's --accent), what is written on it, and the red of
  *     what went wrong, the one colour of the app's own.
@@ -15,7 +16,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { greyscale, png } from "../../../scripts/field-icon.ts";
-import { renderMark } from "../../../scripts/mark.ts";
+import { MARK_FORMS, renderMark } from "../../../scripts/mark.ts";
 
 /** The app's inks: black on light and white on dark (the web app's --accent), and the red of what went wrong (its deeper
  * form on light, its brighter one on dark). Gold, amber and cream are gone (26 November 2026). */
@@ -52,9 +53,10 @@ if (import.meta.main) {
   colour("Danger", INK.danger, INK.dangerOnDark);
 
   // ---- the app icon --------------------------------------------------------------------------------------------------
-  // The I-beam (scripts/mark.ts): white on near black; its dark form the mark alone on nothing, which iOS backs itself.
-  const icon = renderMark(1024);
-  const bare = renderMark(1024, { tile: null });
+  // The I-beam (scripts/mark.ts) in the page's own ground and ink: near black on white; its dark form the white mark
+  // alone on nothing, which iOS backs itself.
+  const icon = renderMark(1024, { tile: MARK_FORMS.light.tile, ink: MARK_FORMS.light.mark });
+  const bare = renderMark(1024, { tile: null, ink: MARK_FORMS.dark.mark });
   mkdirSync(join(ASSETS, "AppIcon.appiconset"), { recursive: true });
   writeFileSync(join(ASSETS, "AppIcon.appiconset/AppIcon.png"), png(icon, 1024));
   writeFileSync(join(ASSETS, "AppIcon.appiconset/AppIcon-dark.png"), png(bare, 1024));
