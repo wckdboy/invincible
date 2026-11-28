@@ -918,9 +918,10 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       code could end the gate's helper and leave a process that writes a later gate's file into its copy (the ninth
       re-review's R9-2: a first gate of `bun test` so passed a second of `test -f`, verified, in Kata and runc). So each
       copy begins, and each gate ends, by ending every process of the gates' user but the sweep's own until none is
-      left; no gate runs while one is, and a gate whose own processes couldn't all be ended doesn't pass. Every other
-      command of the node's in that VM reads no profile (`bash --noprofile --norc`), and the handed helper and its end
-      run as `/usr/bin/python3 -I` by its path; the task's own commands get
+      left; no gate runs while one is, and a gate whose own processes couldn't all be ended doesn't pass. With no
+      repository, a file its gates' user can't read, or one that won't fit, fails the copy and says which, rather than
+      being left out (I-2). Every other command of the node's in that VM reads no profile (`bash --noprofile
+      --norc`), and the handed helper and its end run as `/usr/bin/python3 -I` by its path; the task's own commands get
       their login shell inside the helper. A gate gets the tree that comes back, as CI's job gets a checkout: what the
       task installed or built in its worktree outside that tree, its lease and its HOME are not there, and a link out of
       the tree is refused. A gate whose command runs the task's code runs it as the gates' user, for that run alone. A

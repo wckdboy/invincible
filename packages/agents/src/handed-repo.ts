@@ -623,8 +623,9 @@ else:
                             os.chmod(d, stat.S_IMODE(st.st_mode) | 0o600)
                     finally:
                         os.close(fd)
-            except OSError:
-                pass
+            except OSError as e:
+                # (What its gates' user can't read or copy is no part left out: the copy, and its gates, fail and say so.)
+                sys.exit("its folder couldn't be copied as its gates' user reads it: " + os.path.relpath(s, root) + ": " + (e.strerror or str(e)))
     copied(root, copy)
     # (Its tree, as git hashes it, in a scratch store of the copy's own beside it: no file of it is changed.)
     store = os.path.join(on, 'hashed')

@@ -214,7 +214,8 @@ transport keys carries all of it:
          among them, can list, write or move anything there, nor signal or trace what runs there;
        - its objects taken from the clone through `index-pack`, each hashed as it comes, so the copy is that tree
          whatever the clone holds or does meanwhile. With no repository, the folder is copied, and each copy must hash to
-         what it was as the gates began;
+         what it was as the gates began. A file there the gates' user can't read, or one that won't fit, fails the copy,
+         and with it the gate, and says which: nothing is left out unsaid (the ninth re-review's I-2);
        - with a HOME and a temporary folder of its own, nothing of the VM's environment but a PATH of its read-only
          folders, and of the login profiles only the image's own (`/etc/profile`): never a profile, a `~/.local/bin` or
          a `~/.npmrc` the task wrote;

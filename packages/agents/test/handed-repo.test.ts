@@ -1017,6 +1017,16 @@ describe("the copy of its tree another node's task's gates run on (R8-3)", () =>
     expect([changed.status, changed.stderr.trim()]).toEqual([1, "its folder isn't what it was as its gates began"]);
   });
 
+  test("with no repository, a file its gates' user can't read is no part left out: the copy, and so its gates, fail and say which (the ninth review's I-2)", () => {
+    const folder = temp("handed-folder-");
+    writeFileSync(join(folder, "report.md"), "the report\n");
+    writeFileSync(join(folder, "secret.txt"), "not for its gates\n", { mode: 0o000 });
+    const gates = temp("handed-gates-");
+    const made = sh(handedGates(folder, "", join(gates, handedNonce()), gates));
+    chmodSync(join(folder, "secret.txt"), 0o600);
+    expect([made.status, made.stderr.trim()]).toEqual([1, "its folder couldn't be copied as its gates' user reads it: secret.txt: Permission denied"]);
+  });
+
   test("its copy's folder is one of the gates' folder's, named by a nonce, and its tree a tree's id", () => {
     const gates = "/gates";
     for (const on of ["/gates/x", "/tmp/0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a", `/gates/${"0a".repeat(16)}/..`, "/gatesx/0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"]) expect(() => handedGates("/work/tasks/t", "", on, gates)).toThrow("not a copy for its gates");
