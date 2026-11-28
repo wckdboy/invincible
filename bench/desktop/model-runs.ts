@@ -18,7 +18,7 @@ import { bench, BenchVm, cannotRunHere, clearLeftovers, IN_VM } from "./vm.ts";
  *   INVINCIBLE_BENCH_CAP_USD=15 INVINCIBLE_BENCH_METER_LABEL=c1-bench bun bench/desktop/model-runs.ts [--runs 5] [--only form]
  *
  *   INVINCIBLE_BENCH_SCRATCH=c1 INVINCIBLE_BENCH_GATEWAY_FILE=<the token's file> INVINCIBLE_BENCH_ROUTE=opencode-go/kimi-k3.1-pro \
- *   INVINCIBLE_BENCH_MAX_CALLS=150 INVINCIBLE_BENCH_EYES=opencode-go/kimi-k3.1-pro bun bench/desktop/model-runs.ts --runs 1
+ *   INVINCIBLE_BENCH_MAX_CALLS=120 INVINCIBLE_BENCH_EYES=opencode-go/kimi-k3.1-pro bun bench/desktop/model-runs.ts --runs 1
  *
  * - The gateway file is a node's gateway token for the benchmark, as KEY=value lines (ANTHROPIC_BASE_URL and
  *   ANTHROPIC_AUTH_TOKEN for the anthropic route; OPENAI_BASE_URL, a route template with <provider>, and OPENAI_API_KEY
@@ -33,8 +33,10 @@ import { bench, BenchVm, cannotRunHere, clearLeftovers, IN_VM } from "./vm.ts";
  *   whose terms let the primary call it itself (providers.ts `allows.native`: OpenCode Go's), as an agent's own loop
  *   does. Offered no toolset, it works the desktop by its shell's `desktop` command, shown the screen as a picture
  *   where its preset says it sees. Its plan is paid for already, and shared with the owner's own agents: its cap is
- *   in model calls, the engineer's and the eyes' together for a model that is both (INVINCIBLE_BENCH_MAX_CALLS, 150
- *   unless told), and the first answer that says the allowance or its rate is spent ends every run.
+ *   in model calls, the engineer's and the eyes' together for a model that is both (INVINCIBLE_BENCH_MAX_CALLS, 120
+ *   unless told: four fifths of a day's 150, the rest left for the eyes), and the first answer that says the allowance
+ *   or its rate is spent ends every run. Its calls, the engineer's and the eyes' together, begin 4 s apart at least
+ *   (pacer; INVINCIBLE_BENCH_GAP_MS): OpenCode Go refused a burst past about 25 calls a minute (28 November 2026).
  * - Its eyes (INVINCIBLE_BENCH_EYES, a plan's model as above): the agent is told it has them, as team-runtime tells it,
  *   and a `desktop look "…"` given as a command of its own is answered as deskd answers one (the VM's picture, deskd's
  *   own framing, the eyes' words as they came), from the bench's side, through the gateway: the bench's VMs reach no
@@ -50,7 +52,8 @@ const runs = Number(flag("runs") ?? 5);
 const only = (flag("only")?.split(",") ?? [...TASKS]) as TaskName[];
 const cap = Number(process.env.INVINCIBLE_BENCH_CAP_USD ?? NaN);
 const share = Number(process.env.INVINCIBLE_BENCH_RUN_CAP_USD ?? 1.2);
-const maxCalls = Number(process.env.INVINCIBLE_BENCH_MAX_CALLS ?? 150);
+const maxCalls = Number(process.env.INVINCIBLE_BENCH_MAX_CALLS ?? 120);
+const gapMs = Number(process.env.INVINCIBLE_BENCH_GAP_MS ?? 4000);
 const route = process.env.INVINCIBLE_BENCH_ROUTE ?? "anthropic";
 const eyesRoute = process.env.INVINCIBLE_BENCH_EYES;
 const label = process.env.INVINCIBLE_BENCH_METER_LABEL;
@@ -121,6 +124,22 @@ export function eyesFraming(source: string): string {
   const literal = /^EYES_FRAMING = \(((?:\s*"(?:[^"\\\n]|\\.)*")+)\s*\)/m.exec(source);
   if (!literal) throw new Error("deskd.py has no EYES_FRAMING");
   return [...literal[1]!.matchAll(/"((?:[^"\\\n]|\\.)*)"/g)].map((part) => JSON.parse(`"${part[1]}"`) as string).join("");
+}
+
+/**
+ * A plan's calls begun `gapMs` apart at least, whoever asks: one pacer, each of its fetches `pace(…)`, the engineer's
+ * and the eyes' together. OpenCode Go refused a burst past about 25 calls a minute (28 November 2026, GLM's 27th call in
+ * about a minute), so its runs ask one every 4 s at most: about 15 a minute.
+ */
+export function pacer(gapMs: number, clock: { now(): number; sleep(ms: number): Promise<void> } = { now: () => performance.now(), sleep: (ms) => Bun.sleep(ms) }): (via: typeof fetch) => typeof fetch {
+  let next = -Infinity;
+  return (via) =>
+    (async (url: string | URL | Request, init?: RequestInit) => {
+      const at = Math.max(clock.now(), next);
+      next = at + gapMs;
+      if (at > clock.now()) await clock.sleep(at - clock.now());
+      return via(url, init);
+    }) as typeof fetch;
 }
 
 /** Whether a refusal says a plan's allowance, or its rate, is spent: the bench stops at the first. */
@@ -251,8 +270,9 @@ async function main(): Promise<void> {
     const not = w ? whyNotOurs(w) : null;
     if (not) throw new Error(`the bench won't run on it: ${not}`);
   }
-  // A plan's runs are capped in calls; a model billed by the token, in dollars.
+  // A plan's runs are capped in calls; a model billed by the token, in dollars. A plan's are paced (pacer).
   const onPlan = Boolean(way.openai);
+  const pace = onPlan && gapMs > 0 ? pacer(gapMs) : (via: typeof fetch) => via;
   if (onPlan ? !(maxCalls > 0) : !(Number.isFinite(cap) && cap > 0)) throw new Error(onPlan ? "INVINCIBLE_BENCH_MAX_CALLS: the model calls the runs stop at" : "INVINCIBLE_BENCH_CAP_USD: the spend the runs stop at, in dollars");
   const framing = eyesFraming(readFileSync(new URL("../../sandbox/desktop/deskd.py", import.meta.url), "utf8"));
   const log = (line: string) => console.error(line);
@@ -289,7 +309,7 @@ async function main(): Promise<void> {
         const r = await runTask(vm, task, "model", run, {
           ctx: (asked) =>
             way.openai
-              ? modelsContext(way.token, recording(gatewayAlone(way.base), asked), way.model, { id: way.openai, baseUrl: way.base })
+              ? modelsContext(way.token, recording(pace(gatewayAlone(way.base)), asked), way.model, { id: way.openai, baseUrl: way.base })
               : modelsContext(way.token, recording(throughGateway(way.base, { versioned: way.versioned }), asked), way.model),
           spent: (counted) => {
             if (onPlan) {
@@ -304,7 +324,7 @@ async function main(): Promise<void> {
                 eyes: true,
                 exec: (command: string, timeoutSec: number, inVm: (command: string, timeoutSec: number) => Promise<ExecResult>) => {
                   const question = lookOf(command);
-                  return question === null ? inVm(command, timeoutSec) : benchLook(question, inVm, eyes, framing, count, limited);
+                  return question === null ? inVm(command, timeoutSec) : benchLook(question, inVm, eyes, framing, count, limited, pace(fetch));
                 },
               }
             : {}),

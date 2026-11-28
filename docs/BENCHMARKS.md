@@ -132,9 +132,10 @@ everything but the model.
     none starts without its share left. Each run's cost is read from the node's meter;
   - or a coding plan's model whose terms let the primary call it itself (OpenCode Go's), at the gateway's
     OpenAI-compatible address. Offered no toolset, it works the desktop by its shell's `desktop` command, shown the
-    screen where its preset says it sees. It is capped in model calls, its own and its eyes' together, and every run
-    stops at the first answer that says the allowance is spent. Its eyes, when named, answer a `desktop look` as deskd
-    would, from the bench's side (the bench's VMs reach no network);
+    screen where its preset says it sees. It is capped in model calls, its own and its eyes' together (120 a model
+    unless told), its calls begun 4 s apart at least (OpenCode Go refused a burst past about 25 a minute), and every
+    run stops at the first answer that says the allowance or its rate is spent. Its eyes, when named, answer a
+    `desktop look` as deskd would, from the bench's side (the bench's VMs reach no network);
   - the record, by task: passes, the model calls and actions a run took, the calls per action (the median beside the
     worst; an action is every `desktop` command, the toolset's or inside a shell's own), the looks, tokens, dollars and
     minutes. Once five runs of each task are recorded, it is the suite's model baseline

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { ExecResult } from "../../packages/core/src/index.ts";
-import { benchLook, type EyesCount, eyesFraming, gatewayValues, limitAnswer, lookOf, meterDollars, recordOf, routeOf, whyNotOurs } from "./model-runs.ts";
+import { benchLook, type EyesCount, eyesFraming, gatewayValues, limitAnswer, lookOf, meterDollars, pacer, recordOf, routeOf, whyNotOurs } from "./model-runs.ts";
 
 /* The real model's runs (model-runs.ts): what is read of a gateway token's file, where each route's calls go, and the node's meter. */
 
@@ -90,6 +90,36 @@ test("the bench's look: the VM's own picture, the question in deskd's framing, t
   // No question: as deskd answers it, and nothing is asked.
   expect((await benchLook("", inVm, eyes, "FRAMING", count, () => {}, gateway)).exitCode).toBe(2);
   expect(sent).toHaveLength(2);
+});
+
+test("a plan's runs ask one call every 4 s at most, the engineer's and the eyes' together: a stand-in that refuses a burst, as OpenCode Go did, refuses none", async () => {
+  // OpenCode Go refused a burst past about 25 calls a minute (28 November 2026: GLM's 27th call in about a minute). The
+  // stand-in refuses a call when 25 have started in the minute before it, as that did; each call takes it a second.
+  let now = 0;
+  const clock = { now: () => now, sleep: async (ms: number) => void (now += ms) };
+  const started: number[] = [];
+  const refused: number[] = [];
+  const plan = (async () => {
+    const within = started.filter((t) => t > now - 60_000).length;
+    started.push(now);
+    now += 1000;
+    if (within < 25) return Response.json({ choices: [{ message: { content: "ok" } }] });
+    refused.push(started.length);
+    return new Response('{"error":{"message":"Rate limit exceeded. Please try again later."}}', { status: 429 });
+  }) as unknown as typeof fetch;
+  const ask = (via: typeof fetch) => via("http://192.0.2.10:7811/gw/opencode-go/chat/completions", { method: "POST" });
+  // Unpaced, as the run at 01:26 asked: its 26th call is refused.
+  for (let n = 0; n < 40; n++) await ask(plan);
+  expect(refused[0]).toBe(26);
+  // Paced, one pacer for the engineer's calls and the eyes': none of 40 is refused, each begun 4 s after the one before.
+  started.length = 0;
+  refused.length = 0;
+  now = 10 * 60_000;
+  const pace = pacer(4000, clock);
+  const [engineer, eyes] = [pace(plan), pace(plan)];
+  for (let n = 0; n < 40; n++) await ask(n % 3 === 2 ? eyes : engineer);
+  expect(refused).toEqual([]);
+  expect(started.slice(1).map((t, i) => t - started[i]!)).toEqual(Array(39).fill(4000));
 });
 
 test("the node's meter is read for the token's label alone (as its by-who lines name a token, with no arm: before it), its colours aside; one it says nothing of is null", () => {
