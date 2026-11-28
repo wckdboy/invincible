@@ -129,6 +129,29 @@ describe("what changed", () => {
 });
 
 describe("where a stream stood: the cursor it is opened again from", () => {
+  test("a stream opened while another listens has in its hello what was written before it opened, whatever the look waits on", () => {
+    const s = stamps();
+    // Its poke's look a minute off: as on a starved machine, where the next slice of CPU may be a second away.
+    const live = new LiveChanges(s.table, { everyMs: 60_000, soonMs: 60_000 });
+    const first: LiveTopic[][] = [];
+    const stopFirst = live.subscribe((topics) => first.push(topics));
+    const before = live.at();
+    s.set("turns", "1");
+    live.poke();
+    // (And one that nothing poked for: another process's write, say.)
+    s.set("team", "1");
+    const second: LiveTopic[][] = [];
+    const stopSecond = live.subscribe((topics) => second.push(topics));
+    // Its hello: where things stand now, and what moved since a cursor from before the writes.
+    expect(live.since(before)).toEqual(["team", "turns"]);
+    expect(live.at()).not.toBe(before);
+    // The one already listening is told at once; the new one has it in its hello, and is told nothing more of it.
+    expect(first).toEqual([["team", "turns"]]);
+    expect(second).toEqual([]);
+    stopFirst();
+    stopSecond();
+  });
+
   test("each change comes with where things stand after it; resumed from there with nothing changed since, nothing changed", async () => {
     const s = stamps();
     const live = new LiveChanges(s.table, { everyMs: 60_000, soonMs: 1 });

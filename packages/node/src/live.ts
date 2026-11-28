@@ -8,7 +8,8 @@ import { LIVE_TOPICS, type LiveTopic } from "@invincible/core";
  * the node wrote a chat, a notification's state, a draft, a request or a question of its own, a peer came or went), and
  * as the next deadline a stamp names comes (`due`: an ask that lapses). Every LOOK_MS while anyone listens they are read
  * anyway: the net under the pokes, for what nothing tells (another process's write). Whoever listens is told the topics
- * whose stamps moved, together, and nothing more. While nobody listens nothing is read.
+ * whose stamps moved, together, and nothing more. While nobody listens nothing is read. Each stream opens on the stamps
+ * read as it opens, so its hello holds every write made before it.
  *
  * Where things stand is a count of the times anything moved since this began, each topic keeping the count at which it
  * last moved. A reader's cursor is the latest count among the topics it may read, sealed (Seal): it moves only with
@@ -117,6 +118,13 @@ export class LiveChanges {
       this.kept = null;
       this.last = now;
       this.timer = setInterval(() => this.look(), this.o.everyMs ?? LOOK_MS);
+    } else {
+      // Others listen: what was written before this one opened is read now, so its hello has it (where things stand, and
+      // what moved since its cursor), rather than its being told a look later. On a starved machine a poke's look waits
+      // for the next slice of CPU, a second away. Those already listening are told it now, as that look would have.
+      if (this.soon) clearTimeout(this.soon);
+      this.soon = null;
+      this.look();
     }
     this.listeners.add(listener);
     return () => {
