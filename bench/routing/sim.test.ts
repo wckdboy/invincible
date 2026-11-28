@@ -49,21 +49,31 @@ describe("the routing suite's stand-ins", () => {
     expect(r.tasks[0]!.usd).toBeGreaterThan(routed.tasks[0]!.usd);
   });
 
-  test("the memory: an agent whose tasks all need the lead begins on it once one moved up, and tries the worker after two begun there; one whose tasks the worker does never does", async () => {
+  test("the memory, by kind: an agent whose tasks all need the lead begins on it once one moved up, and tries the worker after two begun there; one whose tasks the worker does never does, nor do fixes the worker does, whatever its other tasks needed", async () => {
     const tasks = memoryTasks(7, 6);
-    expect(["ada", "bo", "cy"].map((agent) => tasks.filter((t) => t.agent === agent).length)).toEqual([6, 6, 6]);
-    expect(tasks.filter((t) => t.agent === "bo").every((t) => t.level === 3)).toBe(true);
-    expect(tasks.filter((t) => t.agent === "ada").every((t) => t.level <= 2)).toBe(true);
+    expect(["ada", "bo", "cy", "di"].map((agent) => tasks.filter((t) => t.agent === agent).length)).toEqual([6, 6, 6, 6]);
+    expect(tasks.filter((t) => t.agent === "bo").every((t) => t.level === 3 && !t.fix)).toBe(true);
+    expect(tasks.filter((t) => t.agent === "ada").every((t) => t.level <= 2 && !t.fix)).toBe(true);
+    // di's: a fix its worker does, then a task that needs the lead, in turn.
+    expect(tasks.filter((t) => t.agent === "di").map((t) => (t.fix ? (t.level <= 2 ? "fix" : "hard fix") : `level ${t.level}`))).toEqual(["fix", "level 3", "fix", "level 3", "fix", "level 3"]);
     const on = await runPolicy("routed", tasks, { memory: true });
-    const began = (agent: string) => on.tasks.filter((t) => t.task.agent === agent).map((t) => t.began);
-    // The tier its last verified (core's beginFor): the lead's, once one moved up; after two begun there, the worker's tried.
-    expect(began("bo")).toEqual(["engineer", "planner", "planner", "engineer", "planner", "planner"]);
+    const began = (agent: string, fix?: boolean) =>
+      on.tasks.filter((t) => t.task.agent === agent && (fix === undefined || Boolean(t.task.fix) === fix)).map((t) => `${t.began}${t.routed?.because ? `:${t.routed.because}` : ""}`);
+    // The tier its last verified: the lead's, once one moved up; after two begun there by the memory, the worker's tried.
+    expect(began("bo")).toEqual(["engineer", "planner:memory", "planner:memory", "engineer:probe", "planner:memory", "planner:memory"]);
     expect(began("ada").every((b) => b === "engineer")).toBe(true);
+    // di's fixes stay on the worker; its other tasks go as bo's do, each kind remembered apart, as its records keep it.
+    expect(began("di", true)).toEqual(["engineer", "engineer", "engineer"]);
+    expect(began("di", false)).toEqual(["engineer", "planner:memory", "planner:memory"]);
+    expect(on.tasks.filter((t) => t.task.agent === "di").map((t) => t.routed?.kind)).toEqual(["fix", "task", "fix", "task", "fix", "task"]);
     // Without it, every one of bo's begins on the worker and moves up.
     const off = await runPolicy("routed", tasks);
     expect(off.tasks.filter((t) => t.task.agent === "bo").every((t) => t.began === "engineer" && t.escalations.length === 1)).toBe(true);
     expect(on.usd).toBeLessThan(off.usd);
     expect(on.verified).toBe(off.verified);
+    // The same trail, the same tier: run again, every task begins where it did, for the same reason.
+    const again = await runPolicy("routed", tasks, { memory: true });
+    expect(again.tasks.map((t) => [t.began, t.routed, t.verified, t.usd])).toEqual(on.tasks.map((t) => [t.began, t.routed, t.verified, t.usd]));
   });
 
   test("the same tasks give the same outcomes, costs and times when run again", async () => {

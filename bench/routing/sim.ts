@@ -31,8 +31,10 @@ export interface SimTask {
   kind: Kind;
   /** How hard it is: a model does it when this is at most its capability (1 to 4; nothing does a 4). */
   level: number;
-  /** The agent it is given to (absent: the one stand-in agent). Its tasks before it are its memory's (team-runtime beginOf). */
+  /** The agent it is given to (absent: the one stand-in agent). Its tasks before it are its memory's (core's routing.ts beginFor). */
   agent?: string;
+  /** A fix of a pull request's checks: its kind, as its routing is kept, is a fix (core's routing.ts); absent, a task. */
+  fix?: boolean;
 }
 
 /** The stand-ins: what each can do, what it costs (stand-in $ per million tokens) and how long a call takes. */
@@ -64,8 +66,11 @@ export type Policy = "routed" | "pinned" | "strong";
 export const POLICIES: readonly Policy[] = ["routed", "pinned", "strong"];
 
 /**
- * Three agents' tasks, in turn, for the memory (team-runtime beginOf): `ada`'s are all ones its worker can do (levels 1
- * and 2), `bo`'s all need the lead (level 3), `cy`'s any level; each kind in turn, the levels drawn from the seed.
+ * Four agents' tasks, in turn, for the memory (core's routing.ts beginFor, by kind of task): `ada`'s are all ones its
+ * worker can do (levels 1 and 2), `bo`'s all need the lead (level 3), `cy`'s any level, and `di`'s are fixes its worker
+ * can do and tasks that need the lead, one and the other: a memory of one kind for all would begin its fixes on the lead
+ * after each task. Each kind of failing in turn, the levels drawn from the seed: di's from a seed of their own, so ada's,
+ * bo's and cy's are what they were before di's were added.
  */
 export function memoryTasks(seed: number, each = 12): SimTask[] {
   const random = rng(subSeed(seed, "routing.memory"));
@@ -75,10 +80,13 @@ export function memoryTasks(seed: number, each = 12): SimTask[] {
     { agent: "bo", level: () => 3 },
     { agent: "cy", level: () => 1 + intBelow(random, 4) },
   ];
-  return Array.from({ length: each * agents.length }, (_, i) => {
+  const three: SimTask[] = Array.from({ length: each * agents.length }, (_, i) => {
     const who = agents[i % agents.length]!;
     return { id: `task-m${String(i).padStart(11, "0")}`, kind: kinds[Math.floor(i / agents.length) % kinds.length]!, level: who.level(), agent: who.agent };
   });
+  const mixed = rng(subSeed(seed, "routing.memory.mixed"));
+  const di = (k: number): SimTask => ({ id: `task-d${String(k).padStart(11, "0")}`, kind: kinds[k % kinds.length]!, level: k % 2 === 0 ? 1 + intBelow(mixed, 2) : 3, agent: "di", ...(k % 2 === 0 ? { fix: true } : {}) });
+  return Array.from({ length: each }, (_, k) => [...three.slice(k * agents.length, (k + 1) * agents.length), di(k)]).flat();
 }
 
 /** The tasks of a seed: as many of each kind, each at a level drawn from the seed. */
@@ -103,6 +111,8 @@ export interface TaskResult {
   calls: Record<Tier, number>;
   /** Whose models its work began on, as its record kept it (absent: not kept, its work held to models). */
   began?: "engineer" | "planner";
+  /** Its kind as its record kept it (core's routing.ts), and why it began where it did. */
+  routed?: { kind?: string; because?: string };
 }
 
 export interface PolicyResult {
@@ -117,6 +127,9 @@ export interface PolicyResult {
 
 const text = (content: unknown): string =>
   typeof content === "string" ? content : Array.isArray(content) ? content.map((part) => (part && typeof part === "object" && "text" in part ? String((part as { text: unknown }).text) : "")).join("") : "";
+
+/** A stand-in pull request whose checks failed: what makes a task a fix (its agent has no repository here, so only its kind). */
+const SIM_FIX = { connector: "sim", owner: "sim", repo: "sim", branch: "sim-fix", pr: 7, head: "a".repeat(40) } as const;
 
 const fenced = (command: string) => `Next.\n\`\`\`sh\n${command}\n\`\`\``;
 
@@ -235,7 +248,7 @@ export async function runPolicy(policy: Policy, tasks: readonly SimTask[], optio
       calls = { worker: 0, lead: 0, judge: 0 };
       movedOffPins = 0;
       const trail: string[] = [];
-      const given: TeamTask = { id: each.id, room: "work", assignee: agent.id, title: `A ${each.kind} task at level ${each.level}`, goal: "Fix the total of the new orders, and verify it.", dependsOn: [], gates: ["bun test required-check"], budgetUsd: BUDGET_USD, status: "running", verified: false, progress: "", output: "", error: null, chainId: `chain-${each.id}`, createdAt: 1, updatedAt: 1 };
+      const given: TeamTask = { id: each.id, room: "work", assignee: agent.id, title: `A ${each.kind} task at level ${each.level}`, goal: "Fix the total of the new orders, and verify it.", dependsOn: [], gates: ["bun test required-check"], budgetUsd: BUDGET_USD, status: "running", verified: false, progress: "", output: "", error: null, chainId: `chain-${each.id}`, createdAt: 1, updatedAt: 1, ...(each.fix ? { fix: SIM_FIX } : {}) };
       const context: TeamRunContext = {
         signal: new AbortController().signal,
         chainId: given.chainId,
@@ -248,7 +261,7 @@ export async function runPolicy(policy: Policy, tasks: readonly SimTask[], optio
       const outcome = await runtime.executeTask(agent, given, context);
       const usd = costOf(outcome.record.spent, PRICES).usd;
       const seconds = (Object.keys(TIERS) as Tier[]).reduce((sum, tier) => sum + calls[tier] * TIERS[tier].callSeconds, 0) + state.commands * COMMAND_SECONDS + state.gates * GATE_SECONDS;
-      results.push({ task: each, verified: outcome.verified, usd, minutes: seconds / 60, escalations: trail.filter((line) => line.startsWith("Escalated ·")).map((line) => line.split("\n")[0]!), movedOffPins, calls: { ...calls }, ...(outcome.record.routing ? { began: outcome.record.routing.began } : {}) });
+      results.push({ task: each, verified: outcome.verified, usd, minutes: seconds / 60, escalations: trail.filter((line) => line.startsWith("Escalated ·")).map((line) => line.split("\n")[0]!), movedOffPins, calls: { ...calls }, ...(outcome.record.routing ? { began: outcome.record.routing.began, routed: { kind: outcome.record.routing.kind, because: outcome.record.routing.because } } : {}) });
       history.set(agent.id, [{ ...given, status: outcome.verified ? "done" : "failed", verified: outcome.verified, record: outcome.record }, ...(history.get(agent.id) ?? [])]);
     }
     const verified = results.filter((r) => r.verified).length;

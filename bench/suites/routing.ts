@@ -10,8 +10,9 @@ import { BUDGET_USD, memoryTasks, type PolicyResult, POLICIES, runPolicy, simTas
  * every turn on the strong one (`strong`). Measured, each against the mandate's numbers: tasks verified, interventions
  * per verified task (a task that ends unverified needs you), stand-in dollars and virtual minutes per verified task, and
  * how often the work moved up; and the rules, never anything but 0: an agent's pinned work moved off its model, work
- * moved up more than the ladder's one rung, work moved "up" onto the model it was on, and a run that differs when run
- * again. No vendor's model, price or speed is in it: what it measures is the routing, on the stand-ins' terms.
+ * moved up more than the ladder's one rung, work moved "up" onto the model it was on, a task of a kind its worker always
+ * does begun on the lead by the memory, and a run (or the memory's) that differs when run again. No vendor's model,
+ * price or speed is in it: what it measures is the routing, on the stand-ins' terms.
  */
 
 const TASKS = 36;
@@ -30,11 +31,12 @@ export const suite: Suite = {
     "routing.rule.same-rung",
     "routing.memory.on.usd-per-done",
     "routing.rule.memory-misroutes",
+    "routing.memory.replay.differs",
     "routing.pace.on.served",
     "routing.pace.on.refused",
     "routing.replay.differs",
   ],
-  held: { "routing.rule.pinned-moved": 0, "routing.rule.climbs": 0, "routing.rule.same-rung": 0, "routing.rule.memory-misroutes": 0, "routing.pace.on.refused": 0, "routing.replay.differs": 0 },
+  held: { "routing.rule.pinned-moved": 0, "routing.rule.climbs": 0, "routing.rule.same-rung": 0, "routing.rule.memory-misroutes": 0, "routing.memory.replay.differs": 0, "routing.pace.on.refused": 0, "routing.replay.differs": 0 },
   async run(ctx) {
     const tasks = simTasks(ctx.seed, TASKS);
     const kinds = (["gate", "review", "stall"] as const).map((kind) => `${tasks.filter((t) => t.kind === kind).length} ${kind}`).join(", ");
@@ -65,9 +67,11 @@ export const suite: Suite = {
     ctx.quality("routing.rule.pinned-moved", results.get("pinned")!.tasks.reduce((sum, t) => sum + t.movedOffPins, 0), "turns", "lower", { note: "turns of a pinned agent's work answered by a model other than its own (the rule: never)" });
     ctx.quality("routing.rule.climbs", [...results.values()].flatMap((r) => r.tasks).filter((t) => t.escalations.length > 1).length, "tasks", "lower", { note: "tasks whose work moved up more than once: the ladder has one rung (never)" });
     ctx.quality("routing.rule.same-rung", results.get("strong")!.tasks.reduce((sum, t) => sum + t.escalations.length, 0), "", "lower", { note: "work said to move up onto the model it was on: with the planner's model the work's own there is no rung (never)" });
-    // The memory, by kind of task (team-runtime beginOf): three agents' tasks in turn, `ada`'s all the worker's to do,
-    // `bo`'s all the lead's, `cy`'s any; routed as a node does, with each agent's tasks so far its memory's, and without.
+    // The memory, by kind of task (core's routing.ts beginFor): four agents' tasks in turn, `ada`'s all the worker's to
+    // do, `bo`'s all the lead's, `cy`'s any, and `di`'s fixes the worker's and its other tasks the lead's, one and the
+    // other; routed as a node does, with each agent's tasks so far its memory's, and without.
     const remembered = memoryTasks(ctx.seed);
+    let kept: PolicyResult | null = null;
     for (const memory of [false, true]) {
       const r = await runPolicy("routed", remembered, { memory });
       ctx.pulse();
@@ -75,17 +79,25 @@ export const suite: Suite = {
       const name = memory ? "on" : "off";
       const per = (n: number) => n / r.verified;
       const said = memory ? "each agent's tasks so far its memory's, as a node's are" : "no agent's tasks so far seen";
-      ctx.quality(`routing.memory.${name}.verified`, r.verified, "tasks", "higher", { note: `of ${remembered.length}, three agents' tasks in turn, routed, ${said}` });
+      ctx.quality(`routing.memory.${name}.verified`, r.verified, "tasks", "higher", { note: `of ${remembered.length}, four agents' tasks in turn, routed, ${said}` });
       ctx.quality(`routing.memory.${name}.usd-per-done`, per(r.usd), "$", "lower", { note: `stand-in dollars per verified task, ${said}` });
       ctx.quality(`routing.memory.${name}.minutes-per-done`, per(r.minutes), "min", "lower", { note: `virtual minutes per verified task, ${said}` });
       ctx.quality(`routing.memory.${name}.escalations`, r.tasks.flatMap((t) => t.escalations).length, "", "lower", { note: `times work moved up, ${said}` });
       if (memory) {
-        ctx.quality("routing.memory.on.began-on-lead", r.tasks.filter((t) => t.began === "planner").length, "tasks", "higher", { note: "tasks that began on the lead by what their agent's last tasks needed" });
-        // (ada's tasks are all the worker's to do: never one begun on the lead, whatever its memory.)
-        ctx.quality("routing.rule.memory-misroutes", r.tasks.filter((t) => t.task.agent === "ada" && t.began === "planner").length, "tasks", "lower", { note: "tasks of an agent whose every task the worker does, begun on the lead (never)" });
+        kept = r;
+        ctx.quality("routing.memory.on.began-on-lead", r.tasks.filter((t) => t.began === "planner").length, "tasks", "higher", { note: "tasks that began on the lead by how their agent's last task of their kind went" });
+        ctx.quality("routing.memory.on.probes", r.tasks.filter((t) => t.routed?.because === "probe").length, "tasks", "lower", { note: "tasks that began on the worker again as a try, after their kind's last two began on the lead by the memory" });
+        // (ada's tasks are all the worker's to do, and so are di's fixes, whatever its other tasks needed: never one of
+        // them begun on the lead. A memory of one kind for all would begin di's fixes there.)
+        const misrouted = r.tasks.filter((t) => t.began === "planner" && (t.task.agent === "ada" || (t.task.agent === "di" && t.task.fix)));
+        ctx.quality("routing.rule.memory-misroutes", misrouted.length, "tasks", "lower", { note: "tasks of a kind the worker does every one of, begun on the lead (never): ada's, and di's fixes" });
       }
       ctx.log(`the memory ${name}: ${r.verified} of ${remembered.length} verified, $${r.usd.toFixed(2)} and ${r.minutes.toFixed(0)} min in all, moved up ${r.tasks.flatMap((t) => t.escalations).length} times, ${r.tasks.filter((t) => t.began === "planner").length} begun on the lead`);
     }
+    // The memory's tasks again, with it: each begins where it did, for the same reason, with the same outcome.
+    const memoryAgain = await runPolicy("routed", remembered, { memory: true });
+    const begun = (t: PolicyResult["tasks"][number]) => JSON.stringify([t.began, t.routed, t.verified, t.usd, t.minutes, t.escalations]);
+    ctx.quality("routing.memory.replay.differs", memoryAgain.tasks.filter((t, i) => begun(t) !== begun(kept!.tasks[i]!)).length, "tasks", "lower", { note: `of ${remembered.length}, the memory's tasks that began elsewhere, for another reason, or ended otherwise when run again (never)` });
     // A plan's pace (bursts.ts Pacer): eight agents on OpenCode Go for ten virtual minutes, without the pace and with it.
     for (const pace of [undefined, 24]) {
       const r = runPace({ seed: ctx.seed, agents: 8, ...(pace ? { pace } : {}) });
