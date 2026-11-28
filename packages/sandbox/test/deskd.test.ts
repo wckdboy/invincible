@@ -1088,10 +1088,18 @@ describe("nothing hangs, nothing is silent (step 5)", () => {
     await session(r, [{ id: 1, name: "type", input: { text: "Hello" } }, { id: 2, name: "key", input: { text: "Tab" } }, { id: 3, name: "type", input: { text: "abc" } }, { id: 4, name: "key", input: { text: "Return" } }]);
     const k = calls(r.trace(), "key") as { key: string; down: boolean; at: number }[];
     const lastUp = (before: number) => k.slice(0, before).filter((e) => !e.down).at(-1)!.at;
-    const tab = k.findIndex((e) => e.key === "Tab" && e.down);
     const ret = k.findIndex((e) => e.key === "Return" && e.down);
-    expect(k[tab]!.at - lastUp(tab)).toBeLessThan(0.1);
     expect(k[ret]!.at - lastUp(ret)).toBeGreaterThanOrEqual(0.15);
+    // The waits counted, in the trace's order: the Tab comes after the typing with no settle between them, the Return
+    // after one settle of its own cap (1 s). (On the real clock, "the Tab within 0.1 s" counted a busy machine's time.)
+    const t = r.trace() as { call: string; key?: string; down?: boolean; cap?: number }[];
+    const settlesBefore = (key: string) => {
+      const at = t.findIndex((e) => e.call === "key" && e.key === key && e.down);
+      const up = t.slice(0, at).findLastIndex((e) => e.call === "key" && !e.down);
+      return t.slice(up + 1, at).filter((e) => e.call === "settle").map((e) => e.cap);
+    };
+    expect(settlesBefore("Tab")).toEqual([]);
+    expect(settlesBefore("Return")).toEqual([1]);
   }, BUSY(9.4));
 
   test("a paste is answered once the app has taken the text, so the Return after it can't overtake it; a paste nothing takes is an error", async () => {
