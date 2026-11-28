@@ -18,9 +18,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
@@ -44,8 +43,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -53,32 +50,25 @@ import sh.invincible.bot.app.AppModel
 import sh.invincible.bot.core.Work
 import sh.invincible.bot.core.get
 import sh.invincible.bot.core.string
-import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
 
 /**
- * The app once it's paired (the owner's word, 27 November 2026: "something like t3code on desktop, and openmausbot/grokbot
- * on mobile"): no tab bar, and it opens on the primary's conversation. On a phone one page at a time, opened from the
- * roster and back to the conversation, and the roster a drawer (ModalNavigationDrawer: what needs you, your agent, the
- * agents, the rooms, then the work, Settings and everything else), from the conversation's top-left or a swipe from its
- * left edge; Back closes it. From 600 dp wide (a tablet, a foldable open), the roster is a sidebar beside the page instead,
- * as T3 Code's. A tapped notification opens where it always did. Back, and Esc on a keyboard, return the way you came.
+ * The app once it's paired (the owner's word, 28 November 2026: "use grok bot as the app look/UX. like a chat app, with the
+ * primary at the top, the other agents, and a settings menu"): no tab bar, and it opens on the list (HomeList: your agent
+ * pinned first, then the agents and rooms by what they last did). On a phone one page at a time, each opened from the list
+ * and back to it. From 600 dp wide (a tablet, a foldable open), the list is a sidebar beside the page instead, and the
+ * page at the root is your agent's chat. A tapped notification opens where it always did. Back, and Esc on a keyboard,
+ * return the way you came.
  */
 @Composable
 fun Root(app: AppModel) {
     val stack = rememberSaveable { mutableStateOf(listOf(Nav.ROOT)) }
     val nav = remember { Nav(stack) }
-    var places by remember { mutableStateOf(false) }
     var giving by remember { mutableStateOf(false) }
-    var folded by rememberSaveable { mutableStateOf(false) }
     val focus = LocalFocusManager.current
     // A tablet, or a foldable open (the window's width, as Android's own size classes read it).
     val width: Dp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() }
     val wide = width >= Space.wide
-    val drawer = androidx.compose.material3.rememberDrawerState(androidx.compose.material3.DrawerValue.Closed)
-    val scope = rememberCoroutineScope()
     val roomy = width >= Space.roomy
-    val sidebar = wide && !folded
     val motion = MaterialTheme.motionScheme
     val brand = LocalBrand.current
 
@@ -119,8 +109,6 @@ fun Root(app: AppModel) {
     }
 
     BackHandler(enabled = nav.depth > 1) { nav.back() }
-    // (Declared after Back's own, so while the drawer is open, Back closes it first.)
-    BackHandler(enabled = drawer.isOpen) { scope.launch { drawer.close() } }
     val work = if (wide) rememberWork(app) else null
 
     val content: @Composable () -> Unit = { Box(
@@ -143,8 +131,15 @@ fun Root(app: AppModel) {
             },
     ) {
         Row(Modifier.fillMaxSize()) {
-            if (sidebar) {
-                Sidebar(app, nav, give = { giving = true }, places = { places = true }, collapse = { folded = true })
+            if (wide) {
+                // The list as the sidebar: your agent's row opens its chat at the root, beside the list.
+                HomeList(
+                    app,
+                    open = { address -> nav.open(if (address == "chat") Nav.ROOT else address) },
+                    settings = { nav.open("settings") },
+                    current = if (nav.top == Nav.ROOT) "chat" else nav.top,
+                    modifier = Modifier.width(Space.sidebar).fillMaxHeight(),
+                )
                 VerticalDivider(thickness = Dp.Hairline, color = brand.line)
             }
             // A page opens from the side and closes back to it (shared axis); one place gives way to another in place.
@@ -165,50 +160,32 @@ fun Root(app: AppModel) {
                 // A tap that nothing on the page takes puts the keyboard away, as Back does (your word, 23 November 2026:
                 // it can always be closed, so you never get stuck under it).
                 Column(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { focus.clearFocus() }) }) {
-                    Page(app, nav, address, wide, roomy, drawer = if (sidebar || wide) null else ({ scope.launch { drawer.open() } }), give = { giving = true })
+                    Page(app, nav, address, wide, roomy, give = { giving = true })
                 }
             }
-        }
-        if (wide && folded) {
-            IconButton(onClick = { folded = false }, modifier = Modifier.align(Alignment.BottomStart).semantics { contentDescription = "Show the sidebar" }) { Icon(PanelIcon, null) }
         }
         // While the node can't be reached: said over the page, with Retry (its live stream told it within seconds).
         ReachBanner(app, Modifier.align(Alignment.TopCenter))
     } }
-    if (wide) content() else androidx.compose.material3.ModalNavigationDrawer(
-        drawerState = drawer,
-        // (From the conversation's left edge only, at the root: elsewhere that edge goes back.)
-        gesturesEnabled = drawer.isOpen || nav.depth == 1,
-        drawerContent = {
-            androidx.compose.material3.ModalDrawerSheet(drawerContainerColor = brand.paper, windowInsets = WindowInsets.safeDrawing) {
-                Drawer(
-                    app,
-                    current = nav.top,
-                    go = { address -> scope.launch { drawer.close() }; nav.open(address) },
-                    places = { scope.launch { drawer.close() }; places = true },
-                    close = { scope.launch { drawer.close() } },
-                )
-            }
-        },
-        content = content,
-    )
-    if (places) PlacesSheet(app, nav, give = { giving = true }, close = { places = false })
+    content()
     if (giving) GiveDialog(app) { giving = false }
 }
 
 private val DIGITS = listOf(Key.One, Key.Two, Key.Three, Key.Four, Key.Five, Key.Six, Key.Seven, Key.Eight, Key.Nine)
 
-/** The page at an address. [drawer] opens the roster (a phone's; null where the roster is a sidebar). */
+/** The page at an address. */
 @Composable
-private fun Page(app: AppModel, nav: Nav, address: String, wide: Boolean, roomy: Boolean, drawer: (() -> Unit)?, give: () -> Unit) {
+private fun Page(app: AppModel, nav: Nav, address: String, wide: Boolean, roomy: Boolean, give: () -> Unit) {
     val back = { nav.back(); Unit }
     val inbox by app.inbox.collectAsState()
     val table by app.table.collectAsState()
     val (kind, rest) = address.substringBefore(':') to address.substringAfter(':', "")
     when (kind) {
-        // (At the root its top-left opens the roster, a phone's drawer; over another page it goes back.)
-        "chat" -> ChatScreen(app, back = back, roster = if (nav.depth == 1) drawer else null, root = nav.depth == 1, openTask = { nav.go(Nav.task(it)) }, give = give)
-        "chats" -> Chats(app, close = back, opened = { if (nav.under == Nav.ROOT) nav.back() else nav.replace("chat") })
+        // The list (a phone's home); on a tablet, where the list is the sidebar, your agent's chat at the root.
+        "list" -> if (wide) ChatScreen(app, back = back, roster = null, root = true, openTask = { nav.go(Nav.task(it)) }, give = give)
+        else HomeList(app, open = { nav.go(it) }, settings = { nav.go("settings") })
+        "chat" -> ChatScreen(app, back = back, roster = null, root = false, openTask = { nav.go(Nav.task(it)) }, give = give)
+        "chats" -> Chats(app, close = back, opened = { if (nav.under == "chat" || (wide && nav.under == Nav.ROOT)) nav.back() else nav.replace("chat") })
         "task" -> TaskScreen(app, rest, nav, wide, roomy)
         "agent" -> AgentScreen(app, rest, back = back, openTask = { nav.go(Nav.task(it)) })
         "room" -> RoomScreen(app, rest, back = back, openTask = { nav.go(Nav.task(it)) })

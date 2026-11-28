@@ -37,6 +37,7 @@ import sh.invincible.bot.core.NodeError
 import sh.invincible.bot.core.Reach
 import sh.invincible.bot.core.Roster
 import sh.invincible.bot.core.Work
+import sh.invincible.bot.core.HomeRow
 import sh.invincible.bot.core.RosterRow
 import sh.invincible.bot.core.Price
 import sh.invincible.bot.core.ProjectName
@@ -127,6 +128,8 @@ data class Table(
     val asOf: Long? = null,
     /** The team's tasks as the work reads them (Work, a task's thread): read from the same answer as [snapshot]. */
     val tasks: List<TeamTask> = emptyList(),
+    /** Every agent and room for the list that is home, the latest first (Roster.homeRows): from the same answer. */
+    val home: List<HomeRow> = emptyList(),
 ) {
     /**
      * The agents after a look at the node: `team` its answer for the team (null: it couldn't be read), `turns` its
@@ -147,7 +150,10 @@ data class Table(
             needs = needs,
             unread = unread.map { it["title"].string },
         )
-        return Table(snapshot, snapshot?.let { Roster.rows(it, asks, now) } ?: emptyList(), primary, unread, turns?.get("chats")?.text() ?: chats, tasks = work)
+        return Table(
+            snapshot, snapshot?.let { Roster.rows(it, asks, now) } ?: emptyList(), primary, unread, turns?.get("chats")?.text() ?: chats,
+            tasks = work, home = snapshot?.let { Roster.homeRows(it, asks, now) } ?: emptyList(),
+        )
     }
 }
 

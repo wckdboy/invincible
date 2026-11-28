@@ -37,11 +37,12 @@ import sh.invincible.bot.app.AppModel
 import sh.invincible.bot.core.Primary
 
 /**
- * Where you are, as an address, and where you came from: the primary's conversation at the root (the owner's word, 27
- * November 2026: the app opens on it, as Grok Bot's and OpenMausBot's do, the roster a drawer beside it), then each page you
- * opened from it. Every page the app has is one of these, so anything that opens one (a tap, a notification, a link) opens
- * it the same way: "chat", "home" (the work), "task:<id>", "agent:<handle>", "room:<id>", "agents", "inbox", "settings",
- * "keys", "connectors", "mac:<node>", "desktop:<handle>", "terminal:<sandbox>". Kept across a rotation.
+ * Where you are, as an address, and where you came from: the list at the root (the owner's word, 28 November 2026, after
+ * Grok Bot: home is a list, your agent pinned first, the other agents and rooms below; on a tablet the list is the sidebar
+ * and the root shows your agent's chat beside it), then each page you opened from it. Every page the app has is one of
+ * these, so anything that opens one (a tap, a notification, a link) opens it the same way: "list", "chat" (your agent's),
+ * "home" (the work), "task:<id>", "agent:<handle>", "room:<id>", "agents", "inbox", "settings", "keys", "connectors",
+ * "mac:<node>", "desktop:<handle>", "terminal:<sandbox>". Kept across a rotation.
  */
 @Stable
 class Nav(private val stack: MutableState<List<String>>) {
@@ -56,8 +57,7 @@ class Nav(private val stack: MutableState<List<String>>) {
         if (top != address) stack.value = stack.value + address
     }
 
-    /** Opens a page straight from the root (the roster's row, a notification, the "…" sheet's places): Back returns to the
-     * primary's conversation. */
+    /** Opens a page straight from the root (a row of the list, a notification, a link): Back returns to the list. */
     fun open(address: String) {
         stack.value = if (address == ROOT) listOf(ROOT) else listOf(ROOT, address)
     }
@@ -75,8 +75,8 @@ class Nav(private val stack: MutableState<List<String>>) {
     }
 
     companion object {
-        /** Where the app opens, and Back ends: the primary's conversation. */
-        const val ROOT = "chat"
+        /** Where the app opens, and Back ends: the list (on a tablet, your agent's chat beside it). */
+        const val ROOT = "list"
         /** The work's address (it was Home): what needs you and every task, from the roster's foot. */
         const val HOME = "home"
         fun task(id: String) = "task:$id"
