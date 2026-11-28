@@ -126,7 +126,8 @@ describe("a Claude seat's sign-in", () => {
   });
 
   test("cancelled: its tool is told, the log says so, and its VM goes; a code after that reaches nothing", async () => {
-    const n = node();
+    // (A seat never signed in: its tool, asked as the attempt ends, says it isn't.)
+    const n = node({ status: { type: "status", installed: true, signedIn: false } });
     n.add(A);
     const started = n.signIns.start(A);
     await n.settled(() => n.bridge().told.length > 0);
@@ -162,7 +163,7 @@ describe("a Claude seat's sign-in", () => {
   });
 
   test("it lapses if nobody finishes it, said as expired", async () => {
-    const n = node({ attemptMs: 150 });
+    const n = node({ attemptMs: 150, status: { type: "status", installed: true, signedIn: false } });
     n.add(A);
     const started = n.signIns.start(A);
     await n.settled(() => n.bridge().told.length > 0);
@@ -170,6 +171,31 @@ describe("a Claude seat's sign-in", () => {
     await started;
     await n.settled(() => n.asked.some((a) => a[0] === "destroy"));
     expect(seatState(n.seat(A), Date.now())).toEqual({ is: "signed-out", why: "expired" });
+  });
+
+  // The re-check of 28 November 2026, R10: a new sign-in that ends before it took leaves a seat signed in as it was (a
+  // Gemini seat's sign-in is kept until a new one takes), and the log says so: its tool is asked, as after one that took.
+  test("a seat signed in, whose new sign-in is cancelled or lapses, stays as its tool says: ready, on the sign-in it had", async () => {
+    for (const how of ["cancelled", "expired"] as const) {
+      const n = node({ attemptMs: how === "expired" ? 300 : 60_000 });
+      n.add(A);
+      const first = n.signIns.start(A);
+      await n.settled(() => n.bridge().told.length > 0);
+      n.bridge().say({ type: "card", url: PAGE });
+      const card = await first;
+      await n.signIns.answer(A, card.attempt, CODE);
+      n.bridge().say({ type: "done", ok: true }, true);
+      await n.settled(() => seatState(n.seat(A), Date.now()).is === "ready");
+      n.next();
+      const again = n.signIns.start(A);
+      await n.settled(() => n.bridge().told.length > 0);
+      n.bridge().say({ type: "card", url: PAGE });
+      const second = await again;
+      if (how === "cancelled") await n.signIns.cancel(A, second.attempt);
+      await n.settled(() => n.asked.filter((a) => a[0] === "destroy").length === 2);
+      expect([how, seatState(n.seat(A), Date.now()).is]).toEqual([how, "ready"]);
+      expect([how, n.asked.filter((a) => a[0] === "exec").length]).toEqual([how, 2]);
+    }
   });
 
   test("an account that isn't the seat's, or is another seat's, is refused and signed out again by its own tool", async () => {

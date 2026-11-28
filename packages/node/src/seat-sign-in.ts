@@ -220,6 +220,22 @@ export class SeatSignIns {
     }
   }
 
+  /**
+   * What the seat's tool says of its sign-in, asked in the attempt's VM of the tool the seat's plan runs (core's
+   * SEAT_HARNESS), by its own driver, and the log told: for the attempt that took (`attempt`), or as the seat stands.
+   */
+  private async stands(attempt: Attempt, host: Host, took?: string): Promise<void> {
+    const seat = this.deps.store.seats().find((s) => s.id === attempt.seat.id) ?? attempt.seat;
+    const tool = SEAT_HARNESS[seat.kind];
+    const signIn = (tool ? AGENTS[tool] : undefined)?.signIn;
+    if (!signIn) throw new Error(`no tool says how a ${seat.kind} seat's sign-in stands`);
+    const asked = await host.exec(attempt.vm, ["bash", "-lc", signIn.seatCheck(seatSalt(this.deps.vault))], 60);
+    const stands = recordSeatStatus(this.deps.store, this.deps.node, seat, signIn.read(asked.stdout), took);
+    // Another account than the seat's: refused, and signed out again by the tool's own command, so its home holds none.
+    const out = SIGN_OUT[seat.kind];
+    if (stands === "wrong-account" && out) await host.exec(attempt.vm, out, 60).catch(() => undefined);
+  }
+
   /** The rest of it: how it ends, what the seat's tool then says of it, and its VM gone. */
   private async follow(attempt: Attempt, lines: AsyncIterator<string>, host: Host): Promise<void> {
     let ok = false;
@@ -237,20 +253,15 @@ export class SeatSignIns {
         }
       }
       if (ok && !attempt.ending) {
-        const seat = this.deps.store.seats().find((s) => s.id === attempt.seat.id) ?? attempt.seat;
-        // Asked of the tool the seat's plan runs (core's SEAT_HARNESS), by its own driver.
-        const tool = SEAT_HARNESS[seat.kind];
-        const signIn = (tool ? AGENTS[tool] : undefined)?.signIn;
-        if (!signIn) throw new Error(`no tool says how a ${seat.kind} seat's sign-in stands`);
-        const asked = await host.exec(attempt.vm, ["bash", "-lc", signIn.seatCheck(seatSalt(this.deps.vault))], 60);
-        const stands = recordSeatStatus(this.deps.store, this.deps.node, seat, signIn.read(asked.stdout), attempt.id);
-        // Another account than the seat's: refused, and signed out again by the tool's own command, so its home holds none.
-        const out = SIGN_OUT[seat.kind];
-        if (stands === "wrong-account" && out) await host.exec(attempt.vm, out, 60).catch(() => undefined);
+        await this.stands(attempt, host, attempt.id);
         return;
       }
       const outcome = attempt.ending ?? "failed";
       this.deps.store.emit(this.deps.node, "seat.signin", { id: attempt.seat.id, attempt: attempt.id, phase: "ended", outcome });
+      // Ended before it took: its tool is asked how the seat stands, as after one that took, since a sign-in it had before
+      // may hold yet (a Gemini seat's is kept until a new one takes: the re-check of 28 November 2026, R10). A seat
+      // still signed in stays so; one that isn't is as the log just said.
+      await this.stands(attempt, host).catch(() => undefined);
     } catch {
       try {
         this.deps.store.emit(this.deps.node, "seat.signin", { id: attempt.seat.id, attempt: attempt.id, phase: "ended", outcome: attempt.ending ?? "failed" });

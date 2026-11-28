@@ -226,18 +226,20 @@ def main():
     env = {k: os.environ[k] for k in ("PATH", "LANG", "LC_ALL", "TERM", "HOME", "USER") if k in os.environ}
     env.update({"AGY_CLI_DISABLE_AUTO_UPDATE": "true", "SSH_CONNECTION": "127.0.0.1 0 127.0.0.1 0"})
     # A fresh sign-in starts from an empty profile: whatever a run left in the last one goes with it (the review of 28
-    # November 2026, M2). Each run's start resets it again, keeping its sign-in and its sessions (antigravity.ts).
-    if os.path.isdir(gemini) and not os.path.islink(gemini):
-        for name in os.listdir(gemini):
-            path = os.path.join(gemini, name)
-            if os.path.islink(path) or not os.path.isdir(path):
-                os.unlink(path)
-            else:
-                shutil.rmtree(path)
-    elif os.path.lexists(gemini):
-        os.unlink(gemini)
-    os.makedirs(gemini, mode=0o700, exist_ok=True)
-    argv = ["agy", "acp", "--gemini-dir", gemini, "--app-data-dir", "antigravity-acp", "--disable-telemetry", "--login"]
+    # November 2026, M2). Each run's start resets it again, keeping its sign-in and its sessions (antigravity.ts). It is
+    # made in a profile of its own beside the seat's, which stays as it was, signed in, its sessions with it, until agy
+    # says the new one took; then the new one takes its place (the re-check of 28 November 2026, R10). Anything at either
+    # name, a link a run left among it, is taken away, never followed.
+    def clear(path):
+        if os.path.islink(path) or (os.path.lexists(path) and not os.path.isdir(path)):
+            os.unlink(path)
+        elif os.path.isdir(path):
+            shutil.rmtree(path)
+    fresh, before = gemini + ".signing-in", gemini + ".before"
+    for path in (fresh, before):
+        clear(path)
+    os.makedirs(fresh, mode=0o700)
+    argv = ["agy", "acp", "--gemini-dir", fresh, "--app-data-dir", "antigravity-acp", "--disable-telemetry", "--login"]
     try:
         child = subprocess.Popen(argv, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     except OSError:
@@ -302,6 +304,13 @@ def main():
                 child.kill()
         code = child.wait()
     ok = not why and code == 0
+    if ok:
+        if os.path.lexists(gemini):
+            os.rename(gemini, before)
+        os.rename(fresh, gemini)
+        clear(before)
+    else:
+        clear(fresh)
     emit("done", ok=ok, **({} if ok else {"why": (why or "it ended without saying it was signed in")[:200]}))
 main()
 `;

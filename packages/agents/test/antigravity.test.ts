@@ -198,9 +198,10 @@ describe("its sign-in, ours to start and Google's to finish", () => {
     expect(await s.done()).toEqual({ type: "done", ok: true });
     expect(box.signedIn()).toBe(true);
     const [started] = box.trace();
-    // T3 Code's login: agy's own ACP sign-in, in the seat's profile, a remote session with no display and no key of yours.
+    // T3 Code's login: agy's own ACP sign-in, a remote session with no display and no key of yours, in a profile of its own
+    // beside the seat's, which takes the seat's place once it took (the re-check's R10).
     expect(started).toEqual({
-      argv: ["acp", "--gemini-dir", box.home, "--app-data-dir", "antigravity-acp", "--disable-telemetry", "--login"],
+      argv: ["acp", "--gemini-dir", `${box.home}.signing-in`, "--app-data-dir", "antigravity-acp", "--disable-telemetry", "--login"],
       env: { SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0", AGY_CLI_DISABLE_AUTO_UPDATE: "true", DISPLAY: null, GEMINI_API_KEY: null, HOME: box.env.HOME },
     });
     expect(box.trace().filter((item) => "code" in item)).toEqual([{ code: CODE }]);
@@ -531,5 +532,24 @@ describe("Antigravity's profile, reset", () => {
     expect(left(box.home)).toEqual(["antigravity-acp", `antigravity-acp/${TOKEN}`]);
     expect(readFileSync(join(box.home, "antigravity-acp", TOKEN), "utf8")).toBe("FAKE-token-the-bridge-never-reads");
     expect(readFileSync(join(box.dir, "outside.txt"), "utf8")).toBe("not agy's");
+    // Nothing of it is left beside the seat's profile.
+    expect(readdirSync(join(box.home, "..")).sort()).toEqual(["antigravity"]);
+  });
+
+  // The re-check of 28 November 2026, R10: a sign-in made the seat's profile empty as it began, so one cancelled or
+  // lapsed left the seat with no sign-in and no sessions. It is made in a profile of its own, beside the seat's, which
+  // stays as it was until agy says the new one took.
+  test("a sign-in cancelled before it took leaves the seat's profile as it was: its sign-in and its sessions", async () => {
+    const box = vm();
+    plant(box);
+    const before = left(box.home);
+    const s = signIn(box);
+    s.tell({});
+    await s.until("asks");
+    s.tell({ cancel: true });
+    expect(await s.done()).toMatchObject({ type: "done", ok: false, why: "cancelled" });
+    expect(left(box.home)).toEqual(before);
+    expect(readFileSync(join(box.home, "antigravity-acp", TOKEN), "utf8")).toBe("FAKE-old-token-never-read");
+    expect(readdirSync(join(box.home, "..")).sort()).toEqual(["antigravity"]);
   });
 });
