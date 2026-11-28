@@ -310,8 +310,8 @@ struct HomeRowView<Face: View>: View {
                     Text(row.name).font(.body.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
                     Spacer(minLength: Space.s2)
                     if let at = row.at {
-                        // (Said once, as the list is drawn: "now", "4m", "3h", "2d".)
-                        Text(Work.shortSpan(Date.now.timeIntervalSince1970 * 1000 - at)).font(.footnote).foregroundStyle(.tertiary).monospacedDigit().lineLimit(1)
+                        // (Said as the list is drawn, as a chat app's: "14:05" today, "Yesterday", "Thursday", "21/11/2026".)
+                        Text(ListTime.words(at, now: Date.now.timeIntervalSince1970 * 1000)).font(.footnote).foregroundStyle(.tertiary).monospacedDigit().lineLimit(1)
                     }
                 }
                 HStack(alignment: .center, spacing: Space.s2) {
@@ -369,7 +369,7 @@ private struct HomeChatRow: View {
             if chat.unread == true { Circle().fill(Color.ink).frame(width: 7, height: 7).accessibilityLabel("New answer") }
             Text(chat.title).font(.body).foregroundStyle(.primary).lineLimit(1)
             Spacer(minLength: Space.s2)
-            Text(Work.shortSpan(Date.now.timeIntervalSince1970 * 1000 - chat.updatedAt)).font(.footnote).foregroundStyle(.tertiary).monospacedDigit().lineLimit(1)
+            Text(ListTime.words(chat.updatedAt, now: Date.now.timeIntervalSince1970 * 1000)).font(.footnote).foregroundStyle(.tertiary).monospacedDigit().lineLimit(1)
         }
         .frame(minHeight: 44)
         .accessibilityElement(children: .combine)

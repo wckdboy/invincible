@@ -154,6 +154,18 @@ struct Vectors: Decodable {
         let home: [HomeRow]
     }
 
+    /// When, as the list that is home says it (lib/time.ts listTime): its zone and locale pinned. `devices`: a phone in
+    /// another language, its words the app's (English), its clock and dates its region's (`locale`, lib/time.ts listLocale).
+    struct ListTimes: Decodable {
+        struct Case: Decodable { let at: Double; let words: String }
+        struct Device: Decodable { let device: String; let locale: String; let cases: [Case] }
+        let now: Double
+        let zone: String
+        let locale: String
+        let cases: [Case]
+        let devices: [Device]
+    }
+
     struct AgentForms: Decodable {
         struct Handle: Decodable { let name: String; let taken: [String]; let handle: String }
         struct Removal: Decodable {
@@ -464,6 +476,7 @@ struct Vectors: Decodable {
     let agents: AgentsSection
     let unread: Unread
     let rooms: Rooms
+    let listTimes: ListTimes
     let agentForms: AgentForms
     let keys: KeyCases
     let desktop: DesktopCases

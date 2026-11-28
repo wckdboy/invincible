@@ -29,6 +29,26 @@ struct HomeTests {
         }
     }
 
+    /// The list's times as every app says them (lib/time.ts listTime, by the vectors' listTimes): the clock today,
+    /// Yesterday, the weekday's name within the week, then the date in numbers, by the calendar there; and a phone in
+    /// Danish says them in the app's English with Denmark's clock and dates.
+    @Test func theListsTimesAreAChatAppsAsEveryAppSaysThem() throws {
+        let times = Vectors.shared.listTimes
+        let zone = try #require(TimeZone(identifier: times.zone))
+        for item in times.cases {
+            #expect(ListTime.words(item.at, now: times.now, zone: zone, device: Locale(identifier: times.locale)) == item.words, "\(times.locale) \(item.at)")
+        }
+        #expect(!times.devices.isEmpty)
+        for device in times.devices {
+            let speaking = ListTime.speaking(Locale(identifier: device.device))
+            #expect("\(speaking.language.languageCode?.identifier ?? "")-\(speaking.region?.identifier ?? "")" == device.locale)
+            for item in device.cases {
+                #expect(ListTime.words(item.at, now: times.now, zone: zone, device: Locale(identifier: device.device)) == item.words, "\(device.device) \(item.at)")
+            }
+        }
+    }
+
+
     #if os(iOS)
     @MainActor @Test func whatWaitsOnYouIsAnsweredInTheChatItWaitsIn() {
         let decisions = [
