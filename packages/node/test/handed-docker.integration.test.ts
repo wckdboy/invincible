@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkpointCommand, HANDED_CHANGES_BYTES, handedApply, handedGive, handedNonce, handedReceive, handedSend, handedTake } from "@invincible/agents";
+import { checkpointCommand, HANDED_CHANGES_BYTES, handedApply, handedGive, handedNonce, handedReceive, handedSend, handedTake, handedTree } from "@invincible/agents";
 import type { SandboxView } from "@invincible/core";
 import { KATA_RUNTIME, SandboxHost } from "@invincible/sandbox";
 
@@ -115,6 +115,10 @@ for (const runtime of ["runc", "kata"] as const) {
         expect(Number(back.to.stdout.trim())).toBe(back.bytes);
         const applied = inside(agent, handedApply(root, base, id, nonce, back.bytes, HANDED_CHANGES_BYTES));
         expect([applied.status, applied.stderr.trim()]).toEqual([0, ""]);
+        // (It prints the tree it made the worktree, which the agent's side then reads there as it stands: the image's git.)
+        const made = applied.stdout.trim().split(" ")[1];
+        expect(made).toMatch(/^[0-9a-f]{40}$/);
+        expect(inside(agent, handedTree(root, base, id)).stdout.trim()).toBe(made!);
         const seen = inside(agent, `cd ${root} && cat app.txt src/new.ts && od -An -tx1 logo.bin && readlink link.ts && test ! -e README.md && echo gone && git diff --cached --name-status ${base} | sort`);
         expect(seen.stdout.trim().split("\n").map((line) => line.trim())).toEqual(["two", "export const x = 1;", "00 01 ff", "src/new.ts", "gone", "A\tlink.ts", "A\tlogo.bin", "A\tsrc/new.ts", "D\tREADME.md", "M\tapp.txt"]);
         // Its step kept from the agent's worktree, as the node keeps one after a step of the task's.

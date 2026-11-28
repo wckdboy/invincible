@@ -44,8 +44,13 @@ export interface RunDeps {
     messages: ModelMessage[],
     turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[] },
   ): Promise<{ text: string; model: string; skipped?: { model: string; error: string }[]; calls?: ClientCall[]; carry?: string }>;
-  /** Run one shell command in the run's workspace. `what`: a gate's (its processes may be ended with it). */
-  exec(command: string, timeoutSec: number, what?: "gate"): Promise<ExecResult>;
+  /**
+   * Run one shell command in the run's workspace. `what`: a gate's (its processes may be ended with it), or one of the
+   * review's evidence (read where the work is kept, which may be elsewhere than where it is done: team-runtime.ts I-b).
+   */
+  exec(command: string, timeoutSec: number, what?: "gate" | "evidence"): Promise<ExecResult>;
+  /** Before each review's evidence is read, once: where it is read elsewhere than the work is done, the work is taken there. */
+  beforeEvidence?(): Promise<void>;
   /** Fixed cleanup for this worker, available even after ordinary execution is cancelled. */
   stopAgent?(): Promise<void>;
   /** The stop's word to a live coding agent's run, on a way that stays open once ordinary execution is cancelled (harnesses.ts AgentRunDeps.tellStop). */
@@ -1613,11 +1618,14 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     // (The latest REVIEWED_STEPS commands: a long run's every one is in the ledger.)
     const shown = trail.slice(-REVIEWED_STEPS);
     let evidence = "";
+    // (Taken where the evidence is read first, once for all of it: so each command reads the same work, and what passes is
+    // that work.)
+    if (o.evidence.length) await deps.beforeEvidence?.();
     for (const each of o.evidence) {
       check();
       const [command, shown] = typeof each === "string" ? [each, each] : [each.run, each.shown];
       try {
-        const result = await deps.exec(command, Math.min(o.commandTimeoutSec, 60));
+        const result = await deps.exec(command, Math.min(o.commandTimeoutSec, 60), "evidence");
         evidence += `$ ${shown}\n${observation(result, SHOWN.evidence)}\n\n`;
       } catch (error) {
         evidence += `$ ${shown}\n(could not run: ${(error as Error).message})\n\n`;

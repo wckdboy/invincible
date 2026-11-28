@@ -9,7 +9,7 @@ import { commandsRun, DESKTOP_EVIDENCE, escalatedWhy, runLoop, stepsNamed, type 
 import { type Trip } from "./tripwires.ts";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
 import { HELD_GIT, heldGit } from "./held-git.ts";
-import { handedApply, handedDrop, handedGive, handedNonce, handedReceive, handedSend, handedTake } from "./handed-repo.ts";
+import { handedApply, handedDrop, handedGive, handedNonce, handedReceive, handedSend, handedTake, handedTree } from "./handed-repo.ts";
 import { runEvidence, runTrail } from "./skills-run.ts";
 
 /** What one run of an agent is given by the team service (node/team.ts) that starts it. */
@@ -878,11 +878,11 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
        * Another node's task's changes since its base, from its own clone to the task's worktree in its agent's repository,
        * as one patch the agent's side keeps and then applies with the node's held git (R5-3). Applied only once all of it
        * came: its sender done, the pipe not cut, and as many bytes kept as were carried (a side ended by its deadline, or
-       * the pipe cut, ends the other's input as if the patch ended there). Null when they came, else why not. Only ever
-       * one at a time, with every other step of its agent's side on that worktree (`serially`, R7-3).
+       * the pipe cut, ends the other's input as if the patch ended there). The tree its apply made, when they came; else
+       * why not. Only ever one at a time, with every other step of its agent's side on that worktree (`serially`, R7-3).
        */
-      const bringBack = async (): Promise<string | null> => {
-        if (!own || !agent.repository) return null;
+      const bringBack = async (): Promise<{ tree: string } | { why: string }> => {
+        if (!own || !agent.repository) return { tree: "" };
         const said = (r: { stdout: string; stderr: string }) => redact(r.stderr || r.stdout).trim().split("\n").at(-1)?.slice(0, 300) || "no reason given";
         // (A file of its own on its agent's side, by a name only its receive and its apply are given: an apply reads only
         // what its own pipe carried, R7-3.)
@@ -890,7 +890,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         /** Whatever of it came, dropped, on a signal of its own (the task's may have ended); and why it isn't applied. */
         const dropped = async (why: string) => {
           await deps.exec(agent, handedDrop(task.id, nonce), 60, AbortSignal.timeout(90_000)).catch(() => {});
-          return why;
+          return { why };
         };
         const back = await own.vm.send(handedSend(root, base), handedReceive(task.id, nonce, HANDED_CHANGES_BYTES), 900, ctx.signal).catch((error: Error) => error);
         if (back instanceof Error) return dropped(redact(back.message).slice(0, 300));
@@ -900,7 +900,9 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         if (back.from.exitCode !== 0) return dropped(said(back.from));
         if (!/^\d{1,15}$/.test(kept) || Number(kept) !== back.bytes) return dropped(`its changes came cut short: ${/^\d{1,15}$/.test(kept) ? kept : "no"} bytes of ${back.bytes} kept`);
         const applied = await inRepo(handedApply(root, base, task.id, nonce, back.bytes, HANDED_CHANGES_BYTES), 600, ctx.signal).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
-        return applied.exitCode === 0 ? null : dropped(said(applied));
+        if (applied.exitCode !== 0) return dropped(said(applied));
+        const tree = /^\d{1,15} ([0-9a-f]{40}(?:[0-9a-f]{24})?)$/.exec(applied.stdout.trim())?.[1];
+        return tree ? { tree } : { why: "its apply said no tree it made" };
       };
       // The VM's notes store (Engram), when the node's switch is on: kept under the agent's repository, or with none
       // its own handle, so every task of its finds them. Whether this VM has the pinned binary is asked as the task
@@ -956,14 +958,18 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       };
       /** The run has ended: a step's keeping that hasn't begun by then is dropped, as its changes all come back at the end. */
       let ending = false;
+      /** Where another node's task's latest review read its evidence on its agent's side: the tree brought back for it (I-b). */
+      let reviewed: { tree: string } | { why: string } | null = null;
+      /** (Read as it is now: it is set by the run's own calls, which TypeScript doesn't follow from here.) */
+      const lastReviewed = (): typeof reviewed => reviewed;
       const keepStep = (step: number) => {
         const command = steps.command;
         void serially(async () => {
           if (ending) return;
           // (Another node's task's changes brought back to its agent's worktree first, where the step is kept.)
           const back = await bringBack();
-          if (back !== null) {
-            if (!steps.said) ctx.emit(`Steps · this task's steps can't be kept to start another from: its changes couldn't be brought back (${back})`);
+          if ("why" in back) {
+            if (!steps.said) ctx.emit(`Steps · this task's steps can't be kept to start another from: its changes couldn't be brought back (${back.why})`);
             steps.said = true;
             return;
           }
@@ -985,8 +991,16 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       };
       /** A command of the task's, in its workspace: in the agent's own VM (`exec`), or in the VM of the seat its coding tool runs on (`execOn`). */
       const inTask = (command: string) => withGateway(`mkdir -p ${quote(temp)} && export TMPDIR=${quote(temp)} && ${sees ? `export INVINCIBLE_EYES=${quote(sees)} && ` : ""}${space ? `export INVINCIBLE_EYES_SPACE=${quote(space)} && ` : ""}cd ${quote(root)} && ${engram ? engramShell(engram, home) : ""}${command}`);
-      const exec = async (command: string, timeout = 120, what?: "gate") => {
+      const exec = async (command: string, timeout = 120, what?: "gate" | "evidence") => {
         await onSide;
+        // Another node's task's review's evidence, in a repository: read on its agent's side, on the tree its bring-back
+        // made there just before (beforeEvidence), and never in its VM, whose processes are the task's own and could change
+        // its clone after the evidence was read (the seventh fabric review's I-b). What is shipped as verified is that tree.
+        if (what === "evidence" && own && agent.repository) {
+          const on = reviewed;
+          if (!on || "why" in on) return { exitCode: -1, stdout: "", stderr: `its changes couldn't be brought back from its VM to be read: ${on ? on.why : "they weren't asked for"}`, durationMs: 0, truncated: false };
+          return serially(() => inRepo(`cd ${quote(root)} && ${command}`, Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal));
+        }
         // A plain `desktop …` (C1 step 3): its words to the VM's held desktop session, not a login shell's 111 ms. Not
         // for another node's task: its commands all run under the handed helper below, so what a `desktop start` or a
         // `desktop app` of its starts is bounded with it too (the third re-review's R3-3).
@@ -1154,6 +1168,9 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           return ask(agent, role === "engineer" ? workRole(agent.role) : role, messages, ctx.signal, role === "reviewer" ? undefined : contextFor(role), (model, usage) => addUsage(spent, role, model, usage), { ...(turn?.loop ? { loop: turn.loop } : {}), ...(turn?.tools ? { tools: turn.tools } : {}), ...(apart ? { apart } : {}) }, own, task.budgetUsd !== undefined, handed);
         },
         exec, signal: ctx.signal,
+        // Before each review's evidence is read: another node's task's changes brought back to its agent's side, where that
+        // evidence is then read, and what its review passes is the tree they made (I-b).
+        ...(own && agent.repository ? { beforeEvidence: async () => void (reviewed = await serially(bringBack)) } : {}),
         emit: (event) => {
           // What its tool spent on its own sign-in, as it said it: in what the task spent, under its own sign-in's name (it
           // costs no money: its plan's), and its session's own count of what that would have cost at API prices.
@@ -1243,7 +1260,23 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       const proven = proof.before.length || proof.after.length || proof.review ? { proof: { before: proof.before, after: proof.after, review: proof.review, sameModel: proof.review !== null && saidSameReview } } : {};
       const plan = onPlan ? planTaken(onPlan, spent, sessionUsd, shares, task.record?.plan, deps.listPrices?.()) : null;
       const record: TeamTaskRecord = { startedAt, endedAt: Date.now(), ended: outcome.status, commands: commandsRun(outcome), revisions: outcome.revisions, spent: mergeSpend(spent, await deps.toolSpent?.(agent, startedAt)), ...proven, ...(plan ? { plan } : {}) };
-      const verified = outcome.status === "done";
+      // Another node's task in a repository whose review passed ships the tree its last review's evidence was read on, on
+      // its agent's side, and nothing its VM had after (the seventh fabric review's I-b): its changes aren't brought back
+      // again, and its agent's worktree is checked to be that tree still. Short of that it isn't verified, and says why.
+      const passed = outcome.status === "done";
+      const shown = lastReviewed();
+      let unbound: string | null = null;
+      if (passed && own && agent.repository) {
+        if (!shown) unbound = "no evidence of it was read for its review";
+        else if ("why" in shown) unbound = `its review's evidence couldn't be read on its agent's side: ${shown.why}`;
+        else {
+          const now = await serially(() => inRepo(handedTree(root, base, task.id), 300, ctx.signal)).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
+          if (now.exitCode !== 0) unbound = `its workspace on its agent's side couldn't be read: ${redact(now.stderr || now.stdout).trim().split("\n").at(-1)?.slice(0, 200) ?? "no reason given"}`;
+          else if (now.stdout.trim() !== shown.tree) unbound = "its workspace on its agent's side isn't the tree its review was shown";
+        }
+        if (unbound) ctx.emit(`Review · passed, but its work isn't verified: ${unbound}`);
+      }
+      const verified = passed && unbound === null;
       // Its verified work may teach a skill, as its own runs do (it waits for you): told, never waited on. Not work in
       // sensitive mode: what a skill is made of would go to its models.
       if (verified && !held) deps.learned?.(agent, task, runEvidence({ run: `team:${task.id}`, goal: task.goal, network: "online", repo: !!agent.repository, agent: coding?.driver.name, outcome, trail }));
@@ -1254,10 +1287,11 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       if (agent.repository) {
         const out = `/work/out/tasks/${task.id}`;
         // (Another node's task's: brought back from its clone to its agent's worktree, and read there, as an own task's, after
-        // every step of its agent's side before it, one at a time: R7-3.)
-        const back = await serially(bringBack);
-        const made = back !== null
-          ? { exitCode: -1, stdout: "", stderr: `its changes couldn't be brought back from its VM: ${back}` }
+        // every step of its agent's side before it, one at a time: R7-3. One whose review passed on a tree brought back for
+        // it isn't brought back again: what is read is what that review was shown, I-b.)
+        const back = own && passed && shown && "tree" in shown ? shown : await serially(bringBack);
+        const made = "why" in back
+          ? { exitCode: -1, stdout: "", stderr: `its changes couldn't be brought back from its VM: ${back.why}` }
           : own
             ? await serially(() => inRepo(`cd ${quote(root)} && ${changesCommand(out, base)}`, 300, ctx.signal)).catch((error: Error) => ({ exitCode: -1, stdout: "", stderr: error.message }))
             : await exec(changesCommand(out, base), 300).catch((error: Error) => ({ exitCode: -1, stdout: "", stderr: error.message }));
@@ -1282,7 +1316,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       }
       // (Whatever the task left in its temporary directory goes with it.)
       await inVm(`rm -rf ${quote(temp)}`, 60, ctx.signal).catch(() => {});
-      return { verified, output: `${outcome.summary}\n\nReview: ${outcome.review ?? outcome.status}\nWorkspace: ${root}${changed}${notes ? `\nNotes: ${notes}` : ""}`, ...(verified ? {} : { error: outcome.status }), record, ...(changes ? { changes } : {}), ...(!verified && outcome.rest ? { rest: outcome.rest } : {}) };
+      return { verified, output: `${outcome.summary}\n\nReview: ${outcome.review ?? outcome.status}${unbound ? `\nNot verified: ${unbound}` : ""}\nWorkspace: ${root}${changed}${notes ? `\nNotes: ${notes}` : ""}`, ...(verified ? {} : { error: unbound ?? outcome.status }), record, ...(changes ? { changes } : {}), ...(!verified && outcome.rest ? { rest: outcome.rest } : {}) };
     },
   };
 }

@@ -818,6 +818,7 @@ test("another node's task runs in a VM of its own: every command of it there, no
  * its changes come back the same way, as a patch its agent's side applies with the node's held git. */
 test("another node's task in a repository works on a clone of its own: set up, checkpointed and kept on its agent's side, its changes brought back", async () => {
   const HANDED_BASE = "89abcdef0123456789abcdef0123456789abcdef";
+  const TREE = "a".repeat(40);
   const agent = { ...member, repository: "https://github.com/you/project" };
   const inAgent: string[] = [], inTask: string[] = [], received: [string, string][] = [], sent: [string, string][] = [];
   // (Its patch all came: as many bytes kept on its agent's side as the node carried.)
@@ -828,6 +829,9 @@ test("another node's task in a repository works on a clone of its own: set up, c
     paid: (ref: string) => ref === "paid/m",
     exec: async (_m: Agent, command: string) => {
       inAgent.push(command);
+      // (An apply prints its size and the tree it made the worktree; that tree is then read there as it stands.)
+      if (command.includes("--allow-empty")) return result({ stdout: `0 ${TREE}` });
+      if (command.includes(".tree-index")) return result({ stdout: TREE });
       return command.includes("from_commit") ? result({ stdout: `${HANDED_BASE} fetched` }) : result({ stdout: "0" });
     },
     handedVm: async () => ({
@@ -863,6 +867,11 @@ test("another node's task in a repository works on a clone of its own: set up, c
   expect(applied).toHaveLength(sent.length);
   for (const c of applied) expect(c).toContain(HANDED_BASE);
   expect(inAgent.findLastIndex((c) => c.includes("--allow-empty"))).toBeLessThan(inAgent.findIndex((c) => c.includes(`'/work/out/tasks/${handedTask.id}'`)));
+  // Its review's evidence read on its agent's side, in its worktree there, and never in its VM (I-b). (Its `git status
+  // --short`, known by that word at whatever depth of quoting: in its VM it went under the handed helper.)
+  const evidence = (c: string) => c.includes("--short");
+  expect(inAgent.some((c) => c.startsWith(`cd '${root}' && `) && evidence(c))).toBe(true);
+  expect(inTask.some(evidence)).toBe(false);
 });
 
 /* The seventh fabric review's R7-3: every step of another node's task's agent's side on its worktree runs one at a time
@@ -887,7 +896,7 @@ test("another node's task's agent's side runs one step at a time: its last bring
         await Bun.sleep(200);
         applying--;
         events.push("apply ends");
-        return result({ stdout: "0" });
+        return result({ stdout: `0 ${"a".repeat(40)}` });
       }
       if (command.includes(`'/work/out/tasks/${handedTask.id}'`)) events.push("its changes are read");
       return result({ stdout: "0" });
@@ -916,6 +925,80 @@ test("another node's task's agent's side runs one step at a time: its last bring
   await Bun.sleep(800);
   expect([sends, mostSending, mostApplying]).toEqual([2, 1, 1]);
   expect(events).toEqual(["send 1 begins", "send 1 ends", "apply begins", "apply ends", "send 2 begins", "send 2 ends", "apply begins", "apply ends", "its changes are read", "its run returned"]);
+});
+
+/* The seventh fabric review's I-b: what another node's task's reviewer passed is what is applied and shipped. Its evidence
+ * ran in its VM, on its clone, whose processes are the task's own, and what was shipped as verified was the patch its VM
+ * sent at the end: a process of its own could change a file after its evidence passed. Its evidence is read on its agent's
+ * side now, on the tree brought back for it, and that tree is what is shipped. */
+test("another node's task whose review passed ships the tree its review's evidence was read on, never what its VM had after it (I-b)", async () => {
+  const HANDED_BASE = "89abcdef0123456789abcdef0123456789abcdef";
+  const agent = { ...member, repository: "https://github.com/you/project" };
+  const tree = (version: number) => String(version).repeat(40);
+  // Its clone in its VM, by version: its command makes version 1, and a process it left running makes version 2 just
+  // after its evidence is read, wherever that is read. (On its agent's side: `side`, what the last apply there made.)
+  let inVm = 0, carried = 0, side = 0, shown = 0, shipped = 0;
+  // (Its evidence's `git status --short`, known by that word at whatever depth of quoting: in its VM it goes under the
+  // handed helper.)
+  const evidence = (c: string) => c.includes("--short");
+  const f = fixture([say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("PASS\nFine.")], {
+    agent: () => agent,
+    models: () => [{ provider: "paid", model: "m" }],
+    paid: (ref: string) => ref === "paid/m",
+    keep: async () => "artifact-r8-ib",
+    exec: async (_m: Agent, command: string) => {
+      if (command.includes("from_commit")) return result({ stdout: `${HANDED_BASE} fetched` });
+      if (command.includes("--allow-empty")) return (side = carried), result({ stdout: `0 ${tree(side)}` });
+      if (command.includes(".tree-index")) return result({ stdout: tree(side) });
+      if (evidence(command)) return (shown = side), (inVm = 2), result({ stdout: ` M app.txt\n` });
+      if (command.includes(`'/work/out/tasks/${handedTask.id}'`)) return (shipped = side), result({ stdout: "1" });
+      return result({ stdout: "0" });
+    },
+    handedVm: async () => ({
+      exec: async (command: string) => {
+        if (plain(command).includes("echo one")) inVm = 1;
+        if (evidence(command)) return (shown = inVm), (inVm = 2), result({ stdout: ` M app.txt\n` });
+        return result();
+      },
+      receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }),
+      send: async () => ((carried = inVm), { from: result(), to: result({ stdout: "0" }), bytes: 0, cut: false }),
+      stop: async () => {},
+      release: async () => {},
+    }),
+  });
+  f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  const done = await f.runtime.executeTask(agent, handedTask, f.context);
+  expect([done.verified, shown, inVm]).toEqual([true, 1, 2]);
+  // What is kept and shipped as verified is version 1, what its review was shown; never version 2.
+  expect(shipped).toBe(1);
+  expect(done.output).toContain("Changes: 1 file, kept as artifact-r8-ib");
+});
+
+test("another node's task whose agent's worktree isn't the tree its review was shown is not verified, and says why (I-b)", async () => {
+  const HANDED_BASE = "89abcdef0123456789abcdef0123456789abcdef";
+  const agent = { ...member, repository: "https://github.com/you/project" };
+  const lines: string[] = [];
+  const f = fixture([say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("PASS\nFine.")], {
+    agent: () => agent,
+    models: () => [{ provider: "paid", model: "m" }],
+    paid: (ref: string) => ref === "paid/m",
+    keep: async () => "artifact-r8-ib2",
+    exec: async (_m: Agent, command: string) => {
+      if (command.includes("from_commit")) return result({ stdout: `${HANDED_BASE} fetched` });
+      if (command.includes("--allow-empty")) return result({ stdout: `0 ${"1".repeat(40)}` });
+      // (Something changed it there after its review read it.)
+      if (command.includes(".tree-index")) return result({ stdout: "2".repeat(40) });
+      return result({ stdout: command.includes(`'/work/out/tasks/${handedTask.id}'`) ? "1" : "0" });
+    },
+    handedVm: async () => ({ exec: async () => result(), receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }), send: async () => ({ from: result(), to: result({ stdout: "0" }), bytes: 0, cut: false }), stop: async () => {}, release: async () => {} }),
+  });
+  f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  const done = await f.runtime.executeTask(agent, handedTask, { ...f.context, emit: (line: string) => void lines.push(line) });
+  expect(done.verified).toBe(false);
+  expect(done.error).toBe("its workspace on its agent's side isn't the tree its review was shown");
+  expect(done.output).toContain("Not verified: its workspace on its agent's side isn't the tree its review was shown");
+  expect(done.output).toContain("Changes: 1 file, kept as artifact-r8-ib2. Not verified: read them before you ship them.");
+  expect(lines).toContain("Review · passed, but its work isn't verified: its workspace on its agent's side isn't the tree its review was shown");
 });
 
 /* What another node's task sends back is applied on its agent's side only once all of it came (R5-3): a pipe cut at its

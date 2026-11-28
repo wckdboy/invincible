@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { handedApply, handedDrop, handedGive, handedNonce, handedReceive, handedSend, handedTake } from "../src/handed-repo.ts";
+import { handedApply, handedDrop, handedGive, handedNonce, handedReceive, handedSend, handedTake, handedTree } from "../src/handed-repo.ts";
 import { changesCommand } from "../src/team-runtime.ts";
 
 // Every test here makes repositories and runs git on them, as processes of their own, so its time is the machine's to
@@ -260,6 +260,25 @@ describe("what comes back from another node's task", () => {
       expect(sh(handedApply(s.root, s.base, "task-x", bad, 10, 64 << 20, s.keep.agent)).stderr.trim()).toBe("no such receive");
     }
     expect(s.left()).toEqual([`task-x.${b}.patch`]);
+  });
+
+  test("prints the tree it made the worktree, which is the tree the agent's side then reads there, until the worktree changes", () => {
+    const s = setUp();
+    expect(s.give().status).toBe(0);
+    writeFileSync(join(s.theirs, "app.txt"), "two\n");
+    writeFileSync(join(s.theirs, "logo.bin"), Buffer.from([0, 1, 2, 255]));
+    const back = s.bring();
+    expect(back.status).toBe(0);
+    const [size, tree] = back.stdout.trim().split(" ");
+    expect(Number(size)).toBeGreaterThan(0);
+    expect(tree).toMatch(/^[0-9a-f]{40}$/);
+    // (As its index has it, and as its files are read: what the changes' read would ship.)
+    expect(s.git(s.root, "write-tree").stdout.trim()).toBe(tree!);
+    const read = sh(handedTree(s.root, s.base, "task-x", s.keep.agent));
+    expect([read.status, read.stdout.trim()]).toEqual([0, tree!]);
+    writeFileSync(join(s.root, "app.txt"), "changed on the agent's side\n");
+    expect(sh(handedTree(s.root, s.base, "task-x", s.keep.agent)).stdout.trim()).not.toBe(tree);
+    expect(s.left()).toEqual([]);
   });
 });
 

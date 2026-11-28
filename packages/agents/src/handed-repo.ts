@@ -15,7 +15,7 @@ import { heldGit } from "./held-git.ts";
  *   (`handedApply`): to where the work began alone, in an index of its own, so that nothing in the task's worktree is read
  *   or written through, and then the tree that makes, and nothing else, is made the worktree's; what the patch's binary
  *   parts inflate to is held to the limit too. Every step of the agent's side on that worktree runs one at a time
- *   (team-runtime.ts).
+ *   (team-runtime.ts), and each apply prints the tree it made, which is what its review's evidence is read on.
  * - It is applied only once the node has seen all of it come: its sender done, the pipe not cut, and as many bytes kept
  *   as were carried. A side ended by its deadline, or a pipe cut at its cap, ends what the other reads as if the patch
  *   ended there, so a patch cut short at a file's end would otherwise be applied as a smaller one. One that didn't all
@@ -131,7 +131,7 @@ print(size)`;
 /**
  * Its agent's side: the patch of one receive (`nonce`) kept in `keep`, applied with the node's held git to `base` alone, in
  * an index of its own, and then dropped; the tree that made is then the task's worktree at `root`, and its index, with
- * nothing else in it (what git ignores too). Its size printed. Refused whole unless it is the `size` bytes
+ * nothing else in it (what git ignores too). Its size and that tree printed. Refused whole unless it is the `size` bytes
  * the node carried, or past `limit` as its binary parts say they inflate.
  */
 const APPLY_SCRIPT = `root, base, keep, task, nonce, size, limit = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], int(sys.argv[6]), int(sys.argv[7])
@@ -183,7 +183,7 @@ if r.returncode or not re.fullmatch('[0-9a-f]{40}|[0-9a-f]{64}', tree): sys.exit
 r = git(root,'read-tree','--reset','-u',tree,timeout=600)
 if not r.returncode: r = git(root,'clean','-f','-f','-d','-x','-q',timeout=600)
 if r.returncode: sys.exit('its workspace could not be made what its changes are: '+said(r))
-print(size)`;
+print(size, tree)`;
 
 /** Its agent's side: a patch of one receive (`nonce`) that didn't all come, dropped, with its apply's index. */
 const DROP_SCRIPT = `keep, task, nonce = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -193,6 +193,29 @@ if re.fullmatch('[0-9a-f]{32}', nonce):
             os.remove(os.path.join(keep, task+'.'+nonce+each))
         except OSError:
             pass`;
+
+/**
+ * Its agent's side: the tree of the task's worktree at `root` as it stands, everything git doesn't ignore, read as its VM's
+ * send reads its clone (SEND_SCRIPT): what its changes' read would ship. Its scratch index goes in `keep`.
+ */
+const TREE_SCRIPT = `root, base, keep, task = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+bad = refused(root)
+if bad: sys.exit(bad)
+os.makedirs(keep, exist_ok=True)
+index = os.path.join(keep, task+'.tree-index')
+def gone():
+    try:
+        os.remove(index)
+    except OSError:
+        pass
+gone()
+held = {'GIT_INDEX_FILE': index}
+r = git(root,'read-tree',base,env=held)
+if not r.returncode: r = git(root,'add','-A','.',env=held,timeout=600)
+tree = '' if r.returncode else git(root,'write-tree',env=held).stdout.decode().strip()
+gone()
+if not re.fullmatch('[0-9a-f]{40}|[0-9a-f]{64}', tree): sys.exit('could not read its workspace')
+print(tree)`;
 
 /** Where each side keeps its scratch files: under the agent's /work/.agent, and the task VM's own. */
 export const HANDED_KEEP = "/work/.agent/handed";
@@ -205,3 +228,4 @@ export const handedNonce = (): string => randomBytes(16).toString("hex");
 export const handedReceive = (task: string, nonce: string, limit: number, keep = HANDED_KEEP): string => heldGit(RECEIVE_SCRIPT, keep, task, nonce, String(limit));
 export const handedApply = (root: string, base: string, task: string, nonce: string, size: number, limit: number, keep = HANDED_KEEP): string => heldGit(APPLY_SCRIPT, root, base, keep, task, nonce, String(size), String(limit));
 export const handedDrop = (task: string, nonce: string, keep = HANDED_KEEP): string => heldGit(DROP_SCRIPT, keep, task, nonce);
+export const handedTree = (root: string, base: string, task: string, keep = HANDED_KEEP): string => heldGit(TREE_SCRIPT, root, base, keep, task);
