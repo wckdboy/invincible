@@ -5,6 +5,7 @@ package sh.invincible.bot.ui
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,6 +26,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,8 +37,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -96,6 +104,38 @@ fun PageBar(title: String, back: () -> Unit, navigation: (@Composable () -> Unit
         windowInsets = WindowInsets(0),
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
     )
+}
+
+/**
+ * A chat's name in its bar, as Grok Bot's (the owner's word, 28 November 2026; I10's for the iPhone): its face and its name
+ * in a pill. A tap opens what it is, where [open] is given. What it is doing ([line]) is said to a screen reader with its
+ * name. Its touch target is at least Material's, though the pill is smaller.
+ */
+@Composable
+fun ChatPill(name: String, line: String?, open: (() -> Unit)?, face: @Composable () -> Unit) {
+    Row(
+        Modifier
+            .minimumInteractiveComponentSize()
+            .clip(RoundedCornerShape(percent = 50))
+            .background(LocalBrand.current.raised)
+            .then(if (open != null) Modifier.clickable(onClickLabel = "About $name", onClick = open) else Modifier)
+            .clearAndSetSemantics {
+                contentDescription = name
+                line?.takeIf { it.isNotBlank() }?.let { stateDescription = it }
+                heading()
+                if (open != null) {
+                    role = Role.Button
+                    onClick(label = "About $name") { open(); true }
+                }
+            }
+            .heightIn(min = 36.dp)
+            .padding(start = 6.dp, end = Space.s3),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.s2),
+    ) {
+        face()
+        Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
 }
 
 /**

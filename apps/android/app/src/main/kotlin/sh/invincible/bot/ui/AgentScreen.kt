@@ -49,7 +49,6 @@ import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.AgentState
 import sh.invincible.bot.core.NodeError
 import sh.invincible.bot.core.Roster
-import sh.invincible.bot.core.RosterRow
 import sh.invincible.bot.core.Steps
 import sh.invincible.bot.core.TeamTask
 import sh.invincible.bot.core.bool
@@ -100,13 +99,20 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
         title = person?.name ?: id,
         back = back,
         openTask = openTask,
-        barTitle = { AgentBarTitle(id, person?.name ?: id, person?.avatar ?: row?.avatar, row, person?.role, open = { about = true }) },
+        // Its face and its name in a pill, as Grok Bot's (the owner's word, 28 November 2026): a tap opens what it is. What
+        // it is doing, or its role where it does nothing, is said with its name.
+        barTitle = {
+            val line = row?.let { Roster.besideChip(it.line, it.state) }?.takeIf { it.isNotBlank() } ?: person?.role
+            ChatPill(person?.name ?: id, line = listOfNotNull(row?.state?.words, line).joinToString(", "), open = { about = true }) {
+                AgentMarkView(id, person?.avatar ?: row?.avatar, 24.dp, state = AgentMark.state(row?.state), live = true)
+            }
+        },
         barAlways = true,
-        // Any VM, as the iPhone offers it: one without a desktop says so (the node's refusal) and how to get one.
+        // Its VM, in its menu, as the iPhone offers it: one without a desktop says so (the node's refusal) and how to get one.
         actions = {
             if (sandbox != null) {
                 androidx.compose.foundation.layout.Box {
-                    TextButton(onClick = { vmMenu = true }) { Text("Its VM") }
+                    androidx.compose.material3.IconButton(onClick = { vmMenu = true }) { Icon(MoreIcon, contentDescription = "${person?.name ?: id}'s options") }
                     androidx.compose.material3.DropdownMenu(expanded = vmMenu, onDismissRequest = { vmMenu = false }) {
                         androidx.compose.material3.DropdownMenuItem(text = { Text("Its screen") }, onClick = { vmMenu = false; watching = true })
                         androidx.compose.material3.DropdownMenuItem(text = { Text("Its terminal") }, onClick = { vmMenu = false; inTerminal = true })
@@ -146,36 +152,6 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
     if (colouring) person?.let { p -> GlassDialog(app, id, p.name, p.avatar) { colouring = false } }
 }
 
-/**
- * An agent's page's bar, always (I10's 16dae258, as the iPhone's and the web's: the page has no head of its own): its glass,
- * its state's dot on it; its name and its state's chip; under them what it is doing, in the needs ink where it needs you,
- * or its role where it does nothing. The glass is the one in focus, so its light breathes while it works. A tap opens what
- * the agent is ([open]).
- */
-@Composable
-private fun AgentBarTitle(id: String, name: String, avatar: Json?, row: RosterRow?, role: String?, open: () -> Unit) {
-    val line = row?.let { Roster.besideChip(it.line, it.state) }?.takeIf { it.isNotBlank() }
-    Row(
-        Modifier
-            .clip(MaterialTheme.shapes.small)
-            .clickable(role = Role.Button, onClickLabel = "About $name", onClick = open)
-            .semantics(mergeDescendants = true) {},
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.s2),
-    ) {
-        AgentMarkView(id, avatar, 28.dp, state = AgentMark.state(row?.state), live = true)
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                StateChip(row?.state)
-            }
-            (line ?: role?.takeIf { it.isNotBlank() })?.let {
-                Text(it, style = MaterialTheme.typography.labelMedium, color = if (line != null && row?.needs == true) LocalBrand.current.needs else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-            }
-        }
-    }
-}
-
 /** A room's page: who sits in it, what was said there and its tasks, and a box to write to them all. */
 @Composable
 fun RoomScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) -> Unit = {}) {
@@ -193,6 +169,9 @@ fun RoomScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) -
         title = room?.name ?: "A room",
         back = back,
         openTask = openTask,
+        // (Its name in a pill, as an agent's is, with what it is doing; who sits in it heads the page below.)
+        barTitle = { ChatPill(room?.name ?: "A room", line = row?.line, open = null) { RoomFace(24.dp) } },
+        barAlways = true,
     ) {
         Column(Modifier.fillMaxWidth().padding(Space.margin), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.s2)) {
             Row(horizontalArrangement = Arrangement.spacedBy(-Space.s3)) {

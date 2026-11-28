@@ -37,10 +37,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -103,6 +101,19 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
         Chats(app, close = { listing = false }, opened = { listing = false })
         return
     }
+    // Its own computer, when it has one: its screen, watched and taken over, or a terminal in it; Back returns here.
+    val computer = table.snapshot?.computer
+    var watching by rememberSaveable { mutableStateOf(false) }
+    var inTerminal by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = watching) { watching = false }
+    if (watching) {
+        DesktopScreen(app, "primary", Primary.name) { watching = false }
+        return
+    }
+    if (inTerminal && computer != null) {
+        TerminalScreen(app, computer, Primary.name) { inTerminal = false }
+        return
+    }
     Column(Modifier.fillMaxSize().imePadding()) {
         // Almost no chrome (the owner's word, 27 November 2026): at the root its top-left opens the roster (a phone's drawer;
         // a wide screen has it beside), elsewhere it goes back; its name; and one menu, a new chat and your chats.
@@ -113,16 +124,21 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
             roster != null -> ({ RosterBack(needs, roster) })
             else -> ({})
         }
-        PageBar(title ?: Primary.name, back, navigation = lead) {
+        // As Grok Bot's (the owner's word, 28 November 2026): back, your agent's face and name in a pill (the chat's title
+        // said with it), and one menu: a new chat, your past chats, its own computer, a task to give. A side question is
+        // "/btw" in the box.
+        PageBar(Primary.name, back, navigation = lead, titleContent = { ChatPill(Primary.name, line = title ?: "New chat", open = null) { PrimaryMark(24.dp) } }) {
             var options by remember { mutableStateOf(false) }
             androidx.compose.foundation.layout.Box {
                 androidx.compose.material3.IconButton(onClick = { options = true }) { Icon(MoreIcon, contentDescription = "Chat options") }
                 androidx.compose.material3.DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
-                    // (One menu: a new chat, a task to give, every chat, a side question.)
                     androidx.compose.material3.DropdownMenuItem(text = { Text("New chat") }, enabled = !live, onClick = { options = false; chat.fresh() })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Past chats") }, onClick = { options = false; listing = true })
+                    if (computer != null) {
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("Its screen") }, onClick = { options = false; watching = true })
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("Its terminal") }, onClick = { options = false; inTerminal = true })
+                    }
                     give?.let { g -> androidx.compose.material3.DropdownMenuItem(text = { Text("Give a task") }, onClick = { options = false; g() }) }
-                    androidx.compose.material3.DropdownMenuItem(text = { Text("Chats") }, onClick = { options = false; listing = true })
-                    androidx.compose.material3.DropdownMenuItem(text = { Text("Ask on the side") }, onClick = { options = false; chat.askAside("") })
                 }
             }
         }
@@ -135,13 +151,6 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
         val kept by chat.chats.collectAsState()
         LaunchedEffect(welcome) { if (welcome) chat.loadChats() }
         LazyColumn(Modifier.weight(1f), state = list) {
-            item {
-                Row(Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s2), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s3)) {
-                    // The primary, the I-beam in ink (still: its line says what it is doing).
-                    PrimaryMark(40.dp)
-                    Text(table.primary.line, style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                }
-            }
             // A new conversation: the welcome, as the web's (Welcome.kt): your agent's mark, large, and what it does; what you
             // might ask it first, a press puts it in the message box; your recent chats and All chats.
             // (Its latest kept chat being read: said so, in place of the welcome, which would only be replaced.)

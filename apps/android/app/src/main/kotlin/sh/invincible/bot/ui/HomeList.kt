@@ -48,6 +48,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import sh.invincible.bot.app.AppModel
@@ -237,9 +238,9 @@ private fun SearchPill(open: () -> Unit) {
 
 /** A room's face: what a group is, in a circle of its own. */
 @Composable
-private fun RoomFace() {
-    Box(Modifier.size(44.dp).clip(CircleShape).background(LocalBrand.current.raised), contentAlignment = Alignment.Center) {
-        Icon(agentsIcon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+internal fun RoomFace(size: Dp = 44.dp) {
+    Box(Modifier.size(size).clip(CircleShape).background(LocalBrand.current.raised), contentAlignment = Alignment.Center) {
+        Icon(agentsIcon, null, Modifier.size(size / 2), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

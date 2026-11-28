@@ -82,6 +82,8 @@ data class Snapshot(
     val removed: List<Pair<String, String>>,
     /** When you last looked at each agent's page and room; null from a node that keeps no such thing. */
     val seen: Map<String, Long>?,
+    /** Your agent's own computer, when it has one: its sandbox (its terminal's), its screen under the reserved handle. */
+    val computer: String? = null,
 ) {
     companion object {
         fun of(j: Json) = Snapshot(
@@ -91,6 +93,7 @@ data class Snapshot(
             j["deliveries"].list.map(Job::delivery),
             j["removed"].list.map { (it["id"].string ?: "") to (it["name"].string ?: "") },
             (j["seen"] as? Json.Obj)?.fields?.mapValues { it.value.long ?: 0 },
+            j["computer"]["id"].string,
         )
     }
 }

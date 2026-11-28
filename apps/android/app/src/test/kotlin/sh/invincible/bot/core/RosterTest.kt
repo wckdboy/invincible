@@ -29,6 +29,13 @@ class RosterTest {
         }
     }
 
+    @Test fun yourAgentsOwnComputerIsReadAsItsSandbox() {
+        // (Its own computer, made as an agent's VM is: its screen under its reserved handle, its terminal in its sandbox.)
+        val team = Json.parse("""{"agents":[],"rooms":[],"tasks":[],"deliveries":[],"computer":{"node":"homelab","id":"sb-0123456789"}}""")
+        assertEquals("sb-0123456789", Snapshot.of(team).computer)
+        assertEquals(null, Snapshot.of(Json.parse("""{"agents":[],"rooms":[],"tasks":[],"deliveries":[]}""")).computer)
+    }
+
     @Test fun yourAgentsLineInTheListIsThePwasAndNeverSaysWhatWaitsOnYou() {
         val cases = v["homePrimary"].list
         assertTrue(cases.size >= 15)
