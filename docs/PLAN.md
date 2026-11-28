@@ -89,6 +89,15 @@ own setting says so (`invincible fabric on`), and pinned to Q-AMP 0.2.0, the fir
   - The target's id goes into the signing input. It is a contract change, with fixtures for the old form and the new.
 - ✅ The pin: Q-AMP 0.2.0, the first release with the sidecar (`scripts/qamp-pin.sh`).
 - 🔜 The owner's pair switched on (FABRIC.md, the runbook).
+- 🔜 Coding plans for another node's tasks, bounded by calls or tokens a day (the lead, 28 November 2026). A hand-off
+  runs only on models its budget counts above $0, so that its budget bounds its spend (`handedLease`, `paidFor`).
+  A coding plan's models (OpenCode Go's, Z.ai's, MiMo's) count at $0, their calls paid already, so a hand-off to an
+  agent whose models are all plans calls nothing.
+  - What would let a plan serve one: a bound of its own, a number of calls or tokens a day for each hand-off, counted at
+    the gateway as its lease's, and refused past it, as its dollars are now.
+  - It would also have to share the plan's own windows (its five-hour and monthly allowances, `windows.ts`) with your
+    own work, which comes first.
+  - The plan's terms decide which may serve another node's work at all: unattended use, as the provider list says.
 
 **Exit:** the first answer on a fresh connection, and sync's lag, are measured before and after (the carried grants measured 96 vs
 504 ms first answer). Revocation cuts a key off within one round trip. The fuzz targets run clean.
