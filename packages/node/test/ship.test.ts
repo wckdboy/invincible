@@ -333,6 +333,8 @@ describe("the gate, end to end", () => {
   const port = freePort();
   const TOKEN = "github_pat_FAKEFAKEFAKEFAKE0000_fakefakefakefakefakefakefakefakefakefakefakefake";
   const seen: { method: string; url: string; auth: string | null }[] = [];
+  /** One GitHub request kept waiting, its path this, until its test lets it go: a send that is under way meanwhile. */
+  let hold: { path: string; reached: () => void; released: Promise<void> } | null = null;
   // Your default branch stands where the shipments began, and so does the pull request's branch a fix begins on.
   const gh = fakeGitHub({ heads: { main: BASE, "invincible/fixing": BASE } });
   let daemon: Daemon;
@@ -356,6 +358,10 @@ describe("the gate, end to end", () => {
       const url = new URL(String(input));
       seen.push({ method: init?.method ?? "GET", url: url.toString(), auth: new Headers(init?.headers).get("authorization") });
       if (url.origin !== "https://api.github.com") return new Response("{}", { status: 404 });
+      if (hold && url.pathname === hold.path) {
+        hold.reached();
+        await hold.released;
+      }
       const answer = await gh.github((init?.method ?? "GET") as "GET" | "POST" | "PATCH", url.pathname, init?.body ? JSON.parse(String(init.body)) : undefined);
       return Response.json(answer.json, { status: answer.status });
     }) as typeof fetch;
@@ -461,6 +467,49 @@ describe("the gate, end to end", () => {
     expect((await send(home.adminToken(), "shipTeamTask", { task: id })).status).toBe(409);
     // Yours alone: an agent may not.
     expect((await send(armToken, "shipTeamTask", { task: id })).status).toBe(403);
+  });
+
+  test("your tap while another approval is being sent waits for its own ship to be sent, and answers with it: never \"not sent yet\" for one that goes out after", async () => {
+    // An agent's other ship, approved by you and being sent: GitHub holds it at its branch's check until this test lets it go.
+    let reached!: () => void;
+    const underWay = new Promise<void>((resolve) => (reached = resolve));
+    let release!: () => void;
+    hold = { path: "/repos/amiriteorg/shipyard/git/ref/heads/invincible/held", reached, released: new Promise<void>((resolve) => (release = resolve)) };
+    try {
+      const other = await send(armToken, "callConnector", { connector: "github", tool: "ship", args: { ...ARGS, artifact, branch: "invincible/held" }, why: "40 tests pass" });
+      expect(other.body).toMatchObject({ status: "asked" });
+      expect((await send(home.adminToken(), "decideAction", { id: other.body.action, approve: true })).status).toBe(200);
+      await underWay;
+      // Your tap, on an agent's verified work, while that send is under way.
+      const team = new TeamStore(join(home.dir, "team.db"));
+      let id: string;
+      try {
+        const work = team.createTask({ room: team.direct("noa").id, assignee: "noa", title: "Parse SI prefixes", goal: "Parse them." });
+        team.finish(work.id, "done", null, { verified: true, output: "Prefixes parse, milli to tera.\n\nReview: PASS", changes: { artifact, files: 3, base: BASE } });
+        id = work.id;
+      } finally {
+        team.close();
+      }
+      const before = seen.length;
+      const tapped = send(home.adminToken(), "shipTeamTask", { task: id, title: "Parse SI prefixes" });
+      // Its ship is filed and approved, and waits behind the send under way; then that one goes on.
+      const actions = async () => (await send(home.adminToken(), "actions")).body.actions as ActionView[];
+      const yours = async () => (await actions()).find((a) => a.tool === "ship" && a.args.title === "Parse SI prefixes");
+      for (const end = Date.now() + 10_000; (await yours())?.state !== "approved"; await Bun.sleep(5)) {
+        if (Date.now() > end) throw new Error("your tap's ship was never filed and approved");
+      }
+      release();
+      const shipped = await tapped;
+      expect(shipped.status).toBe(200);
+      expect(shipped.body).toMatchObject({ url: "https://github.com/amiriteorg/shipyard/pull/7", pr: 7 });
+      expect((await yours())?.state).toBe("done");
+      expect((await actions()).find((a) => a.id === other.body.action)?.state).toBe("done");
+      // Each was sent once: the other's pull request, then yours.
+      expect(seen.slice(before).filter((s) => s.method === "POST" && s.url.endsWith("/pulls"))).toHaveLength(2);
+    } finally {
+      hold = null;
+      release();
+    }
   });
 
   test("a fix onto its pull request's branch goes through the same gate: it waits for you; approved, the branch moves forward once and no new pull request opens", async () => {

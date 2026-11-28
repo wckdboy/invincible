@@ -2612,8 +2612,8 @@ export function createApp(ctx: AppContext) {
       receipt = filed.result.body;
     } else if (yours) {
       await connectorErrors(() => ctx.connectors.decide(filed.action, true, yours.kind === "client" ? yours.device : null));
-      await ctx.connectors.drain();
-      const action = ctx.connectors.actions(10_000).find((a) => a.id === filed.action);
+      // (Its own send, behind any other already under way: never "not sent yet" for a ship that goes out after.)
+      const action = await ctx.connectors.drainFor(filed.action);
       if (action?.state !== "done") throw new HttpError(502, `not shipped: ${action?.receipt ?? "it hasn't been sent yet (invincible action ls)"}`);
       receipt = action.receipt ?? "";
     } else {

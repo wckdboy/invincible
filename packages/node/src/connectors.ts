@@ -804,6 +804,21 @@ export class ConnectorService {
     return this.draining;
   }
 
+  /**
+   * An approved action, sent: its view once it has been (your tap on Ship waits for it). A drain under way took the
+   * approved actions as they stood when it began, perhaps before this one was approved: it is joined, and if this one
+   * wasn't among them, one more drain, begun after the approval and so holding it, sends it. Two at most; one still
+   * approved after them couldn't be sent now (this node's clock behind its events), and its view says so.
+   */
+  async drainFor(id: string): Promise<ActionView | undefined> {
+    for (let drains = 0; drains < 2; drains++) {
+      await this.drain();
+      const action = this.actions(10_000).find((a) => a.id === id);
+      if (action?.state !== "approved") return action;
+    }
+    return this.actions(10_000).find((a) => a.id === id);
+  }
+
   private async drainOnce(): Promise<void> {
     const mine = this.actions(10_000).filter((a) => a.node === this.o.identity.id && (a.state === "approved" || a.state === "lapsed"));
     for (const action of mine) {
