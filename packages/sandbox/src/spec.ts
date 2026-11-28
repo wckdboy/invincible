@@ -359,8 +359,11 @@ export const pipeArgs = (id: string, cmd: string[], timeoutSec: number, tag: str
  * leads its own. That is a side's GNU `timeout`: it makes a group of its own (setpgid), which holds the whole command, the
  * node's git among it, though git runs with an environment of its own and so without the tag. A group is killed only
  * where its leader has the tag, never group 0 or 1 or a group an untagged process leads, so nothing else is ended; this
- * script runs without the tag, and so it is never among what it kills. It looks twice, for anything a tagged process
- * started between the first look and its kill. The tag is matched whole, as a fixed string, so no other pipe's processes
+ * script runs without the tag, and so it is never among what it kills. Each look finds every group a tagged process
+ * leads before it kills anything: killed first, the leader's child (the side's shell) lets the leader, its `timeout`,
+ * exit, and the group, an untagged child of the node's git in it, would then have no leader to be found by (on Ultra's
+ * Docker, 28 November 2026: /proc lists 13 before 7). It looks twice, for anything a tagged process started between the
+ * first look and its kill. The tag is matched whole, as a fixed string, so no other pipe's processes
  * match it, and one that isn't 32 or more lowercase hex digits is refused (exit 2) before anything is looked at.
  *
  * What it can't find runs on: a process that dropped the tag from its environment and also left the group (as a daemon
@@ -370,12 +373,13 @@ export const PIPE_END = `t=$1
 case $t in ''|*[!0-9a-f]*) exit 2;; esac
 [ \${#t} -ge 32 ] || exit 2
 tagged() { for d in /proc/[0-9]*; do tr '\\0' '\\n' 2>/dev/null < "$d/environ" | grep -qxF "INVINCIBLE_PIPE=$t" && echo "\${d#/proc/}"; done; }
+group() { sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | cut -d' ' -f3; }
 for look in 1 2; do
-  for p in $(tagged); do
-    [ "$p" -gt 1 ] || continue
-    [ "$(sed 's/.*) //' "/proc/$p/stat" 2>/dev/null | cut -d' ' -f3)" = "$p" ] && kill -KILL "-$p" 2>/dev/null
-    kill -KILL "$p" 2>/dev/null
-  done
+  found=$(tagged)
+  leads=
+  for p in $found; do [ "$p" -gt 1 ] && [ "$(group "$p")" = "$p" ] && leads="$leads $p"; done
+  for g in $leads; do kill -KILL "-$g" 2>/dev/null; done
+  for p in $found; do [ "$p" -gt 1 ] && kill -KILL "$p" 2>/dev/null; done
 done
 exit 0`;
 
