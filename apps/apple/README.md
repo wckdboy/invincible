@@ -282,6 +282,10 @@ bun apps/apple/scripts/vectors.ts --check   # exits 1 if the file isn't what thi
 `bun apps/apple/scripts/brand.ts` writes the app's colours (the ink: black on light, white on dark; what is written on
 it; the red of what went wrong) and its icon, the I-beam, from `scripts/mark.ts`, the mark of the web app's and Android's
 icons: iOS's tile edge to edge (iOS rounds it), its dark form the mark alone on nothing (iOS backs it itself), its tinted
-form that mark in grey, and the Mac's tile at each size. The app's mark inside the app (Settings' About, joining, a Mac's
+form that mark in grey; and the Mac's, an Icon Composer icon (`Invincible/Mac/MacIcon.icon`): the I-beam as one layer, near
+black on white, white on near black in the dark, and white for macOS to tint, which draws its tinted and clear forms from
+it. Xcode compiles it into the Mac app's `Assets.car` (light, dark and tintable), with a flat `MacIcon.icns` beside it.
+macOS shows the form the Mac's Appearance settings ask for ("Icon & widget style"): Dark, Clear or Tinted can follow light
+and dark, while Default keeps the light one. The app's mark inside the app (Settings' About, joining, a Mac's
 first run, Home's header, the drawer's head, the sidebar's head) is the I-beam alone in the page's ink (`AppMark`), beside
 the INVINCIBLE wordmark (`Wordmark`) where a sidebar begins.

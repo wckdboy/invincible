@@ -84,17 +84,42 @@ describe("the app icon: the I-beam, one solid form in one ink", () => {
     }
   });
 
-  test("the Apple app's: iOS's tile, its dark form the mark alone (iOS backs it), its tinted form in grey; the Mac's at each size", () => {
+  test("the Apple app's: iOS's tile, its dark form the mark alone (iOS backs it), its tinted form in grey", () => {
     const set = "apps/apple/Invincible/Assets.xcassets/AppIcon.appiconset";
     expect(header(`${set}/AppIcon.png`)).toEqual({ width: 1024, height: 1024, type: 2 });
     expect(header(`${set}/AppIcon-dark.png`)).toEqual({ width: 1024, height: 1024, type: 6 });
     expect(header(`${set}/AppIcon-tinted.png`)).toEqual({ width: 1024, height: 1024, type: 6 });
     const contents = JSON.parse(readFileSync(join(ROOT, set, "Contents.json"), "utf8")) as { images: { filename: string; appearances?: { value: string }[] }[] };
     expect(contents.images.map((i) => [i.filename, i.appearances?.[0]?.value ?? "any"])).toEqual([["AppIcon.png", "any"], ["AppIcon-dark.png", "dark"], ["AppIcon-tinted.png", "tinted"]]);
-    for (const px of [16, 32, 64, 128, 256, 512, 1024]) expect(header(`apps/apple/Invincible/Mac/MacAssets.xcassets/MacIcon.appiconset/icon_${px}.png`)).toMatchObject({ width: px, height: px });
     // The dark form is the mark on nothing: its corners are transparent, where the tile's are its near black.
     const dark = renderMark(256, { tile: null });
     for (const at of [0, 255, 256 * 255, 256 * 256 - 1]) expect(dark[at * 4 + 3]).toBeLessThanOrEqual(1);
+  });
+
+  // The Mac's follows light and dark too (macOS 26's Icon Composer icons): one layer, the I-beam (MARK_POLYGON at
+  // MARK_BOX, the same box as every other icon's), its ground and ink per appearance from MARK_FORMS. The tinted and
+  // clear forms are drawn by macOS from the mark, white for it to tint. Xcode compiles it into the app's Assets.car.
+  test("the Mac's icon is an Icon Composer icon: light, the ink on white; dark, white on near black; tinted, the white mark", () => {
+    const icon = "apps/apple/Invincible/Mac/MacIcon.icon";
+    type Solid = { appearance?: string; value: { solid: string } };
+    const json = JSON.parse(readFileSync(join(ROOT, icon, "icon.json"), "utf8")) as {
+      "fill-specializations": Solid[];
+      groups: { layers: { "image-name": string; glass: boolean; "fill-specializations": Solid[] }[] }[];
+      "supported-platforms": { squares: string[] };
+    };
+    // Icon Composer's colour form (sRGB components, 0 to 1) of a hex colour.
+    const srgb = (hex: string) => `srgb:${[1, 3, 5].map((i) => (Number.parseInt(hex.slice(i, i + 2), 16) / 255).toFixed(5)).join(",")},1.00000`;
+    const forms = (list: Solid[]) => list.map((s) => [s.appearance ?? "light", s.value.solid]);
+    expect(forms(json["fill-specializations"])).toEqual([["light", srgb(MARK_FORMS.light.tile)], ["dark", srgb(MARK_FORMS.dark.tile)]]);
+    const layer = json.groups[0]!.layers[0]!;
+    expect(json.groups.flatMap((g) => g.layers).length).toBe(1);
+    expect(forms(layer["fill-specializations"])).toEqual([["light", srgb(MARK_FORMS.light.mark)], ["dark", srgb(MARK_FORMS.dark.mark)], ["tinted", srgb(MARK_FORMS.dark.mark)]]);
+    expect([layer["image-name"], layer.glass, json["supported-platforms"].squares]).toEqual(["ibeam.svg", false, ["macOS"]]);
+    const svg = readFileSync(join(ROOT, icon, "Assets", layer["image-name"]), "utf8");
+    expect(svg).toContain(`points="${MARK_POLYGON}"`);
+    expect(svg).toContain(`scale(${MARK_BOX})`);
+    // It replaced the set of PNGs, white on near black at each size, which followed no mode.
+    expect(existsSync(join(ROOT, "apps/apple/Invincible/Mac/MacAssets.xcassets/MacIcon.appiconset"))).toBe(false);
   });
 
   // The owner's, 28 November 2026: the icon follows light and dark wherever the platform can. iOS can: its light form is
