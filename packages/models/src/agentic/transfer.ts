@@ -29,18 +29,23 @@ for (const [file, text] of Object.entries(FILES)) {
 }
 `;
 
-/** The commands that write `files` (path → text) under `root`, creating directories as needed. */
-export function putCommands(files: Record<string, string>, root: string): string[] {
+/**
+ * The commands that write `files` (path → text) under `root`, creating directories as needed, then run `after` (when
+ * given) once they're written. As few as the door's limit allows: each is a round trip, a `docker exec` by way of the
+ * node. A repository of one piece, as most are, goes in one command; a larger one's pieces go first, the first making
+ * the file and the last unpacking it.
+ */
+export function putCommands(files: Record<string, string>, root: string, after?: string): string[] {
   for (const path of Object.keys(files)) if (path.startsWith("/") || path.split("/").includes("..")) throw new Error(`a file's path stays under its root: ${path}`);
   // One self-unpacking module: the files as a literal, then the code that writes them.
   const payload = b64(`const FILES = ${JSON.stringify(files)};\n${UNPACK}`);
   const pieces: string[] = [];
   for (let at = 0; at < payload.length; at += CHUNK) pieces.push(payload.slice(at, at + CHUNK));
-  return [
-    `${MARK}put-reset\nmkdir -p ${SCRATCH} && : > ${SCRATCH}/in.b64`,
-    ...pieces.map((piece) => `${MARK}put-chunk\nprintf %s '${piece}' >> ${SCRATCH}/in.b64`),
-    `${MARK}put-apply ${root}\nbase64 -d ${SCRATCH}/in.b64 > ${SCRATCH}/unpack.mjs && bun ${SCRATCH}/unpack.mjs '${root}' && rm -rf ${SCRATCH}`,
-  ];
+  return pieces.map((piece, i) => {
+    const write = `${i === 0 ? `mkdir -p ${SCRATCH} && ` : ""}printf %s '${piece}' ${i === 0 ? ">" : ">>"} ${SCRATCH}/in.b64`;
+    if (i < pieces.length - 1) return `${MARK}put-chunk\n${write}`;
+    return `${MARK}put-apply ${root}\n${write} && base64 -d ${SCRATCH}/in.b64 > ${SCRATCH}/unpack.mjs && bun ${SCRATCH}/unpack.mjs '${root}' && rm -rf ${SCRATCH}${after ? ` && { ${after}; }` : ""}`;
+  });
 }
 
 /** What a put-apply command's payload holds, for a stand-in sandbox (the chunks' base64, joined, decoded here). */

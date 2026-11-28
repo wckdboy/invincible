@@ -8,7 +8,6 @@ import {
   checkCommand,
   GRADE,
   gradeChecks,
-  MARK,
   type PosedTask,
   poseTask,
   problemId,
@@ -41,17 +40,16 @@ export const CHECK_TIMEOUT_SEC = 120;
 
 type Exec = (command: string, timeoutSec: number) => Promise<ExecResult>;
 
-/** The repository as given, in the run's sandbox, as a git repository of one commit (so the reviewer sees what changed). */
+/**
+ * The repository as given, in the run's sandbox, as a git repository of one commit (so the reviewer sees what changed),
+ * in the same command as the put: without git the work goes on, and only the reviewer's view of what changed is poorer.
+ */
 async function seed(exec: Exec, posed: PosedTask): Promise<void> {
-  for (const command of putCommands(posed.files, REPO)) {
+  const commit = `mkdir -p /work/out && cd ${REPO} && git init -q . 2>/dev/null && git add -A 2>/dev/null && git -c user.name=invincible -c user.email=eval@invincible.invalid commit -qm "as given" 2>/dev/null; true`;
+  for (const command of putCommands(posed.files, REPO, commit)) {
     const result = await exec(command, 120);
     if (result.exitCode !== 0) throw new Error(`the task's repository couldn't be put in the sandbox: ${(result.stderr || result.stdout).trim().slice(0, 300)}`);
   }
-  // Without git the work goes on: only the reviewer's view of what changed is poorer.
-  await exec(
-    `${MARK}commit\nmkdir -p /work/out && cd ${REPO} && git init -q . 2>/dev/null && git add -A 2>/dev/null && git -c user.name=invincible -c user.email=eval@invincible.invalid commit -qm "as given" 2>/dev/null; true`,
-    120,
-  );
 }
 
 /**

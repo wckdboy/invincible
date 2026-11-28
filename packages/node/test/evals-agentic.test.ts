@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type ChatStreamEvent, type RouteName, routes, EvalRecord, evalProblem, type EvalView, VARIANTS } from "@invincible/core";
-import { AGENTIC_SUITE, GRADE, poseTask, REPO, type Solution } from "@invincible/models";
+import { AGENTIC_SUITE, GRADE, MARK, poseTask, putCommands, REPO, type Solution } from "@invincible/models";
 import { attemptTask, timeNote } from "../src/eval-agentic.ts";
 import { describeEval, nothingAnswered, runEvals, type EvalJob } from "../src/eval-cli.ts";
 import { suiteNamed } from "../src/eval-suites.ts";
@@ -157,6 +157,34 @@ describe("an agentic eval", () => {
     expect(grader!.box.commands.filter((c) => c.includes("invincible-eval:check")).map((c) => c.split("\n")[0]!.split(" ")[2])).toEqual(posed.checks.map((c) => c.key));
     // And the grading sandbox is gone afterwards.
     expect(fake.destroyed).toContain(grader!.box.id);
+  });
+
+  test("the repository goes in, committed, in one command, and what was left in one: a round trip each, where they were four and three", async () => {
+    const debugging = task("tangled-total");
+    const posed = poseTask(debugging, 21, 2);
+    const fake = fakeNode({ leaves: () => posed.reference });
+    const record = (await attemptTask(fake.node, debugging, 2, job(21)))!;
+    expect(record).toMatchObject({ status: "scored", score: 1 });
+    const puts = (box: Box) => box.commands.filter((c) => c.startsWith(`${MARK}put`) || c.startsWith(`${MARK}commit`));
+    const [engineer] = fake.engineers();
+    expect(puts(engineer!)).toHaveLength(1);
+    expect(puts(engineer!)[0]).toContain('commit -qm "as given"');
+    const [grader] = fake.graders();
+    expect(puts(grader!.box)).toHaveLength(1);
+  });
+
+  test("a repository larger than a command may carry goes in pieces, the last with its unpacking, each under the door's limit", async () => {
+    const files = { "src/big.txt": "0123456789abcdef".repeat(6_400), "README.md": "Big.\n" };
+    const commands = putCommands(files, REPO);
+    // Its 137,000 characters of base64 in three pieces: the first makes the file, the last unpacks it.
+    expect(commands).toHaveLength(3);
+    expect(commands[0]).toMatch(/printf %s '[A-Za-z0-9+/=]+' > /);
+    expect(commands.filter((c) => c.includes("unpack.mjs"))).toEqual([commands[2]!]);
+    for (const command of commands) expect(command.length).toBeLessThan(100_000);
+    const sandboxes = new StandInSandboxes();
+    for (const command of commands) expect((await sandboxes.exec("big", command)).exitCode).toBe(0);
+    expect(sandboxes.box("big").files.get(`${REPO}/src/big.txt`)).toBe(files["src/big.txt"]);
+    expect(sandboxes.box("big").files.get(`${REPO}/README.md`)).toBe("Big.\n");
   });
 
   test("a plausible wrong fix passes the repository's own test and the review, and the hidden tests still fail it", async () => {

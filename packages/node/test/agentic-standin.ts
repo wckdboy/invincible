@@ -91,9 +91,10 @@ export class StandInSandboxes {
     const first = command.split("\n", 1)[0]!;
     if (first.startsWith(MARK)) {
       const [kind, ...rest] = first.slice(MARK.length).split(" ");
-      if (kind === "put-reset") this.buffers.set(id, "");
-      else if (kind === "put-chunk") this.buffers.set(id, (this.buffers.get(id) ?? "") + (/printf %s '([^']*)'/.exec(command)?.[1] ?? ""));
-      else if (kind === "put-apply") {
+      // A piece of a put: written afresh (`>`, its first) or added (`>>`); the last also unpacks it.
+      const piece = kind === "put-chunk" || kind === "put-apply" ? /printf %s '([^']*)' (>>?) /.exec(command) : null;
+      if (piece) this.buffers.set(id, (piece[2] === ">" ? "" : (this.buffers.get(id) ?? "")) + piece[1]);
+      if (kind === "put-apply") {
         for (const [path, text] of Object.entries(unpackPayload(this.buffers.get(id) ?? ""))) box.files.set(`${rest[0]}/${path}`, text);
         this.buffers.delete(id);
       } else if (kind === "tree") return { exitCode: 0, stdout: treeOutput(this.under(box, rest[0]!)) };
