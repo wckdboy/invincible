@@ -473,6 +473,21 @@ export function verdictOf(task: Pick<TeamTask, "status" | "verified" | "record" 
  * didn't write it; Reviewed, not proven on its reviewer alone (what its gates can't show is said under it); a task that
  * didn't pass says why (`why`: taskEnd's, or the general word). Null while it is in hand.
  */
+/**
+ * A proof in one line, as a chat's compact row says it (the owner's structure, 28 November 2026: "Proven · 1 of 1
+ * gate"): its verdict (verdictOf), then how many of its gates passed, as the task's page counts them; its verdict alone
+ * where no gate ran. Null while it is in hand.
+ */
+export function proofLine(task: Pick<TeamTask, "status" | "verified" | "record" | "error">): string | null {
+  const facts = factsOfRecord(task.record);
+  const said = verdictOf(task, facts);
+  if (!said) return null;
+  const gates = facts?.gates ?? [];
+  if (!gates.length) return said.word;
+  const passed = gates.filter((gate) => gate.exit === 0).length;
+  return `${said.word} · ${passed} of ${gates.length} ${gates.length === 1 ? "gate" : "gates"} passed`;
+}
+
 export function proofSeal(task: Pick<TeamTask, "status" | "verified" | "record" | "error">, facts: ProofFacts | null, why: string): { word: string; by: string; passed: boolean } | null {
   const verdict = verdictOf(task, facts);
   if (!verdict) return null;

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TeamTrailEntry } from "@invincible/core/team";
-import { because, commandKind, costWords, factsOfProof, factsOfRecord, gateRows, judgedWith, liveStep, proofOf, proofSeal, readTrailLine, saidBesideProof, workedLine, reviewOf, sameModelReview, stepGroups, steersOf, summaryWords, verdictOf, workedFor, workSummary } from "./steps.ts";
+import { because, commandKind, costWords, factsOfProof, factsOfRecord, gateRows, judgedWith, liveStep, proofLine, proofOf, proofSeal, readTrailLine, saidBesideProof, workedLine, reviewOf, sameModelReview, stepGroups, steersOf, summaryWords, verdictOf, workedFor, workSummary } from "./steps.ts";
 
 /* A task's trail as the node writes it (team-runtime.ts progress()), its lines in the order they happened. */
 const T0 = 1_764_000_000_000;
@@ -179,6 +179,20 @@ describe("a task's proof and its cost, in one place", () => {
     expect(costWords({ record: { ...record, spent: [line("a/m", 2, 2, 0, 0)] } }, prices)).toBe("spend unknown · 6m 12s");
     expect(costWords({ budgetUsd: 0.5 }, prices)).toBe("budget $0.50");
     expect(costWords({}, prices)).toBe("");
+  });
+});
+
+describe("a proof in one line, as a chat's compact row says it", () => {
+  const record = (proof?: { before: number[]; after: number[]; review: "pass" | "revise" | null; sameModel: boolean }, ended: "done" | "unverified" | "gave-up" | "stopped" = "done") => ({ startedAt: 0, endedAt: 1, ended, commands: 1, revisions: 0, spent: [], ...(proof ? { proof } : {}) });
+  test("its verdict, then how many of its gates passed, as the task's page counts them", () => {
+    expect(proofLine({ status: "done", verified: true, error: null, record: record({ before: [1], after: [0], review: "pass", sameModel: false }) })).toBe("Proven · 1 of 1 gate passed");
+    expect(proofLine({ status: "done", verified: true, error: null, record: record({ before: [0, 0], after: [0, 0], review: "pass", sameModel: false }) })).toBe("Reviewed, not proven · 2 of 2 gates passed");
+    expect(proofLine({ status: "failed", verified: false, error: "unverified", record: record({ before: [1, 1], after: [0, 1], review: null, sameModel: false }, "unverified") })).toBe("Failed · gate 2 · 1 of 2 gates passed");
+  });
+  test("its verdict alone where no gate ran, and nothing while it is in hand", () => {
+    expect(proofLine({ status: "done", verified: true, error: null, record: record() })).toBe("Reviewed");
+    expect(proofLine({ status: "failed", verified: false, error: "gave-up", record: record({ before: [1], after: [], review: null, sameModel: false }, "gave-up") })).toBe("Gave up");
+    expect(proofLine({ status: "running", verified: false, error: null, record: undefined })).toBeNull();
   });
 });
 

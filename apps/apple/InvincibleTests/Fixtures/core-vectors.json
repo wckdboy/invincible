@@ -5842,6 +5842,276 @@
       }
     ]
   },
+  "proofLines": [
+    {
+      "task": {
+        "status": "done",
+        "verified": true,
+        "error": null,
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "done",
+          "commands": 2,
+          "revisions": 0,
+          "spent": [],
+          "proof": {
+            "before": [
+              1,
+              0
+            ],
+            "after": [
+              0,
+              0
+            ],
+            "review": "pass",
+            "sameModel": false
+          }
+        }
+      },
+      "line": "Proven · 2 of 2 gates passed"
+    },
+    {
+      "task": {
+        "status": "done",
+        "verified": true,
+        "error": null,
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "done",
+          "commands": 2,
+          "revisions": 0,
+          "spent": [],
+          "proof": {
+            "before": [
+              0
+            ],
+            "after": [
+              0
+            ],
+            "review": "pass",
+            "sameModel": false
+          }
+        }
+      },
+      "line": "Reviewed, not proven · 1 of 1 gate passed"
+    },
+    {
+      "task": {
+        "status": "done",
+        "verified": true,
+        "error": null,
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "done",
+          "commands": 2,
+          "revisions": 0,
+          "spent": [],
+          "proof": {
+            "before": [],
+            "after": [],
+            "review": "pass",
+            "sameModel": false
+          }
+        }
+      },
+      "line": "Reviewed, not proven"
+    },
+    {
+      "task": {
+        "status": "done",
+        "verified": true,
+        "error": null,
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "done",
+          "commands": 2,
+          "revisions": 0,
+          "spent": [],
+          "proof": {
+            "before": [
+              1
+            ],
+            "after": [
+              0
+            ],
+            "review": "pass",
+            "sameModel": true
+          }
+        }
+      },
+      "line": "Reviewed, not proven · 1 of 1 gate passed"
+    },
+    {
+      "task": {
+        "status": "done",
+        "verified": true,
+        "error": null,
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "done",
+          "commands": 2,
+          "revisions": 0,
+          "spent": []
+        }
+      },
+      "line": "Reviewed"
+    },
+    {
+      "task": {
+        "status": "done",
+        "verified": true,
+        "error": null
+      },
+      "line": "Reviewed"
+    },
+    {
+      "task": {
+        "status": "failed",
+        "verified": false,
+        "error": "unverified",
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "unverified",
+          "commands": 2,
+          "revisions": 0,
+          "spent": [],
+          "proof": {
+            "before": [
+              1,
+              1
+            ],
+            "after": [
+              0,
+              1
+            ],
+            "review": null,
+            "sameModel": false
+          }
+        }
+      },
+      "line": "Failed · gate 2 · 1 of 2 gates passed"
+    },
+    {
+      "task": {
+        "status": "failed",
+        "verified": false,
+        "error": "unverified",
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "unverified",
+          "commands": 2,
+          "revisions": 0,
+          "spent": [],
+          "proof": {
+            "before": [
+              1
+            ],
+            "after": [
+              0
+            ],
+            "review": "revise",
+            "sameModel": false
+          }
+        }
+      },
+      "line": "Sent back · 1 of 1 gate passed"
+    },
+    {
+      "task": {
+        "status": "failed",
+        "verified": false,
+        "error": "gave-up",
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "gave-up",
+          "commands": 2,
+          "revisions": 0,
+          "spent": [],
+          "proof": {
+            "before": [
+              1
+            ],
+            "after": [],
+            "review": null,
+            "sameModel": false
+          }
+        }
+      },
+      "line": "Gave up"
+    },
+    {
+      "task": {
+        "status": "failed",
+        "verified": false,
+        "error": "Model unavailable"
+      },
+      "line": "Failed"
+    },
+    {
+      "task": {
+        "status": "done",
+        "verified": false,
+        "error": null,
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "unverified",
+          "commands": 2,
+          "revisions": 0,
+          "spent": []
+        }
+      },
+      "line": "Not verified"
+    },
+    {
+      "task": {
+        "status": "stopped",
+        "verified": false,
+        "error": "stopped"
+      },
+      "line": "Stopped"
+    },
+    {
+      "task": {
+        "status": "failed",
+        "verified": false,
+        "error": "stopped\nBy you.",
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "stopped",
+          "commands": 2,
+          "revisions": 0,
+          "spent": []
+        }
+      },
+      "line": "Stopped"
+    },
+    {
+      "task": {
+        "status": "running",
+        "verified": false,
+        "error": null
+      },
+      "line": null
+    },
+    {
+      "task": {
+        "status": "queued",
+        "verified": false,
+        "error": null
+      },
+      "line": null
+    }
+  ],
   "homePrimary": [
     {
       "answering": true,

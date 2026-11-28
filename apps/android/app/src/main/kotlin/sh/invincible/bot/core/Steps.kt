@@ -406,6 +406,20 @@ object Steps {
      * nothing says what its gates showed), Failed · gate 2, Sent back, Gave up, Stopped, Failed, Not verified. Null while
      * it is in hand.
      */
+    /**
+     * A proof in one line, as a chat's compact row says it (lib/steps.ts proofLine, held to the vectors): its verdict, then
+     * how many of its gates passed, as the task's page counts them; its verdict alone where no gate ran. Null while it is
+     * in hand.
+     */
+    fun proofLine(task: TeamTask): String? {
+        val facts = facts(task.record)
+        val said = verdict(task.status, task.verified, task.error, task.record, facts) ?: return null
+        val gates = facts?.gates ?: emptyList()
+        if (gates.isEmpty()) return said.word
+        val passed = gates.count { it.exit == 0 }
+        return "${said.word} · $passed of ${gates.size} ${if (gates.size == 1) "gate" else "gates"} passed"
+    }
+
     fun verdict(status: String, verified: Boolean, error: String?, record: TeamTask.Record?, facts: Facts?): Said? {
         if (status != "done" && status != "failed" && status != "stopped") return null
         val how = record?.ended ?: (error ?: "").trim().split("\n")[0].trim()

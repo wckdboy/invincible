@@ -13,6 +13,15 @@ import org.junit.Test
 class VerdictVectorsTest {
     private val v = Json.parse(javaClass.classLoader!!.getResource("core-vectors.json")!!.readText())
 
+    @Test fun eachProofIsSaidInOneLineAsThePwaSaysIt() {
+        val cases = v["proofLines"].list
+        assertTrue(cases.size >= 15)
+        for (case in cases) {
+            val task = TeamTask.of(case["task"]!!)
+            assertEquals("${task.status} ${case["task"]["record"]?.text()}", case["line"].string, Steps.proofLine(task))
+        }
+    }
+
     @Test fun eachTaskIsJudgedAsCoreJudgesIt() {
         val cases = v["verdicts"].list
         assertTrue(cases.size >= 15)

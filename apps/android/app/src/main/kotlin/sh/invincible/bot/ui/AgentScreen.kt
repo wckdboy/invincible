@@ -321,9 +321,10 @@ private fun SpeakerFace(id: String?, agents: List<sh.invincible.bot.core.Agent>)
 }
 
 /**
- * A task as it stands: its title, its state in a word, its latest line. Where it offers you something (a proposal's yes or
- * no, verified work to ship, ended work to resume) it is a card with its answer in place, the timeline's action card
- * (the owner's word, 27 November 2026); otherwise a quiet row that opens its thread, Stop under its "…".
+ * A task as it stands: its title, its state in a word, its latest line; once done, its proof in one line instead
+ * (Steps.proofLine, the PWA's: "Proven · 1 of 1 gate passed ›"). Where it offers you something (a proposal's yes or no,
+ * verified work to ship, ended work to resume) it is a card with its answer in place, the timeline's action card (the
+ * owner's word, 27 November 2026); otherwise a quiet row that opens its thread, Stop under its "…".
  */
 @Composable
 private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
@@ -359,6 +360,8 @@ private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
         }
     }
     val ships = status == "done" && verified && t["changes"] != null && t["fix"] == null && shipped == null
+    // (Done: its proof in one line, said once, in its verdict's ink, the row a tap from the whole of it.)
+    val proof = remember(t) { if (status == "done") Steps.proofLine(TeamTask.of(t)) else null }
     val offers = status == "proposed" || ships || status == "failed" || status == "stopped" || status == "interrupted"
     val brand = LocalBrand.current
     val ink = when {
@@ -383,10 +386,14 @@ private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
                     Text(title, style = Type.rowTitle.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                    word?.let { w -> Text(w, style = MaterialTheme.typography.labelMedium, color = ink) }
+                    if (proof == null) word?.let { w -> Text(w, style = MaterialTheme.typography.labelMedium, color = ink) }
                 }
-                progress?.let {
-                    Text(it.lineSequence().first(), style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                if (proof != null) {
+                    Text("$proof ›", style = Type.meta, color = ink, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                } else {
+                    progress?.let {
+                        Text(it.lineSequence().first(), style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    }
                 }
             }
             if (status == "queued" || status == "running") {
@@ -407,7 +414,9 @@ private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
     // proposed it, muted; its latest step, or how it ended and what it kept; its answers each a tap under it. The row
     // opens its thread.
     val ended = status == "failed" || status == "stopped" || status == "interrupted"
-    val line = taskLine(status, word, t["error"].string, t["progress"].string, t["changes"]["files"].int)
+    // (Work to ship says its proof, and what it kept.)
+    val line = if (ships && proof != null) TaskLine(listOfNotNull(proof, t["changes"]["files"].int?.let { "$it file${if (it == 1) "" else "s"} kept" }).joinToString(" · "), false)
+    else taskLine(status, word, t["error"].string, t["progress"].string, t["changes"]["files"].int)
     val task = remember(t) { sh.invincible.bot.core.TeamTask.of(t) }
     fun who(id: String): String = when (id) { "primary" -> Primary.name; "owner", "you" -> "you"; else -> id }
     val by = task.proposedBy?.let { "Proposed by ${who(it)}" } ?: task.givenBy?.let { "Given by ${who(it)}" }
@@ -424,7 +433,7 @@ private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
             Text(title, style = Type.rowTitle.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-            word?.let { w -> Text(w, style = MaterialTheme.typography.labelMedium, color = ink) }
+            if (!(ships && proof != null)) word?.let { w -> Text(w, style = MaterialTheme.typography.labelMedium, color = ink) }
         }
         by?.let { Text(it, style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
         line?.let {

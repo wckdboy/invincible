@@ -48,7 +48,7 @@ import { budgetFrom } from "../../web/src/lib/give.ts";
 import { applyEvent, ASIDE_ANSWERING, ASIDE_FAILED, ASIDE_NOTHING_YET, asideNote, asideOf, asidePlaceholder, BRING_BACK_FAILED, beginTurn, broughtBackWords, busyPlaceholder, composerAction, endTurn, failTurn, FILES_WAIT, JUST_STARTING, keptDiffers, NOT_KEPT, queueHead, shownAgain, steeringLine, turnOf, undeliveredWords } from "../../web/src/lib/turns.ts";
 import { chatStateWords } from "../../../packages/core/src/turns.ts";
 import { atAGlance, attended, byAttention, doingNow, failedGate, inboxBeyond, inProject, NEW_FOR_MS, projectBadge, projectKey, seenOnOpen, shortSpan, spentSince, type Attended } from "../../web/src/lib/work.ts";
-import { commandKind, costWords, factsOfRecord, gateRows, judgedWith, liveStep, proofOf, reviewOf, sameModelReview, stepGroups, steersOf, summaryWords, verdictOf, workedFor, workSummary } from "../../web/src/lib/steps.ts";
+import { commandKind, costWords, factsOfRecord, gateRows, judgedWith, liveStep, proofOf, reviewOf, sameModelReview, stepGroups, steersOf, summaryWords, verdictOf, workedFor, workSummary, proofLine } from "../../web/src/lib/steps.ts";
 import { judgedLine, neverReached, STEER_WORDS, steerAction, steerHint, steersWaiting } from "../../web/src/lib/steer.ts";
 import { MARK_BOX, MARK_POLYGON, MARK_RECTS } from "../../../scripts/mark.ts";
 import { GAP_MS, HELLO_WAIT_MS, liveLink, RETRY_FIRST_MS, RETRY_MAX_MS, SILENT_MS, STEADY_MS } from "../../web/src/lib/live-link.ts";
@@ -1721,6 +1721,8 @@ const verdictCases = [
   { status: "queued", verified: false, error: null },
 ] as const;
 const verdicts = verdictCases.map((task) => ({ task, verdict: verdictOf(task as never, factsOfRecord((task as { record?: never }).record)) }));
+// A proof in one line, as a chat's compact row says it (lib/steps.ts proofLine): its verdict, then how many gates passed.
+const proofLines = verdictCases.map((task) => ({ task, line: proofLine(task as never) }));
 
 // ---- the mark: the I-beam (scripts/mark.ts), which the app draws as a shape of its own (AppMark) --------------------
 const mark = { rects: MARK_RECTS, polygon: MARK_POLYGON, box: MARK_BOX };
@@ -2088,6 +2090,7 @@ const vectors = {
   rooms,
   listTimes,
   chatMarks,
+  proofLines,
   homePrimary,
   agentForms,
   keys,
