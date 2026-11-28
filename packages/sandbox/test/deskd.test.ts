@@ -182,8 +182,27 @@ describe("deskd's held session (the node's): toolset actions in, answers out", (
       { id: 3, name: "key", input: { text: "ctrl+l" } },
     ]);
     expect(click).toMatchObject({ id: 1, ok: true, action: "left_click", did: "clicked at 640,450", changed: true, focus: { before: { app: "Chromium" }, after: { app: "Chromium" } } });
-    expect(click.changed_ms).toBeLessThan(20);
     expect(click.text).toMatch(/^clicked at 640,450 · the screen changed \(\d+ ms\) · focus: Chromium "about:blank - Chromium"$/);
+    // How soon the screen changed is the screen's own delay, from the action's start: on a clock of the test's own,
+    // drawn 5 ms after the action began (which itself took 3 ms), it says 5 ms, never the time deskd took to see it.
+    // (Read on the real clock, "under 20 ms" counted how long a busy machine took to bring the click to the display.)
+    const clocked = py(`
+clock = [50.0]
+class Display:
+    def active(self): return 0
+    def sync(self): pass
+class Drawn:
+    last = 50.005
+    def since(self, t): return (self.last > t, self.last - t if self.last > t else None)
+    def take(self): return [], []
+desk = d.Desk(pieces=object(), display=Display(), watch=Drawn(), now=lambda: clock[0], sleep=lambda s: clock.__setitem__(0, clock[0] + max(s, 1e-6)))
+desk.ready = lambda: desk._display
+def do():
+    clock[0] += 0.003
+    return "clicked at 640,450"
+answer = desk.act("left_click", do)
+print(json.dumps({"changed": answer["changed"], "changed_ms": answer["changed_ms"]}))`) as { changed: boolean; changed_ms: number };
+    expect(clocked).toEqual({ changed: true, changed_ms: 5 });
     // (A text field of the page has the focus: the text goes in by the browser's own insertText. Below, the other ways.)
     expect(typed).toMatchObject({ id: 2, ok: true, did: "typed 3 characters into the page" });
     expect(key).toMatchObject({ id: 3, ok: true, did: "pressed ctrl+l" });
