@@ -2,6 +2,7 @@ import { moneyPrices, type Prices, usdLabel } from "@invincible/core/spend";
 import type { Ctx } from "../context.ts";
 import { PRIMARY } from "../lib/arrange.ts";
 import { besideChip, withState } from "../lib/agent-state.ts";
+import { teamRoutingLines } from "../lib/routing.ts";
 import { teamHash } from "../lib/team.ts";
 import { spentSince } from "../lib/work.ts";
 import { agentsView, setAgentsView, type AgentsView } from "../prefs.ts";
@@ -110,7 +111,10 @@ export function agentsHome(ctx: Ctx, root: HTMLElement, scope: Scope): void {
     const now = tableOf(ctx);
     if (!now.snapshot) return;
     const agents = now.seats.length - 1;
-    const version = JSON.stringify([now.seats, now.rooms, view, Boolean(prices)]);
+    // How the team's finished work was routed (lib/routing.ts, core's report): a quiet line each kind, at a desk's width.
+    // A phone has none.
+    const routing = narrow.matches ? [] : teamRoutingLines(now.snapshot.tasks);
+    const version = JSON.stringify([now.seats, now.rooms, view, Boolean(prices), routing]);
     if (version === shown && page.isConnected) return;
     shown = version;
     if (!page.isConnected) replace(root, page);
@@ -138,6 +142,13 @@ export function agentsHome(ctx: Ctx, root: HTMLElement, scope: Scope): void {
                 { empty: { icon: "hash", title: "No rooms yet", body: agents ? "A room is a conversation several agents share, your agent among them." : "Seat an agent first: a room is where agents talk together." } },
               ),
             ),
+        routing.length
+          ? section(
+              "Routing",
+              { note: "How the tasks this node finished last were routed, by kind. invincible agents routing says it all." },
+              h("div", { class: "stack tight" }, ...routing.map((line) => h("p", { class: "meta" }, line))),
+            )
+          : null,
       ),
     );
   }
