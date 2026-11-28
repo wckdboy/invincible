@@ -48,6 +48,8 @@ struct ChatView: View {
         #if os(iOS)
         let _ = PerfProbe.shared.mark("chat body")
         #endif
+        // When it went on, small and centred over the turn it went on with (Grok Bot's): its first, a new day, a pause.
+        let marks = Chats.timeMarks(chat.thread.turns)
         ScrollView {
             // A plain stack: an answer's rows are tall and hold sideways-scrolling code and tables, and a lazy stack
             // pinned to the bottom kept placing them again and never settled (seen in the iOS 26.1 simulator).
@@ -68,6 +70,13 @@ struct ChatView: View {
                         .foregroundStyle(Color.danger)
                 }
                 ForEach(chat.thread.turns) { turn in
+                    if let at = marks[turn.id] {
+                        Text(Chats.timeMark(at))
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity)
+                            .accessibilityIdentifier("chat.time")
+                    }
                     MessageRow(
                         turn: turn,
                         client: session.client,

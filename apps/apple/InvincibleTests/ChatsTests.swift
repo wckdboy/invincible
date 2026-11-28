@@ -52,3 +52,44 @@ struct ChatsTests {
         #expect(Chats.mostRecent([]) == nil)
     }
 }
+
+/// A chat says when it went on, small and centred (the lead's ask of 28 November 2026, after Grok Bot): over its first
+/// turn, then over each said on another day, or after a quarter of an hour's pause; answers under what they answer.
+struct ChatTimeMarkTests {
+    private func turn(_ id: Int, _ role: ChatThread.Turn.Role = .user, at: Double?) -> ChatThread.Turn {
+        ChatThread.Turn(id: id, role: role, content: "\(id)", steps: [], status: .done, at: at)
+    }
+
+    @Test func aChatIsMarkedAtItsStartAtANewDayAndAfterAPause() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "UTC"))
+        let morning = 1_795_600_000_000.0 - 1_795_600_000_000.0.truncatingRemainder(dividingBy: 86_400_000) + 9 * 3_600_000
+        let minute = 60_000.0
+        let turns = [
+            turn(1, at: morning), turn(2, .assistant, at: nil),
+            turn(3, at: morning + 14 * minute), turn(4, .assistant, at: nil),
+            turn(5, at: morning + 29 * minute),
+            turn(6, at: morning + 15 * 3_600_000),
+            turn(7, at: morning + 24 * 3_600_000),
+        ]
+        #expect(Chats.timeMarks(turns, calendar: calendar) == [1: morning, 5: morning + 29 * minute, 7: morning + 24 * 3_600_000, 6: morning + 15 * 3_600_000])
+        #expect(Chats.timeMarks([], calendar: calendar).isEmpty)
+        #expect(Chats.timeMarks([turn(1, at: nil)], calendar: calendar).isEmpty)
+    }
+
+    @Test func aMarkSaysTheDayAsPeopleSayIt() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "UTC"))
+        let locale = Locale(identifier: "en_US")
+        let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 28, hour: 15)))
+        let ms = { (date: Date) in date.timeIntervalSince1970 * 1000 }
+        let morning = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 28, hour: 9, minute: 41)))
+        #expect(Chats.timeMark(ms(morning), now: now, calendar: calendar, locale: locale).hasPrefix("Today 9:41"))
+        let yesterday = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 27, hour: 18, minute: 20)))
+        #expect(Chats.timeMark(ms(yesterday), now: now, calendar: calendar, locale: locale).hasPrefix("Yesterday 6:20"))
+        let tuesday = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 24, hour: 10)))
+        #expect(Chats.timeMark(ms(tuesday), now: now, calendar: calendar, locale: locale).hasPrefix("Tuesday 10:00"))
+        let october = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 2, hour: 10)))
+        #expect(Chats.timeMark(ms(october), now: now, calendar: calendar, locale: locale).contains("Oct"))
+    }
+}

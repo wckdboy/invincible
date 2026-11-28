@@ -73,6 +73,44 @@ struct UnreadChat: Decodable, Sendable, Equatable {
 /// The chats list as the PWA shows it (`lib/chats.ts`, core's `chatStateWords`): pinned first, then by when each was
 /// last active; each chat's state in words.
 enum Chats {
+    /// A pause long enough that a chat says when it went on (Grok Bot's small centred times between groups).
+    static let markAfterMs = 15 * 60_000.0
+
+    /// The turns a chat marks with when they were said, by id: the first said, then each said on another day than the one
+    /// before it, or after a pause of a quarter of an hour or more. Answers are said under what they answer.
+    static func timeMarks(_ turns: [ChatThread.Turn], calendar: Calendar = .current) -> [Int: Double] {
+        var out: [Int: Double] = [:]
+        var last: Double?
+        for turn in turns {
+            guard let at = turn.at else { continue }
+            if let before = last {
+                let day = { (ms: Double) in calendar.startOfDay(for: Date(timeIntervalSince1970: ms / 1000)) }
+                if at - before >= markAfterMs || day(at) != day(before) { out[turn.id] = at }
+            } else {
+                out[turn.id] = at
+            }
+            last = at
+        }
+        return out
+    }
+
+    /// When, as a chat's mark says it: "Today 9:41", "Yesterday 18:20", the weekday and the time within the week, else
+    /// the date and the time (in the calendar's time zone).
+    static func timeMark(_ ms: Double, now: Date = .now, calendar: Calendar = .current, locale: Locale = .current) -> String {
+        let date = Date(timeIntervalSince1970: ms / 1000)
+        let style = { (day: Date.FormatStyle.DateStyle, time: Date.FormatStyle.TimeStyle) in
+            Date.FormatStyle(date: day, time: time, locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+        }
+        let time = date.formatted(style(.omitted, .shortened))
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day ?? 0
+        switch days {
+        case 0: return "Today \(time)"
+        case 1: return "Yesterday \(time)"
+        case 2..<7: return "\(date.formatted(style(.omitted, .omitted).weekday(.wide))) \(time)"
+        default: return date.formatted(style(.abbreviated, .shortened))
+        }
+    }
+
     /// Whether a kept chat holds what isn't on screen (the PWA's `keptDiffers`): a message more or fewer, another in a
     /// place, or one that ended or changed since (another device asked in it, retried, or stopped it). By the node's own
     /// ids, states and words; a turn of this device's not yet told its kept id is matched by its words and state.

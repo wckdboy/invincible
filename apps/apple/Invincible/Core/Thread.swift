@@ -52,6 +52,8 @@ struct StoredMessage: Decodable, Sendable, Equatable {
     /// done · error · stopped · steered · streaming
     let status: String
     let error: String?
+    /// When it was said (ms; an older node says nothing).
+    var createdAt: Double? = nil
 }
 
 /**
@@ -88,6 +90,9 @@ struct ChatThread: Equatable, Sendable {
         var attachments: [AttachmentRef]? = nil
         /// A look of its come back: shown as its own note, never as yours.
         var look: StoredMessage.Look? = nil
+        /// When it was said (ms): a kept message's, or the moment you sent yours here (nil: not known, or an answer, which
+        /// is said under the message it answers).
+        var at: Double? = nil
     }
 
     private(set) var turns: [Turn] = []
@@ -112,7 +117,7 @@ struct ChatThread: Equatable, Sendable {
     /// Turns kept from what was on screen (a send the node never took), after the kept chat: as they were, with ids of this thread.
     mutating func keep(_ kept: [Turn]) {
         for turn in kept {
-            turns.append(Turn(id: take(), sid: turn.sid, role: turn.role, content: turn.content, answeredAs: turn.answeredAs, model: turn.model, steps: turn.steps, status: turn.status, error: turn.error, attachments: turn.attachments, look: turn.look))
+            turns.append(Turn(id: take(), sid: turn.sid, role: turn.role, content: turn.content, answeredAs: turn.answeredAs, model: turn.model, steps: turn.steps, status: turn.status, error: turn.error, attachments: turn.attachments, look: turn.look, at: turn.at))
         }
     }
 
@@ -126,7 +131,7 @@ struct ChatThread: Equatable, Sendable {
 
     /// You send a message: it, and the answer to come (what the stream then writes), join the thread.
     mutating func begin(question: String, role: String, attachments: [AttachmentRef] = []) {
-        turns.append(Turn(id: take(), role: .user, content: question, steps: [], status: .done, attachments: attachments.isEmpty ? nil : attachments))
+        turns.append(Turn(id: take(), role: .user, content: question, steps: [], status: .done, attachments: attachments.isEmpty ? nil : attachments, at: Date.now.timeIntervalSince1970 * 1000))
         base = turns.count
         let answer = blank(answeredAs: role, model: nil)
         step(answer, Step(text: "Asked as \(role)", state: .done))
@@ -183,7 +188,7 @@ struct ChatThread: Equatable, Sendable {
                 turns[at].status = .steered
                 step(target, Step(text: "Your message reached it here", state: .done))
             }
-            turns.append(Turn(id: take(), role: .user, content: text, steps: [], status: .done))
+            turns.append(Turn(id: take(), role: .user, content: text, steps: [], status: .done, at: Date.now.timeIntervalSince1970 * 1000))
             let next = blank(answeredAs: answer.answeredAs ?? "planner", model: answer.model)
             step(next, Step(text: answer.model.flatMap { $0.isEmpty ? nil : "Thinking with \($0)" } ?? "Thinking", state: .active))
         case .done(let ref):
@@ -236,7 +241,8 @@ struct ChatThread: Equatable, Sendable {
             status: Turn.Status(rawValue: message.status) ?? .done,
             error: message.error.flatMap { $0.isEmpty ? nil : $0 },
             attachments: message.attachments.flatMap { $0.isEmpty ? nil : $0 },
-            look: message.look
+            look: message.look,
+            at: message.createdAt
         )
     }
 
