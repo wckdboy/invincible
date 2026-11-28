@@ -126,10 +126,24 @@ export function deskNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
   };
 
   let shown = "";
+  // Its rows are drawn first once your agent's chats and the team are both in hand (or a few seconds have gone by), all
+  // at once: drawn as each arrived, your agent's chats pushed what was under them down, on every place (the scorecard's
+  // web suite holds every place still, its sidebar included).
+  let chatsRead = !ctx.can("chat");
+  let settled = false;
+  const settle = (): void => {
+    if (settled) return;
+    settled = true;
+    body.append(primarySlot, needs, projectsSlot, agentsSlot);
+  };
   const draw = (): void => {
     const now = Date.now();
-    const table = tableOf(ctx);
     const snapshot = ctx.live.team.value;
+    if (!settled) {
+      if (!chatsRead || (ctx.can("chat") && !snapshot && !ctx.live.teamProblem.value)) return;
+      settle();
+    }
+    const table = tableOf(ctx);
     const threads = threadsOf({ work: snapshot ? workOf({ snapshot, projects: projectNames.value, now }) : { projects: [], other: null }, projects: projectNames.value, conversations });
     // (Drawn again only when what it shows changed: the same rows, the same words, the same minutes.)
     const version = JSON.stringify([table.seats.map((s) => [s.id, s.state, s.line, s.room]), table.rooms.map((r) => [r.id, r.name, r.state]), threads, Math.floor(now / 60_000), open]);
@@ -209,7 +223,7 @@ export function deskNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
   const everything = h("a", { class: "desk-foot-link", href: "#/more", title: "Everything else" }, icon("more", { size: 16 }), h("span", {}, "More"));
   const foot = h("div", { class: "desk-foot" }, machine, h("span", { class: "desk-foot-links" }, everything, settings));
 
-  const body = h("nav", { class: "desk-body", "aria-label": "Your work" }, primarySlot, needs, projectsSlot, agentsSlot);
+  const body = h("nav", { class: "desk-body", "aria-label": "Your work" });
   const el = h("aside", { class: "sidebar desk", "aria-label": "Everything" }, head, body, foot);
   arrowsThrough(el, ".desk-row, .desk-more, .desk-group-name");
 
@@ -229,9 +243,13 @@ export function deskNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
     ctx.api.get<{ conversations: ConversationSummary[] }>("/api/conversations").then(
       (answer) => {
         conversations = answer.conversations;
+        chatsRead = true;
         redraw();
       },
-      () => {},
+      () => {
+        chatsRead = true;
+        redraw();
+      },
     );
   };
   stops.push(ctx.live.follow(["turns"], () => readChats(), null, 2000));
@@ -243,6 +261,12 @@ export function deskNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
   // (The minutes beside each thread move on their own, once a minute, only while the page shows.)
   const minutes = setInterval(() => document.visibilityState === "visible" && redraw(), 60_000);
   stops.push(() => clearInterval(minutes));
+  // (A node slow to answer: what is known is drawn after a few seconds, never an empty sidebar.)
+  const late = setTimeout(() => {
+    settle();
+    redraw();
+  }, 4000);
+  stops.push(() => clearTimeout(late));
   readChats();
   drawNeeds();
   draw();
