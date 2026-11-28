@@ -277,6 +277,35 @@ test("an agent on models of its own works on them, at its tasks and in its rooms
   expect(g.bodies[0].model).toBe("mimo");
 });
 
+test("an agent's work held to models (its own, or sensitive mode's) stays on them when a gate fails twice in a row, or its plan asks for the strongest: nothing escalates it to the planner's", async () => {
+  // The gate fails before the work and at the first two submissions, then passes: today's escalation point.
+  const failing = (fails: number) => {
+    let gates = 0;
+    return async (_m: Agent, command: string) => (command.includes("bun test required-check") ? result({ exitCode: ++gates <= fails ? 1 : 0, stdout: gates <= fails ? "1 fail" : "1 pass" }) : result());
+  };
+  const rounds = (plan: string) => [say(plan), say("```sh\necho one\n```"), say("DONE\nFirst."), say("```sh\necho two\n```"), say("DONE\nSecond."), say("```sh\necho three\n```"), say("DONE\nThird."), say("PASS\nFine.")];
+  const own: Agent = { ...member, models: ["local/mimo"] };
+  const told: string[] = [];
+  const f = fixture(rounds("1. Make the change.\nDone when: the gate passes.\nEngineer: usual"), { agent: () => own, exec: failing(3) });
+  f.setRoster("planner", ["local/plan"]);
+  expect((await f.runtime.executeTask(own, task, { ...f.context, emit: (line) => void told.push(line) })).verified).toBe(true);
+  // Its plan is the planner's and its review the reviewer's; every turn of its work is on its own model, the third round's too.
+  expect(f.bodies.map((body) => body.model)).toEqual(["plan", "mimo", "mimo", "mimo", "mimo", "mimo", "mimo", "fake"]);
+  expect(told.filter((line) => /^(Escalated|Routed) ·/.test(line))).toEqual([]);
+  // A plan that says the work needs the strongest models doesn't take it off them either.
+  const g = fixture([say("1. Change the three files together.\nDone when: the gate passes.\nEngineer: strong"), say("```sh\necho one\n```"), say("DONE\nDone."), say("PASS\nFine.")], { agent: () => own, exec: failing(1) });
+  g.setRoster("planner", ["local/plan"]);
+  expect((await g.runtime.executeTask(own, task, g.context)).verified).toBe(true);
+  expect(g.bodies.map((body) => body.model)).toEqual(["plan", "mimo", "mimo", "fake"]);
+  // In sensitive mode every role is on its models already: no escalation is said, as if the planner's were others.
+  const sensitive: Agent = { ...member, models: ["local/mimo", "local/qwen"], sensitive: true };
+  const heard: string[] = [];
+  const h = fixture(rounds("1. Make the change.\nDone when: the gate passes.\nEngineer: usual"), { agent: () => sensitive, exec: failing(3) });
+  expect((await h.runtime.executeTask(sensitive, task, { ...h.context, emit: (line) => void heard.push(line) })).verified).toBe(true);
+  expect(h.bodies.map((body) => body.model)).toEqual(["mimo", "mimo", "mimo", "mimo", "mimo", "mimo", "mimo", "qwen"]);
+  expect(heard.filter((line) => /^(Escalated|Routed) ·/.test(line))).toEqual([]);
+});
+
 test("sensitive mode: every call of an agent's task is on its own models alone, its plan's and its review's too, the review on another of them than did the work; its VM's lease is for them", async () => {
   const held: Agent = { ...member, models: ["local/mimo", "local/qwen"], sensitive: true };
   const leases: (readonly string[] | undefined)[] = [];
