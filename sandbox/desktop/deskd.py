@@ -873,6 +873,11 @@ ROLES = ("invalid", "accelerator label", "alert", "animation", "arrow", "calenda
 # What a person acts on: clicks, types into, picks from.
 # How many nodes keep their refs at most: several trees' worth (a tree says 400 at most).
 NUMBERS_KEPT = 4000
+# What a field holds, said beside its name (`= "..."`): an entry's text, a combo box's chosen option, at most HELD_SAID
+# characters of it. A password field's never (its role is another); a check box's is its state, said as ever.
+HOLDS_TEXT = {"entry", "text", "spin button"}
+HOLDS_CHOICE = {"combo box"}
+HELD_SAID = 80
 ACTABLE = {"check box", "check menu item", "combo box", "entry", "link", "list item", "menu", "menu item", "page tab",
            "password text", "push button", "push button menu", "radio button", "radio menu item", "slider", "spin button",
            "switch", "toggle button", "tree item", "text"}
@@ -1086,6 +1091,8 @@ class Tree:
                         if not n or (n["role"] == "text" and not self.has(n, "editable")):
                             return None
                         box = self._on_screen(n)
+                        if box:
+                            self.held(n)
                         return (n, box) if box else None
                     found += [f for f in self._many(one, refs) if f]
                     if len(found) >= limit:
@@ -1098,6 +1105,26 @@ class Tree:
                 self.numbers = {k: r for k, r in self.numbers.items() if k in shown}
                 self.refs = {r: self.refs[r] for r in self.numbers.values() if r in self.refs}
             return [(self.number(n), n, box) for n, box in found]
+
+    def held(self, node):
+        """What a field holds, kept with it as `holds` (said in its line): an entry's text, a combo box's chosen option,
+        the selected item of its menu as Chromium says a select's. None where it holds neither, or can't say."""
+        b, p = node["bus"], node["path"]
+        try:
+            if node["role"] in HOLDS_TEXT and self.has(node, "editable"):
+                node["holds"] = self.call(b, p, "org.a11y.atspi.Text", "GetText", "(ii)", (0, -1))[0]
+            elif node["role"] in HOLDS_CHOICE:
+                (kids,) = self.call(b, p, ACC, "GetChildren")
+                for kb, kp in kids[:4]:
+                    menu = self.node((kb or b, kp), node["app"], node.get("window"))
+                    if menu["role"] in ("menu", "list box", "list"):
+                        ((ib, ip),) = self.call(menu["bus"], menu["path"], "org.a11y.atspi.Selection", "GetSelectedChild", "(i)", (0,))
+                        if ip and not ip.endswith("/null"):
+                            node["holds"] = self.node((ib or menu["bus"], ip), node["app"], node.get("window"))["name"]
+                        break
+        except Failed:
+            pass
+        return node.get("holds")
 
     def number(self, node):
         """A node's ref: the one it was given before, while it is the same node on the bus; else the next not given. A
@@ -1144,6 +1171,7 @@ class Tree:
                         if n and name in n["name"].lower():
                             box = self._on_screen(n)
                             if box:
+                                self.held(n)
                                 return self.number(n), n, box
         return None
 
@@ -1165,7 +1193,9 @@ class Tree:
 def say_node(ref, node, box):
     x, y, w, h = box
     states = [s for s in SAID if Tree.has(node, s)] + ([] if Tree.has(node, "sensitive") else ["disabled"])
-    return "[%d] %s \"%s\" at %d,%d (%dx%d)%s" % (ref, node["role"], node["name"][:80], x + w // 2, y + h // 2, w, h, (" " + " ".join(states)) if states else "")
+    held = node.get("holds")
+    holds = "" if held is None else " = " + json.dumps(held[:HELD_SAID] + ("\u2026" if len(held) > HELD_SAID else ""), ensure_ascii=False)
+    return "[%d] %s \"%s\"%s at %d,%d (%dx%d)%s" % (ref, node["role"], node["name"][:80], holds, x + w // 2, y + h // 2, w, h, (" " + " ".join(states)) if states else "")
 
 
 # ---------------------------------------------------------------- the desktop's processes

@@ -1340,7 +1340,11 @@ def call(bus, path, iface, method, signature, args):
         want, roles = unbits(st), unbits(ro)
         return ([r for r in under(bus, path) if all(NODES[r[1]][4] >> s & 1 for s in want) and ROLE[NODES[r[1]][2]] in roles],)
     if method == "GetText":
-        return (TEXTS.get(path, "")[args[0]:args[1]],)
+        # (An end of -1 is the text's end, as AT-SPI has it.)
+        return (TEXTS.get(path, "")[args[0]:(None if args[1] < 0 else args[1])],)
+    if method == "GetSelectedChild":
+        chosen = [r for r in kids(bus, path) if NODES[r[1]][4] >> d.STATE["selected"] & 1]
+        return (chosen[0] if chosen else ("", "/org/a11y/atspi/null"),)
     if method == "GetExtents":
         spaces.append([path, args[0]])
         own = APPS[bus]["toolkit"] == "GTK"
@@ -1357,16 +1361,17 @@ t = d.Tree(call=call, window_origin=origin)
 said = t.actable(pid=300, title="Form - Chromium")
 print(json.dumps({"lines": [d.say_node(r, n, b) for r, n, b in said], "refs": sorted(t.refs), "matches": calls.count("GetMatches"), "walked": calls.count("GetChildren")}))`) as { lines: string[]; refs: number[]; matches: number; walked: number };
     expect(got.lines).toEqual([
-      '[1] entry "Name" at 250,212 (300x24) focused',
-      '[2] entry "Email" at 250,252 (300x24)',
+      '[1] entry "Name" = "Søren Ærø" at 250,212 (300x24) focused',
+      '[2] entry "Email" = "soren@example.test" at 250,252 (300x24)',
       '[3] combo box "Plan" at 200,292 (200x24) collapsed',
       '[4] check box "I agree to the terms" at 106,326 (13x13)',
       '[5] push button "Send" at 130,372 (60x24)',
       '[6] push button "Not now" at 230,372 (60x24) disabled',
     ]);
     expect(got.refs).toEqual([1, 2, 3, 4, 5, 6]);
-    // The app searches its own tree, in one call for the window: no walk (the registry's list and the app's windows only).
-    expect(got).toMatchObject({ matches: 1, walked: 2 });
+    // The app searches its own tree, in one call for the window: no walk (the registry's list and the app's windows
+    // only, and the combo box's own children, for the option it holds).
+    expect(got).toMatchObject({ matches: 1, walked: 3 });
   });
 
   test("a node keeps its ref from one tree to the next, one that appears gets the next, and a ref whose node is gone fails: never another node's", () => {
@@ -1396,14 +1401,39 @@ print(json.dumps({"first": first, "second": second, "terms": terms, "found": fou
     expect(got.gone).toEqual(['ref=7 (menu item "Free") is gone: desktop tree, again', 'ref=8 (menu item "Team") is gone: desktop tree, again']);
   });
 
+  test("a field says what it holds beside its name: an entry its text, a combo box its chosen option; a password field never", () => {
+    // (Every model run of the form, 28 November 2026, asked its eyes whether the form was filled: 1 to 3 looks a run,
+    // each a model call, as the tree said only a field's name.)
+    const got = py(`${BUS}
+NODES["/n3m"] = (":1.5", "/n3", "menu", "", VISIBLE, (100, 304, 200, 0))
+NODES["/n3a"] = (":1.5", "/n3m", "menu item", "Free", VISIBLE, (100, 304, 200, 0))
+NODES["/n3b"] = (":1.5", "/n3m", "menu item", "Team", VISIBLE | 1 << d.STATE["selected"], (100, 328, 200, 0))
+NODES["/n11"] = (":1.5", "/d1", "password text", "Password", ON | EDITABLE, (100, 470, 300, 24))
+NODES["/n12"] = (":1.5", "/d1", "entry", "Note", ON | EDITABLE, (100, 500, 300, 48))
+TEXTS["/n11"] = "fake-password-0000"
+TEXTS["/n12"] = 'Ready by "Friday"\\n' + "x" * 100
+lines = [d.say_node(r, n, b) for r, n, b in t.actable(pid=300, title="Form - Chromium")]
+found = t.find("combo box", "plan", pid=300)
+print(json.dumps({"lines": lines, "found": d.say_node(*found)}, ensure_ascii=False))`) as { lines: string[]; found: string };
+    expect(got.lines).toContain('[1] entry "Name" = "Søren Ærø" at 250,212 (300x24) focused');
+    expect(got.lines).toContain('[2] entry "Email" = "soren@example.test" at 250,252 (300x24)');
+    expect(got.lines).toContain('[3] combo box "Plan" = "Team" at 200,292 (200x24) collapsed');
+    // (On one line, quoted as JSON is, and cut at 80 characters.)
+    expect(got.lines).toContain(`[8] entry "Note" = ${JSON.stringify(`Ready by "Friday"\n${"x".repeat(62)}…`)} at 250,524 (300x48)`);
+    expect(got.lines).toContain('[7] password text "Password" at 250,482 (300x24)');
+    expect(JSON.stringify(got)).not.toContain("fake-password");
+    // Found, it says the same.
+    expect(got.found).toBe('[3] combo box "Plan" = "Team" at 200,292 (200x24) collapsed');
+  });
+
   test("an app that can't search its own tree (no Collection) is walked, many calls in flight, never below what isn't showing: the same nodes", () => {
     const got = py(`${BUS}
 COLLECTION = False
 said = t.actable(pid=300, title="Form - Chromium")
 print(json.dumps({"lines": [d.say_node(r, n, b) for r, n, b in said]}))`) as { lines: string[] };
     expect(got.lines).toEqual([
-      '[1] entry "Name" at 250,212 (300x24) focused',
-      '[2] entry "Email" at 250,252 (300x24)',
+      '[1] entry "Name" = "Søren Ærø" at 250,212 (300x24) focused',
+      '[2] entry "Email" = "soren@example.test" at 250,252 (300x24)',
       '[3] combo box "Plan" at 200,292 (200x24) collapsed',
       '[4] check box "I agree to the terms" at 106,326 (13x13)',
       '[5] push button "Send" at 130,372 (60x24)',
