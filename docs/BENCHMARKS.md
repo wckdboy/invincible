@@ -121,6 +121,21 @@ Each agent's tasks so far are its memory's, as on a node (`TeamRuntimeDeps.work`
 `bo`'s tasks begin on the lead after two that had to move up, and try the worker every third. `ada`'s never begin on the
 lead (`routing.rule.memory-misroutes`, held at 0).
 
+**A plan's pace** (`bench/routing/pace.ts`), in virtual time:
+- Eight agents call one plan for ten minutes, each call followed by a command of its own.
+- The plan is OpenCode Go as measured on 28 November 2026: it refuses past 25 calls in a minute, and a call takes 2.58 s,
+  C1's median through it.
+- Without the pace, each refusal is waited out as `bursts.ts` does. With it, every call takes its turn from the node's
+  one pacer, at 24 a minute. The pacer is the real one.
+- `routing.pace.on.refused` is held at 0.
+
+| The pace | Calls answered | Asks refused | Seconds waited |
+|---|---|---|---|
+| off | 200 | 320 | 3,840 |
+| on | 248 | 0 | 3,474 |
+
+Under the plan's limit (two agents) it changes nothing.
+
 ### desktop: an agent's desktop, fast and stable
 
 An agent's VM made from the desktop image, with the node's own run arguments (Kata, a read-only root, no

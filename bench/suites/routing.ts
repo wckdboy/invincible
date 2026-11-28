@@ -1,4 +1,5 @@
 import type { Suite } from "../lib.ts";
+import { LIMIT_PER_MINUTE, runPace } from "../routing/pace.ts";
 import { BUDGET_USD, memoryTasks, type PolicyResult, POLICIES, runPolicy, simTasks, TIERS } from "../routing/sim.ts";
 
 /*
@@ -29,9 +30,11 @@ export const suite: Suite = {
     "routing.rule.same-rung",
     "routing.memory.on.usd-per-done",
     "routing.rule.memory-misroutes",
+    "routing.pace.on.served",
+    "routing.pace.on.refused",
     "routing.replay.differs",
   ],
-  held: { "routing.rule.pinned-moved": 0, "routing.rule.climbs": 0, "routing.rule.same-rung": 0, "routing.rule.memory-misroutes": 0, "routing.replay.differs": 0 },
+  held: { "routing.rule.pinned-moved": 0, "routing.rule.climbs": 0, "routing.rule.same-rung": 0, "routing.rule.memory-misroutes": 0, "routing.pace.on.refused": 0, "routing.replay.differs": 0 },
   async run(ctx) {
     const tasks = simTasks(ctx.seed, TASKS);
     const kinds = (["gate", "review", "stall"] as const).map((kind) => `${tasks.filter((t) => t.kind === kind).length} ${kind}`).join(", ");
@@ -82,6 +85,16 @@ export const suite: Suite = {
         ctx.quality("routing.rule.memory-misroutes", r.tasks.filter((t) => t.task.agent === "ada" && t.began === "planner").length, "tasks", "lower", { note: "tasks of an agent whose every task the worker does, begun on the lead (never)" });
       }
       ctx.log(`the memory ${name}: ${r.verified} of ${remembered.length} verified, $${r.usd.toFixed(2)} and ${r.minutes.toFixed(0)} min in all, moved up ${r.tasks.flatMap((t) => t.escalations).length} times, ${r.tasks.filter((t) => t.began === "planner").length} begun on the lead`);
+    }
+    // A plan's pace (bursts.ts Pacer): eight agents on OpenCode Go for ten virtual minutes, without the pace and with it.
+    for (const pace of [undefined, 24]) {
+      const r = runPace({ seed: ctx.seed, agents: 8, ...(pace ? { pace } : {}) });
+      const name = pace ? "on" : "off";
+      const said = pace ? `every call taking its turn at ${pace} a minute, as a node's chat() and gateway do` : "each refusal waited out after it came, as bursts.ts does";
+      ctx.quality(`routing.pace.${name}.served`, r.served, "calls", "higher", { note: `calls the plan answered in ten minutes to eight agents, ${said}` });
+      ctx.quality(`routing.pace.${name}.refused`, r.refused, "asks", "lower", { note: `asks it refused as a burst (past ${LIMIT_PER_MINUTE} a minute), ${said}` });
+      ctx.quality(`routing.pace.${name}.waited`, r.waitedS, "s", "lower", { note: `seconds the agents waited, their turn or a burst out, ${said}` });
+      ctx.log(`the pace ${name}: ${r.served} calls served, ${r.refused} refused, ${r.givenUp} given up, ${r.waitedS} s waited`);
     }
     // The same tasks again, task by task: the same outcome, cost and time.
     const again = await runPolicy("routed", tasks);
