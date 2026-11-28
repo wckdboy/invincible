@@ -11,7 +11,7 @@ import XCTest
  *    held on its own (it takes the path cold) and the ten after it together, each said with where its time went;
  *  - a dead link: how soon the app says it's reconnecting once the node goes silent (as a half-open connection does),
  *    and how soon it's back once the node can be reached again;
- *  - scrolling the work's long list (Home's, before): the frames that came late, in ms a second (Apple's hitch time
+ *  - scrolling your agent's chat (Work's long list, and Home's, before): the frames that came late, in ms a second (Apple's hitch time
  *    ratio).
  * Each prints a PERF line and attaches its numbers, so a run's log and its result bundle say what was measured.
  */
@@ -236,23 +236,22 @@ final class PerfTests: XCTestCase {
     }
 
     @MainActor
-    func testScrollWork() throws {
+    func testScrollChat() throws {
         let node = try DevNode.named()
         let app = XCUIApplication()
         app.launchArguments = ["-InvincibleMeasure", "YES", "-InvincibleMeasureFrames", "YES"]
         app.terminate()
         try app.openApp(node)
-        // The work, from the roster: Home's list as it was, a lazy one (a collection view).
-        app.openRoster()
-        let work = app.rosterRow("roster.work")
-        XCTAssertTrue(work.waitForExistence(timeout: 10), "No Work in the roster")
-        work.tap()
-        let page = app.descendants(matching: .any)["work.screen"]
-        XCTAssertTrue(page.waitForExistence(timeout: 10), "The work never came")
+        // Your agent's chat, where the app opens (the owner's word of 28 November 2026: one screen): its latest
+        // conversation, as the dev node's busy fleet makes it, at its latest. Each round flings back into it and down again.
+        let chat = app.descendants(matching: .any)["chat.screen"]
+        XCTAssertTrue(chat.waitForExistence(timeout: 10), "The chat never came")
         settle(5)
-        // (The page is its list: the lazy list carries the screen's name itself, so no list stands inside it.)
-        let list = app.collectionViews["work.screen"]
-        XCTAssertTrue(list.waitForExistence(timeout: 10), "The work's list isn't a collection view by its name")
+        // A fling in the messages' part of the screen (the box at its foot and the bar at its top scroll nothing).
+        func fling(_ from: CGFloat, _ to: CGFloat) {
+            chat.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
+                .press(forDuration: 0.01, thenDragTo: chat.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to)), withVelocity: .fast, thenHoldForDuration: 0)
+        }
         // Three rounds of the same swipes, each measured on its own. Other work on the Mac only ever adds late frames
         // (26 November 2026: CI run 34 failed here while the runner's Mac also ran agents' builds at a load of 50 to
         // 100 on 18 cores; the same commit then passed there at 6.9 ms a second), so the limit holds the best round,
@@ -261,10 +260,10 @@ final class PerfTests: XCTestCase {
         for _ in 0..<3 {
             let late0 = try XCTUnwrap(app.reading("lateMs"))
             let start = Date()
-            list.swipeUp(velocity: .fast)
-            list.swipeUp(velocity: .fast)
-            list.swipeDown(velocity: .fast)
-            list.swipeDown(velocity: .fast)
+            fling(0.3, 0.7)
+            fling(0.3, 0.7)
+            fling(0.7, 0.3)
+            fling(0.7, 0.3)
             let seconds = Date().timeIntervalSince(start)
             let late1 = try XCTUnwrap(app.reading("lateMs"))
             rounds.append(((late1 - late0) / seconds, seconds))
@@ -273,8 +272,8 @@ final class PerfTests: XCTestCase {
         let best = ratios[0], median = ratios[1]
         let load = Self.hostLoad()
         let said = "rounds \(ratios.map { String(format: "%.1f", $0) }), the Mac's load \(String(format: "%.1f", load.average)) on \(load.cores) cores"
-        report("scroll-work", ["lateMsPerSecond": best, "medianLateMsPerSecond": median, "seconds": rounds.map(\.seconds).reduce(0, +), "hostLoad": load.average, "hostCores": Double(load.cores)])
-        XCTAssertLessThanOrEqual(best, try budgets.scrollLateMsPerSecond, "Scrolling the work, frames came \(String(format: "%.1f", best)) ms a second late at best (\(said))")
+        report("scroll-chat", ["lateMsPerSecond": best, "medianLateMsPerSecond": median, "seconds": rounds.map(\.seconds).reduce(0, +), "hostLoad": load.average, "hostCores": Double(load.cores)])
+        XCTAssertLessThanOrEqual(best, try budgets.scrollLateMsPerSecond, "Scrolling the chat, frames came \(String(format: "%.1f", best)) ms a second late at best (\(said))")
         target(median <= (try budgets.scrollLateTargetMsPerSecond), "under \(try! budgets.scrollLateTargetMsPerSecond) ms a second of late frames scrolling; the median round was \(String(format: "%.1f", median)) (\(said))")
     }
 

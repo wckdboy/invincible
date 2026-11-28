@@ -163,32 +163,22 @@ extension XCUIApplication {
         return Int(words[range].filter(\.isNumber))
     }
 
-    /// The roster: an iPhone's drawer opened from the chat's back arrow (an iPad's is its sidebar, always there).
+    /// The drawer: an iPhone's opened from the chat's drawer button (an iPad's is its sidebar, always there).
     func openRoster() {
         let arrow = buttons["roster.open"]
         if arrow.exists { arrow.tap() }
         _ = descendants(matching: .any)["roster"].waitForExistence(timeout: 5)
     }
 
-    /// A new chat with your agent, where the one on screen isn't new already: its own button where the window has room for it
-    /// (an iPad's), else its menu's first (an iPhone's). A menu with nothing to choose in it is put away by a tap on the bar.
+    /// A new chat with your agent, where the one on screen isn't new already: the chat bar's own button.
     func newChat() {
         let new = buttons["chat.new"]
-        if new.exists, new.isHittable {
-            if new.isEnabled { new.tap() }
-            return
-        }
-        let more = buttons["chat.more"]
-        guard more.waitForExistence(timeout: 5) else { return }
-        more.tap()
-        if new.waitForExistence(timeout: 3), new.isEnabled {
-            new.tap()
-        } else {
-            coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)).tap()
-        }
+        guard new.waitForExistence(timeout: 5) else { return }
+        if new.isEnabled { new.tap() }
     }
 
-    /// One of the roster's rows (`roster.needs`, `roster.work`, `roster.settings`, `roster.everything`, `roster.agent.<id>`).
+    /// One of the drawer's rows (`roster.new`, `roster.needs`, `roster.settings`, `roster.agent.<id>`, `roster.room.<id>`,
+    /// `roster.chat.<id>`).
     func rosterRow(_ id: String) -> XCUIElement { descendants(matching: .any)[id].firstMatch }
 
     /// Paired with the dev node, on your agent's chat (where the app opens), the app started afresh: joined through the

@@ -9,9 +9,6 @@ struct ChatView: View {
     private let shown: ChatModel?
     /// Opens the roster, where it is a drawer (an iPhone's: the chat is where the app opens); nil where it is a sidebar.
     private let roster: (() -> Void)?
-    /// Gives the agents a task, from its menu where the roster is a drawer (nil: this device may not, or elsewhere, where
-    /// the work has its own button).
-    private let give: (() -> Void)?
     /// Forgets this device (its key, its pairing), from the refusal of a node that proves to be another (nil: Settings has it).
     private let forget: (() throws -> Void)?
     @FocusState private var composing: Bool
@@ -29,11 +26,10 @@ struct ChatView: View {
     /// A side question asked apart (its menu's Ask on the side…, or "/btw …" typed into the box).
     @State private var aside: SideQuestion?
 
-    init(session: Session, chat: ChatModel? = nil, roster: (() -> Void)? = nil, give: (() -> Void)? = nil, forget: (() throws -> Void)? = nil) {
+    init(session: Session, chat: ChatModel? = nil, roster: (() -> Void)? = nil, forget: (() throws -> Void)? = nil) {
         self.session = session
         shown = chat
         self.roster = roster
-        self.give = give
         self.forget = forget
     }
 
@@ -90,6 +86,10 @@ struct ChatView: View {
         .modifier(LinkTrouble(session: session, said: build == nil && shown == nil, drawer: roster != nil, forget: forget))
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: Space.s2) {
+                #if os(iOS)
+                // What needs you, on the chat itself (one screen): its first decision, answered in place.
+                if build == nil && shown == nil { NeedsCard(session: session) }
+                #endif
                 // What is under way in this chat: its agents' tasks given here (Stop on each), its looks that wait.
                 UnderwayBar(session: session, chat: chat)
                 // What waits above the box while it works: steers on their way, the queue, what became of a message.
@@ -109,31 +109,30 @@ struct ChatView: View {
         .toolbar {
             if build == nil {
             #if os(iOS)
+            // As Grok's and T3 Code's (the owner's word of 28 November 2026): the drawer, the chat's title, a new chat.
+            // Nothing else: its chats and agents are in the drawer, its computer in Settings, a side question "/btw".
             if let roster {
                 ToolbarItem(placement: .topBarLeading) {
-                    RosterButton(needs: session.needsYou, open: roster)
+                    DrawerButton(needs: session.needsYou, open: roster)
                 }
             }
             ToolbarItem(placement: .principal) {
-                HStack(spacing: Space.s2) {
-                    GuardianFace(size: 30, standing: session.primaryStanding)
-                    TimelineTitle(title: "Your agent", line: chat.title ?? session.primary.line, needs: chat.title == nil && session.primary.tone == .warn, alignment: .leading, standing: chat.title == nil ? session.primaryStanding : nil)
-                }
+                Text(chat.title ?? "New chat")
+                    .font(.headline)
+                    .lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("chat.title")
             }
+            ToolbarItem(placement: .topBarTrailing) { newChat }
             #else
             ToolbarItem(placement: .navigation) {
                 PrimaryOrb(size: 26, tone: session.primaryTone, mood: session.primaryMood)
             }
-            #endif
             ToolbarItemGroup(placement: .barTrailing) {
-                // Where the roster is a drawer, the least chrome (the owner's word, 27 November 2026): a new chat is the
-                // menu's first; elsewhere it has its own button.
-                if roster == nil { newChat }
+                newChat
                 // The rest in one menu (I10: one thing in full, the rest a tap further): its chats, and its own computer
                 // once it has one (made from the web app or a terminal, as an agent's VM is).
                 Menu {
-                    if roster != nil { newChat }
-                    if let give { Button(action: give) { Label("Give a task…", systemImage: "square.stack.3d.up") } }
                     Button { listing = true } label: { Label("All chats", systemImage: "clock.arrow.circlepath") }
                         .accessibilityIdentifier("chats")
                     // Something about the work in hand, without changing its course (the PWA's Ask on the side…).
@@ -155,6 +154,7 @@ struct ChatView: View {
                 }
                 .accessibilityIdentifier("chat.more")
             }
+            #endif
             }
         }
         .navigationDestination(isPresented: $watching) {
@@ -574,3 +574,46 @@ private struct StepLine: View {
         .foregroundStyle(step.state == .error ? AnyShapeStyle(Color.danger) : step.state == .warn ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
     }
 }
+
+#if os(iOS)
+/// What needs you, at the chat's foot (the owner's word of 28 November 2026: one screen, as Grok's): the first decision,
+/// its one answer in place, and how many more wait, a tap from Needs you. Nothing while nothing does.
+private struct NeedsCard: View {
+    let session: Session
+    @State private var desk = DecisionDesk()
+    @Environment(\.openPlace) private var openPlace
+    @Environment(\.showInbox) private var showInbox
+
+    var body: some View {
+        if let work = session.attended {
+            let decisions = desk.decisions(session, work, go: { openPlace?($0) })
+            if let first = decisions.first {
+                VStack(alignment: .leading, spacing: 0) {
+                    DecisionRow(decision: first, busy: desk.busy.contains(first.id))
+                    if decisions.count > 1 {
+                        Divider()
+                        Button { showInbox?() } label: {
+                            HStack {
+                                Text("\(decisions.count - 1) more need you").font(.subheadline.weight(.semibold))
+                                Spacer(minLength: Space.s2)
+                                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                            }
+                            .frame(minHeight: Metrics.touch)
+                            .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("chat.needs.more")
+                    }
+                }
+                .padding(.horizontal, Space.s4)
+                .padding(.vertical, Space.s1)
+                .background(Color(uiColor: .secondarySystemBackground), in: .rect(cornerRadius: ComposerBoxMetrics.radius, style: .continuous))
+                .padding(.horizontal, Space.s2)
+                .modifier(DecisionDeskSheets(desk: desk, session: session))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("chat.needs")
+            }
+        }
+    }
+}
+#endif

@@ -6,18 +6,18 @@ does and signs every request the way `packages/core` verifies it. The Mac's app 
 (docs/ARCHITECTURE.md §10), and are Invincible's own: every word of the old theme is gone, and the vocabulary check
 reads these sources too.
 
-On an iPhone it opens on your agent's chat (the owner's word of 27 November 2026: "something like t3code on desktop, and
-openmausbot/grokbot on mobile"; the web's phone): almost no chrome, a back arrow that counts what needs you, its name with
-its line, and one menu (a new chat, a task to give, all chats, a side question, its computer), and a big message box whose
-words have its whole width, its buttons on a line under them (`UI/ComposerBox.swift`: Queue, Steer and Stop beside the
-words had left them a few words wide). The back arrow, or a swipe from the left edge, opens the roster as a drawer
-(`UI/RosterList.swift`, shared with an iPad's and a Mac's sidebar; `UI/Drawer.swift`): what needs you with its count, your
-agent, each agent with its glass and its latest line muted, each room; at its foot, pinned, the work, Settings, everything
-else and the machine. A place chosen there opens over the chat, alone: the work (`UI/HomeView.swift`, Home's until then:
-what needs you, decisions only, three at most, each with its one answer in place, and the work by proof, a lazy list),
-an agent's timeline (its tasks compact: their title and state, one muted line of who and how you stepped in, one line of
-the latest step, and their answers, Approve, Ship it, Give again, each a tap), Needs you, Settings, Everything else
-(`UI/EverythingView.swift`: the agents' board, all chats, keys, connectors). A task opens as a thread of its own
+On an iPhone it is one screen, your agent's chat, and a drawer (the owner's word of 28 November 2026: "make it as simple
+as the grokbot app or t3code ios app"). The chat's bar holds the drawer button, which counts what needs you, the chat's
+title and New chat, and nothing else. At its foot: what needs you as one card (its first decision, answered in place;
+"N more" opens Needs you), what is under way in it, and a big message box whose words have its whole width, its buttons
+on a line under them (`UI/ComposerBox.swift`). The drawer (`UI/Drawer.swift`) comes from the button or a swipe from the
+screen's left edge, and holds, top to bottom: search, which finds a chat by its words; New chat; Needs you with its
+count, while something does; your agents and rooms as one row of faces, each its own chat; your chats by day, pinned
+first, a swipe pinning or deleting one; and Settings at its foot (`UI/SettingsList.swift`: notifications, your agent's
+mark, keys, connectors, its computer, the node, About, forgetting this device). What it opens is pushed over the chat and
+goes back by the screen's left edge: an agent's or a room's chat (its tasks compact: their title and state, one muted line
+of who and how you stepped in, one line of the latest step, and their answers, Approve, Ship it, Give again, each a tap;
+its box gives it a task), Needs you, Settings. A task opens as a thread of its own
 (`UI/TaskView.swift`: a slim bar with its title, where it is and who has it; the brief, the work folded, the proof as one
 line with its verdict that opens to what it rests on, its answers under it; its details in a sheet). A notification, or an
 `invincible://` link (`task/<id>`, `agent/<handle>`, `approval/<id>`, `chat/<id>`), opens its place over the chat; one
@@ -27,16 +27,15 @@ named in small capitals over rows split by hairlines (no cards but a proof's), a
 the verdict said once (the agent's bare "Verified." is never shown beside its proof), and Dynamic Type to the largest
 accessibility size without clipping. Needs you is the work's decisions in full, with what was noticed below them,
 counted nowhere. While the primary answers, its chat's message box stays open: Steer and Queue beside Stop under its
-words (Return does the one Settings → Chat chose), what you queued above the box with Send now,
+words (Return does the one a Mac's Settings → Chat chose), what you queued above the box with Send now,
 Edit and Remove, a held queue saying why with Resume, and a side question asked apart from its menu or with `/btw …`
 (`UI/ChatQueue.swift`, the web's words through the vectors' `composer`). While an agent's task runs, its thread's box
-steers it: Steer this task and Queue for after it under its words, Return again the one Settings → Chat chose, what you
+steers it: Steer this task and Queue for after it under its words, what you
 said on its way to it above the box until its run takes it, then in its trail as yours where it was taken, what an
 ended task never took, and its proof saying what its review judged against (`Core/Steer.swift`, the vectors' `steer`;
-`TaskSteerTests` taps it against the dev node). An iPad's window is the roster in a sidebar under the mark and the
-INVINCIBLE wordmark, your agent's chat beside it first, a slim bar over each place, and its panels (a task's details, an
-agent's workspace) closed until you open them; ⌘K searches or asks. A Mac's window has the work by attention in its
-sidebar (`UI/Places.swift`) until it takes the roster too. A tap anywhere but a field closes the keyboard
+`TaskSteerTests` taps it against the dev node). An iPad's window is the same drawer as its sidebar, always there, and what it chose beside it, your agent's chat first. A
+Mac's window keeps its own places (`UI/Places.swift`, `UI/HomeView.swift`, `UI/EverythingView.swift`) until its own
+redesign. A tap anywhere but a field closes the keyboard
 (`KeyboardCloser`).
 
 The app keeps up with its node over its live stream (`Node/LiveLink.swift`, the web app's lib/live-link.ts ported and
@@ -287,5 +286,5 @@ black on white, white on near black in the dark, and white for macOS to tint, wh
 it. Xcode compiles it into the Mac app's `Assets.car` (light, dark and tintable), with a flat `MacIcon.icns` beside it.
 macOS shows the form the Mac's Appearance settings ask for ("Icon & widget style"): Dark, Clear or Tinted can follow light
 and dark, while Default keeps the light one. The app's mark inside the app (Settings' About, joining, a Mac's
-first run, Home's header, the drawer's head, the sidebar's head) is the I-beam alone in the page's ink (`AppMark`), beside
+first run) is the I-beam alone in the page's ink (`AppMark`), beside
 the INVINCIBLE wordmark (`Wordmark`) where a sidebar begins.

@@ -1,11 +1,11 @@
 import XCTest
 
 /*
- * Getting around, counted in taps from your agent's chat, where the app opens (the owner's word of 27 November 2026:
- * "something like t3code on desktop, and openmausbot/grokbot on mobile"): the roster is a tap away (the chat's back
- * arrow, which counts what needs you), so an agent, Needs you, the work and Settings are two taps; a running task and an
- * approval three (the work's row, Needs you's card); a past chat three (the chat's menu, All chats, the chat); a link
- * none. Against the dev node's busy fleet, each from a fresh launch on the chat.
+ * Getting around, counted in taps from your agent's chat, where the app opens (the owner's word of 28 November 2026: "make
+ * it as simple as the grokbot app or t3code ios app"): the drawer is a tap away (the chat's drawer button, which counts
+ * what needs you), so a past chat, an agent, Needs you and Settings are two taps; a running task three (an agent, its
+ * card) and an approval three (Needs you, its card); a link none. What is pushed over the chat goes back by the screen's
+ * left edge and by its back button. Against the dev node's busy fleet, each from a fresh launch on the chat.
  */
 final class NavTests: XCTestCase {
     @MainActor
@@ -51,9 +51,11 @@ final class NavTests: XCTestCase {
     @MainActor
     func testARunningTaskIsThreeTaps() throws {
         let app = try opened()
-        pick(app, "roster.work")
-        let running = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'row.' AND label CONTAINS 'Working'")).firstMatch
-        XCTAssertTrue(running.waitForExistence(timeout: 10), "No running task in the work")
+        // The agent at work (the dev node's Builder), then its running task's card.
+        pick(app, "roster.agent.builder")
+        shown(app, "agent.screen")
+        let running = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'card.' AND label CONTAINS 'Working'")).firstMatch
+        XCTAssertTrue(running.waitForExistence(timeout: 10), "No running task on the agent's page")
         running.tap()
         shown(app, "task.screen")
     }
@@ -76,17 +78,16 @@ final class NavTests: XCTestCase {
     }
 
     @MainActor
-    func testAPastChatIsThreeTaps() throws {
+    func testAPastChatIsTwoTaps() throws {
         let app = try opened()
-        app.buttons["chat.more"].tap()
-        let all = app.buttons["chats"]
-        XCTAssertTrue(all.waitForExistence(timeout: 5), "No All chats in the chat's menu")
-        all.tap()
-        let chat = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'chats.'")).firstMatch
-        XCTAssertTrue(chat.waitForExistence(timeout: 10), "No past chat among them")
+        app.openRoster()
+        let chat = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'roster.chat.'")).firstMatch
+        XCTAssertTrue(chat.waitForExistence(timeout: 10), "No past chat in the drawer")
         chat.tap()
         shown(app, "chat.screen")
-        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'chats.'")).firstMatch.exists, "The list stayed over the chat")
+        if UIDevice.current.userInterfaceIdiom != .pad {
+            XCTAssertTrue(app.descendants(matching: .any)["roster"].waitForNonExistence(timeout: 5), "The drawer stayed over the chat")
+        }
     }
 
     @MainActor
@@ -98,25 +99,24 @@ final class NavTests: XCTestCase {
         shown(app, "task.screen")
     }
 
-    /// Back from the work to your agent's chat by the screen's left edge, as a thumb goes back, and by its back button. On
-    /// an iPhone the work draws its own head where the system bar was (its scroll's cost: PerfTests.testScrollWork), and
-    /// a hidden bar takes the edge with it unless the work gives it back.
+    /// Back from an agent's chat to your agent's by the screen's left edge, as a thumb goes back, and by its back button:
+    /// what the drawer opens is pushed over the chat, under the system's bar, and goes back as any pushed page does.
     @MainActor
-    func testTheWorkGoesBackByTheEdgeAndByItsButton() throws {
-        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "An iPad's work is a sidebar's place, with nothing to go back to")
+    func testAnAgentsChatGoesBackByTheEdgeAndByItsButton() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "An iPad's agent is a sidebar's place, with nothing to go back to")
         let app = try opened()
         for way in ["the edge", "its back button"] {
-            pick(app, "roster.work")
-            shown(app, "work.screen")
+            pick(app, "roster.agent.builder")
+            shown(app, "agent.screen")
             if way == "the edge" {
                 let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.55))
                 edge.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.55)))
             } else {
-                let back = app.buttons["work.back"]
-                XCTAssertTrue(back.waitForExistence(timeout: 5), "The work has no back button")
+                let back = app.navigationBars.buttons.element(boundBy: 0)
+                XCTAssertTrue(back.waitForExistence(timeout: 5), "The agent's page has no back button")
                 back.tap()
             }
-            XCTAssertTrue(app.descendants(matching: .any)["work.screen"].waitForNonExistence(timeout: 5), "Still on the work after \(way)")
+            XCTAssertTrue(app.descendants(matching: .any)["agent.screen"].waitForNonExistence(timeout: 5), "Still on the agent's page after \(way)")
             shown(app, "chat.screen")
         }
     }

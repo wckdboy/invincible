@@ -48,11 +48,6 @@ struct HomeView: View {
     var search: (() -> Void)? = nil
     /// Gives a task to the agents (nil: this device may not).
     var give: (() -> Void)? = nil
-    /// Back to your agent's chat, where Work is pushed over it (an iPhone's). Work then draws its own head (WorkHead), as
-    /// Home drew its own: the system bar's buttons over the list cost a scroll of the work 10 to 15 ms a second of late
-    /// frames on the Mac mini, where this head, glass and all, costs 3 to 6 (PerfTests.testScrollWork, 28 November 2026).
-    /// Nil where Work is a sidebar's place (an iPad's, a Mac's), which keeps the system bar and its sidebar button.
-    var back: (() -> Void)? = nil
     @AppStorage("home.done") private var doneOpen = false
     /// What its decisions' answers are doing (shared with Needs you: Decisions.swift).
     @State private var desk = DecisionDesk()
@@ -128,21 +123,18 @@ struct HomeView: View {
         .screen("work.screen")
         .navigationTitle("Work")
         .toolbar {
-            if back == nil {
-                ToolbarItemGroup(placement: .barTrailing) {
-                    if let search {
-                        Button(action: search) { Label("Search, or ask", systemImage: "magnifyingglass") }
-                            .accessibilityIdentifier("work.search")
-                    }
-                    if let give {
-                        Button(action: give) { Label("Give a task", systemImage: "square.and.pencil") }
-                            .help("Give a task to the agent best suited to it, or to one by name")
-                            .accessibilityIdentifier("work.give")
-                    }
+            ToolbarItemGroup(placement: .barTrailing) {
+                if let search {
+                    Button(action: search) { Label("Search, or ask", systemImage: "magnifyingglass") }
+                        .accessibilityIdentifier("work.search")
+                }
+                if let give {
+                    Button(action: give) { Label("Give a task", systemImage: "square.and.pencil") }
+                        .help("Give a task to the agent best suited to it, or to one by name")
+                        .accessibilityIdentifier("work.give")
                 }
             }
         }
-        .modifier(WorkOwnHead(back: back, search: search, give: give))
         .task { await session.askProjects() }
         .refreshable { await session.refresh() }
         .modifier(DecisionDeskSheets(desk: desk, session: session))
@@ -273,117 +265,6 @@ struct PlacesMenu: View {
         .buttonBorderShape(.circle)
         .menuIndicator(.hidden)
         .accessibilityLabel("Everything else")
-    }
-}
-
-/// Work's own head where it is pushed over your agent's chat (an iPhone's), in the system bar's place (hidden): back in a
-/// glass of its own, the title in the middle of the screen, search and Give a task together in one glass, as the system bar
-/// draws them, at its sizes, over the list's soft edge; and the screen's left edge still going back (EdgeSwipeBack).
-/// (Elsewhere the system bar, untouched.)
-private struct WorkOwnHead: ViewModifier {
-    let back: (() -> Void)?
-    let search: (() -> Void)?
-    let give: (() -> Void)?
-
-    func body(content: Content) -> some View {
-        #if os(iOS)
-        if let back {
-            content
-                .toolbar(.hidden, for: .navigationBar)
-                .safeAreaBar(edge: .top) { WorkHead(back: back, search: search, give: give) }
-                .background(EdgeSwipeBack())
-        } else {
-            content
-        }
-        #else
-        content
-        #endif
-    }
-}
-
-#if os(iOS)
-/// The screen's left edge still going back from a page that hides the system bar: UIKit's own judge of that swipe (the
-/// stack's interactivePopGestureRecognizer's delegate) refuses it once the bar is hidden. While the page is on screen the
-/// swipe asks this one instead: yes when there is a page under it to go back to and no move is under way already (one
-/// begun mid-move can leave the stack stuck). UIKit's own judge is put back as the page goes, so every other page is as
-/// UIKit has it.
-private struct EdgeSwipeBack: UIViewControllerRepresentable {
-    func makeUIViewController(context: Context) -> Judge { Judge() }
-    func updateUIViewController(_ judge: Judge, context: Context) {}
-
-    final class Judge: UIViewController, UIGestureRecognizerDelegate {
-        private weak var stack: UINavigationController?
-        private weak var own: (any UIGestureRecognizerDelegate)?
-
-        override func viewDidAppear(_ animated: Bool) {
-            super.viewDidAppear(animated)
-            guard let stack = navigationController, let swipe = stack.interactivePopGestureRecognizer, swipe.delegate !== self else { return }
-            self.stack = stack
-            own = swipe.delegate
-            swipe.delegate = self
-        }
-
-        override func viewWillDisappear(_ animated: Bool) {
-            super.viewWillDisappear(animated)
-            if let swipe = stack?.interactivePopGestureRecognizer, swipe.delegate === self { swipe.delegate = own }
-        }
-
-        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            guard let stack else { return false }
-            return stack.viewControllers.count > 1 && stack.transitionCoordinator == nil
-        }
-    }
-}
-#endif
-
-private struct WorkHead: View {
-    let back: () -> Void
-    let search: (() -> Void)?
-    let give: (() -> Void)?
-
-    var body: some View {
-        ZStack {
-            Text("Work")
-                .font(.headline)
-                .lineLimit(1)
-                .accessibilityAddTraits(.isHeader)
-            HStack(spacing: 0) {
-                Button(action: back) { glyph("chevron.left", weight: .medium, width: Metrics.touch) }
-                    .glassEffect(.regular.interactive(), in: .circle)
-                    .accessibilityLabel("Back")
-                    .accessibilityIdentifier("work.back")
-                Spacer(minLength: Space.s2)
-                if search != nil || give != nil {
-                    HStack(spacing: 0) {
-                        if let search {
-                            Button(action: search) { glyph("magnifyingglass") }
-                                .accessibilityLabel("Search, or ask")
-                                .accessibilityIdentifier("work.search")
-                        }
-                        if let give {
-                            Button(action: give) { glyph("square.and.pencil") }
-                                .accessibilityLabel("Give a task")
-                                .accessibilityIdentifier("work.give")
-                        }
-                    }
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, Space.s4)
-        .padding(.vertical, Space.s1)
-    }
-
-    /// A button's symbol at the system bar's size (the body's, large) in a touch's height; a pair's items a little wider,
-    /// as the bar spaces them.
-    private func glyph(_ name: String, weight: Font.Weight = .regular, width: CGFloat = 50) -> some View {
-        Image(systemName: name)
-            .font(.body.weight(weight))
-            .imageScale(.large)
-            .foregroundStyle(.primary)
-            .frame(width: width, height: Metrics.touch)
-            .contentShape(.rect)
     }
 }
 

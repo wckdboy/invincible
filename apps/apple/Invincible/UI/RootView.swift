@@ -43,8 +43,7 @@ private struct WindowTint: UIViewRepresentable {
 }
 
 /// The paired app, asked again every few seconds while a window of it is in front. On an iPhone (and an iPad's narrow
-/// window), Home with everything else pushed over it; on an iPad, a Mac's window: the work in a sidebar and the place
-/// chosen beside it.
+/// window), your agent's chat with the drawer beside it; on an iPad, the drawer as a sidebar and its choice beside it.
 struct MainView: View {
     let app: AppModel
     let session: Session
@@ -76,91 +75,70 @@ struct MainView: View {
     }
 }
 
-/// An iPhone's app (the owner's word of 27 November 2026: "something like t3code on desktop, and openmausbot/grokbot on
-/// mobile"; the web's phone): your agent's chat, and over it, as Messages shows a conversation, a place you go to: the
-/// work, an agent's or a room's page, a task's thread, Needs you, Settings. The roster is a drawer from the left edge (the
-/// chat's back arrow, which counts what needs you, or a swipe): what needs you, your agent, each agent and room, then the
-/// work, Settings and everything else. A notification you tap, or a link, opens where it leads, over the chat.
+/// An iPhone's app (the owner's word of 28 November 2026: "make it as simple as the grokbot app or t3code ios app"): one
+/// screen, your agent's chat, and the drawer beside it (Drawer.swift: New chat, Needs you, your agents, your chats by day,
+/// Settings). What the drawer opens is pushed over the chat, and the screen's left edge goes back from it: an agent's or a
+/// room's chat, Needs you, Settings; a task from a card. A notification you tap, or a link, opens where it leads.
 struct PhoneRoot: View {
     let app: AppModel
     let session: Session
     @State private var path: [Place] = []
     @State private var drawer = false
-    @State private var giving = false
-    @State private var searching = false
-    @State private var givingNext = false
-    @State private var listingChats = false
-
-    /// The agents are given a task from a device that may, with agents to take it, once the node has answered.
-    private var mayGive: Bool { session.can("fleet:admin") && session.can("chat") && session.team != nil && !session.rows.isEmpty }
 
     var body: some View {
-        DrawerHost(open: $drawer, session: session, current: path.last ?? .primary, go: pick) {
+        DrawerHost(open: $drawer, session: session, current: Self.current(path, chat: session.chat.conversation), pick: pick) {
             NavigationStack(path: $path) {
-                ChatView(session: session, roster: { withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) { drawer = true } }, give: mayGive ? { giving = true } : nil, forget: { try app.forget() })
+                ChatView(session: session, roster: { withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) { drawer = true } }, forget: { try app.forget() })
                     .navigationDestination(for: Place.self) { place in destination(place) }
             }
         }
-        .sheet(isPresented: $giving) { GiveSheet(session: session) }
-        .sheet(isPresented: $searching, onDismiss: {
-            if givingNext { givingNext = false; giving = true }
-        }) {
-            CommandPalette(session: session, go: { go($0) }, give: mayGive ? { givingNext = true } : nil)
-        }
-        // Every chat with your agent, in a sheet of its own, as its menu's All chats lists them.
-        .sheet(isPresented: $listingChats) {
-            ChatsView(session: session) { id in
-                listingChats = false
-                Task {
-                    await session.chat.open(id, with: session.client)
-                    path = []
-                }
-            } startNew: {
-                listingChats = false
-                if !session.chat.answering { session.chat.startNew() }
-                path = []
-            }
-        }
-        .environment(\.showInbox) { go(.inbox) }
-        .environment(\.showPrimary) { go(.primary) }
+        .environment(\.showInbox) { path = [.inbox] }
+        .environment(\.showPrimary) { path = [] }
         .environment(\.openPlace) { go($0) }
         .task(id: PushCenter.shared.opened) { await follow() }
         .onChange(of: path, initial: true) { PushCenter.shared.showing = Self.showing(path, chat: session.chat.conversation) }
         .onChange(of: session.chat.conversation) { PushCenter.shared.showing = Self.showing(path, chat: session.chat.conversation) }
     }
 
-    /// A place, over your agent's chat (the chat itself: back to it); every chat in a sheet of its own.
+    /// A place, over your agent's chat (the chat itself, or one of the places the iPhone no longer has: back to it).
     private func go(_ place: Place) {
         switch place {
-        case .primary: path = []
-        case .chats: listingChats = true
+        case .primary, .home, .agents, .chats, .everything: path = []
         default: path.append(place)
         }
     }
 
-    /// A place from the roster: over your agent's chat, alone (the chat itself: back to it).
-    private func pick(_ place: Place) {
-        path = place == .primary ? [] : [place]
+    /// What the drawer chose: a chat on the chat's own screen, anything else over it.
+    private func pick(_ choice: DrawerPick) {
+        switch choice {
+        case .newChat:
+            if !session.chat.answering { session.chat.startNew() }
+            path = []
+        case .chat(let id):
+            path = []
+            Task { await session.chat.open(id, with: session.client) }
+        case .needs: path = [.inbox]
+        case .agent(let id): path = [.agent(id)]
+        case .room(let id): path = [.room(id)]
+        case .settings: path = [.more]
+        }
     }
 
     @ViewBuilder private func destination(_ place: Place) -> some View {
         switch place {
-        case .home: HomeView(session: session, go: go, search: { searching = true }, give: mayGive ? { giving = true } : nil, back: { if !path.isEmpty { path.removeLast() } })
-        case .primary: ChatView(session: session)
         case .task(let id): TaskView(session: session, id: id)
-        case .agents: AgentsView(session: session) { path.append(Place($0)) }
         case .agent(let id): AgentView(session: session, id: id)
         case .room(let id): RoomView(session: session, id: id)
         case .inbox: InboxView(session: session)
-        case .more, .thisMac: MoreView(app: app, session: session)
-        case .chats: AllChats(session: session) { path = [] }
+        case .more, .thisMac: SettingsList(app: app, session: session)
         case .keys: KeysView(session: session)
         case .connectors: ConnectorsView(session: session)
-        case .everything: EverythingView(session: session) { go($0) }
+        // (Places an iPhone no longer has, from an older link: the chat.)
+        case .primary, .home, .agents, .chats, .everything: ChatView(session: session)
         }
     }
 
-    /// A notification you tapped: where it leads, over your agent's chat.
+    /// A notification you tapped: its place over the chat, or the chat it names.
     private func follow() async {
         guard let opened = PushCenter.shared.opened else { return }
         PushCenter.shared.opened = nil
@@ -168,7 +146,10 @@ struct PhoneRoot: View {
         switch opened {
         case .inbox: path = [.inbox]
         case .settings: path = [.more]
-        case .overview: path = [.agents]
+        // The agents: the drawer, which lists them.
+        case .overview:
+            path = []
+            drawer = true
         case .chat(let id):
             if let id { await session.chat.open(id, with: session.client) }
             path = []
@@ -187,45 +168,38 @@ struct PhoneRoot: View {
     static func showing(_ path: [Place], chat: String?) -> Push.Destination? {
         (path.last ?? .primary).shown(chat: chat)
     }
+
+    /// The drawer's row for what is on screen: the chat's own (or none, a new one), or the place over it.
+    static func current(_ path: [Place], chat: String?) -> DrawerPick? {
+        DrawerPick.of(path.last ?? .primary, chat: chat)
+    }
 }
 
-/// An iPad's window (the owner's word of 27 November 2026: "something like t3code on desktop"): the roster in a sidebar
-/// (RosterList.swift) and the place chosen beside it, your agent's chat first. Each window keeps its own place for the next
-/// launch, and the menus and their keys (PadCommands) act in the one in front.
+/// An iPad's window (as T3 Code's on an iPad): the drawer as its sidebar, always there, and beside it what it chose, your
+/// agent's chat first. Each window keeps its own place for the next launch, and the menus and their keys (PadCommands) act
+/// in the one in front.
 struct SplitPlaces: View {
     let app: AppModel
     let session: Session
     /// The place this window shows, kept with the window.
     @SceneStorage("place") private var kept = ""
-    @State private var giving = false
     @State private var composerWanted = false
-    /// Search, or ask (⌘K), and a task chosen there, given once the palette has gone.
-    @State private var searching = false
-    @State private var givingNext = false
 
     private var place: Place {
-        get { (try? JSONDecoder().decode(Place.self, from: Data(kept.utf8))) ?? .primary }
+        get {
+            switch (try? JSONDecoder().decode(Place.self, from: Data(kept.utf8))) ?? .primary {
+            // (Places an iPad no longer has, kept by an older window: the chat.)
+            case .home, .agents, .chats, .everything: .primary
+            case let place: place
+            }
+        }
         nonmutating set { kept = (try? JSONEncoder().encode(newValue)).map { String(decoding: $0, as: UTF8.self) } ?? "" }
     }
 
     var body: some View {
         NavigationSplitView {
-            RosterList(session: session, current: place, go: { place = $0 })
+            Drawer(session: session, current: DrawerPick.of(place, chat: session.chat.conversation), pick: pick)
                 .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
-                .toolbar {
-                    // Its head: the app's mark, alone and on no glass of its own (a bar's item has no room for the wordmark
-                    // beside it: on 27 November 2026 the two were cut to an "I" over an "N…" in a glass circle), and search (⌘K).
-                    ToolbarItem(placement: .topBarLeading) {
-                        AppMark(size: 22)
-                            .accessibilityElement()
-                            .accessibilityLabel("Invincible")
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { searching = true } label: { Label("Search, or ask", systemImage: "magnifyingglass") }
-                            .help("Search, or ask (⌘K)")
-                    }
-                }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if session.reconnecting {
                         ReconnectingLine(session: session).padding(.horizontal, Space.s3).background(.bar)
@@ -241,44 +215,38 @@ struct SplitPlaces: View {
                 // An agent's workspace (its computer's, beside its chat) in a column of its own.
                 .workspaceColumn(session: session, seat: place.workspaceSeat(session))
         }
-        .sheet(isPresented: $giving) { GiveSheet(session: session) }
-        .sheet(isPresented: $searching, onDismiss: {
-            if givingNext { givingNext = false; giving = true }
-        }) {
-            CommandPalette(session: session, go: { place = $0 }, give: mayGive ? { givingNext = true } : nil)
-        }
         .environment(\.showInbox) { place = .inbox }
         .environment(\.openPlace) { place = $0 }
-        .environment(\.openSearch) { searching = true }
-        .focusedSceneValue(\.placeActions, PlaceActions(go: { place = $0 }, newChat: newChat, give: mayGive ? { giving = true } : nil, search: { searching = true }))
+        .focusedSceneValue(\.placeActions, PlaceActions(newChat: newChat))
         .task(id: PushCenter.shared.opened) { await follow() }
     }
 
     @ViewBuilder private var detail: some View {
         switch place {
-        case .home: HomeView(session: session, go: { place = $0 }, search: { searching = true }, give: mayGive ? { giving = true } : nil)
         case .task(let id): TaskView(session: session, id: id, wide: true)
-        case .primary: ChatView(session: session, forget: { try app.forget() })
-        case .agents: AgentsView(session: session, selection: board) { place = Place($0) }
         case .agent(let id): AgentView(session: session, id: id)
         case .room(let id): RoomView(session: session, id: id)
         case .inbox: InboxView(session: session)
-        case .more, .thisMac: MoreView(app: app, session: session)
-        case .chats: AllChats(session: session) { place = .primary }
+        case .more, .thisMac: SettingsList(app: app, session: session)
         case .keys: KeysView(session: session)
         case .connectors: ConnectorsView(session: session)
-        case .everything: EverythingView(session: session) { place = $0 }
+        case .primary, .home, .agents, .chats, .everything: ChatView(session: session, forget: { try app.forget() })
         }
     }
 
-    /// The board's rows lead to their pages in this window: chosen there, they are chosen in the sidebar.
-    private var board: Binding<Route?> {
-        Binding(get: { nil }, set: { route in if let route { place = Place(route) } })
+    /// What the sidebar chose: a chat on the chat's own place, anything else in its place.
+    private func pick(_ choice: DrawerPick) {
+        switch choice {
+        case .newChat: newChat?()
+        case .chat(let id):
+            place = .primary
+            Task { await session.chat.open(id, with: session.client) }
+        case .needs: place = .inbox
+        case .agent(let id): place = .agent(id)
+        case .room(let id): place = .room(id)
+        case .settings: place = .more
+        }
     }
-
-    /// The agents are given a task from a device that may (as its board's own button asks), with agents to take it,
-    /// once the node has answered (never from the agents this device kept).
-    private var mayGive: Bool { session.can("fleet:admin") && session.team != nil && !session.rows.isEmpty }
 
     /// A new chat with the primary, its message box taking the keys; none while it is answering.
     private var newChat: (() -> Void)? {
@@ -296,7 +264,8 @@ struct SplitPlaces: View {
         switch opened {
         case .inbox: place = .inbox
         case .settings: place = .more
-        case .overview: place = .agents
+        // The agents: the sidebar lists them, beside your agent's chat.
+        case .overview: place = .primary
         case .chat(let id):
             place = .primary
             if let id { await session.chat.open(id, with: session.client) }
@@ -314,21 +283,15 @@ struct SplitPlaces: View {
 
 /// What the menus and their keys act on: the window in front (an iPad's windows each have their own place).
 struct PlaceActions {
-    let go: (Place) -> Void
     /// A new chat with the primary: none while it is answering.
     let newChat: (() -> Void)?
-    /// A task for the agents: none from a device that may not give one, or with no agent to take it.
-    let give: (() -> Void)?
-    /// Search, or ask (⌘K).
-    var search: (() -> Void)? = nil
 }
 
 extension FocusedValues {
     @Entry var placeActions: PlaceActions?
 }
 
-/// The menus an iPad shows (its menu bar, and what holding ⌘ lists), as a Mac's: a new chat, a new window and a task for
-/// the agents in File, Work and the four places in View, each acting in the window in front.
+/// The menus an iPad shows (its menu bar, and what holding ⌘ lists): a new chat and a new window, in the window in front.
 struct PadCommands: Commands {
     @FocusedValue(\.placeActions) private var actions
     @Environment(\.openWindow) private var openWindow
@@ -340,26 +303,7 @@ struct PadCommands: Commands {
                 .disabled(actions?.newChat == nil)
             Button("New Window") { openWindow(id: InvincibleApp.main) }
                 .keyboardShortcut("n", modifiers: [.command, .option])
-            Button("Give the agents a Task…") { actions?.give?() }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
-                .disabled(actions?.give == nil)
-            Button("Search or Ask…") { actions?.search?() }
-                .keyboardShortcut("k")
-                .disabled(actions?.search == nil)
         }
-        CommandGroup(before: .sidebar) {
-            place("Work", .home, "0")
-            place(Primary.name, .primary, "1")
-            place("Agents", .agents, "2")
-            place("Needs You", .inbox, "3")
-            place("Settings", .more, "4")
-        }
-    }
-
-    private func place(_ name: String, _ place: Place, _ key: KeyEquivalent) -> some View {
-        Button(name) { actions?.go(place) }
-            .keyboardShortcut(key)
-            .disabled(actions == nil)
     }
 }
 

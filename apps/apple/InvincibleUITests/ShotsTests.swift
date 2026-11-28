@@ -55,73 +55,70 @@ final class ShotsTests: XCTestCase {
             }
         }
         for look in pictured {
-            // Where the app opens: your agent's chat (its latest, or its welcome).
+            // Where the app opens: your agent's chat (its latest, or its welcome), what needs you at its foot.
             try home(app, look, node)
             settle(3)
             shot("01-chat", look)
-            // The roster: an iPhone's drawer (an iPad's sidebar is in every picture).
+            // The drawer (an iPad's sidebar, in every picture): your chats by day, your agents, Needs you, Settings.
             app.openRoster()
             settle(1)
-            shot("02-roster", look)
-            // The work (Home's, before), and its rows further down.
-            if tapIfThere(app.rosterRow("roster.work"), app) {
-                wait(app, "work.screen")
-                settle(2)
-                shot("03-work", look)
-                _ = reach(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'row.'")).firstMatch, app)
+            shot("02-drawer", look)
+            // Its search, finding a chat by its words.
+            let search = app.textFields["roster.search"]
+            if search.waitForExistence(timeout: 5) {
+                search.tap()
+                search.typeText("release")
                 settle(1.5)
-                shot("03-work-rows", look)
-                // Search and ask, from its ⌕.
-                if tapIfThere(app.buttons["work.search"], app) {
-                    settle(1.5)
-                    shot("15-search", look)
-                    dismissSheet(app)
-                }
+                shot("02-drawer-search", look)
+            }
+            // A past chat, from the drawer.
+            try home(app, look, node)
+            app.openRoster()
+            if tapIfThere(reach(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'roster.chat.'")).firstMatch, app), app) {
+                wait(app, "chat.screen")
+                settle(2)
+                shot("03-past-chat", look)
+            }
+            // An agent's chat: Builder's, at work.
+            try home(app, look, node)
+            app.openRoster()
+            if tapIfThere(reach(app.rosterRow("roster.agent.builder"), app), app) {
+                wait(app, "agent.screen")
+                settle(2)
+                shot("04-agent", look)
             }
             // A task proven, one that failed, one at work: each its thread, by its link (the same ones in every look).
-            for (n, word, id) in [("04", "proven", tasks.proven), ("05", "failed", tasks.failed), ("06", "working", tasks.working)] {
+            for (n, word, id) in [("05", "proven", tasks.proven), ("06", "failed", tasks.failed), ("07", "working", tasks.working)] {
                 guard let id else { continue }
                 try home(app, look, node)
                 guard open(app, "invincible://task/\(id)", "task.screen") else { continue }
                 settle(2.5)
                 shot("\(n)-task-\(word)", look)
-                if n == "04", tapIfThere(app.buttons["task.details"], app) {
+                if n == "05", tapIfThere(app.buttons["task.details"], app) {
                     settle(1.5)
                     shot("\(n)-task-details", look)
                     dismissSheet(app)
                 }
             }
-            // An agent's page: Builder's, at work.
-            try home(app, look, node)
-            if open(app, "invincible://agent/builder", "agent.screen") {
-                settle(2)
-                shot("07-agent", look)
-            }
-            // While it answers: a message queued behind it, a side question, and the queue held once it's stopped.
+            // While it answers: a message queued behind it, and the queue held once it's stopped.
             try home(app, look, node)
             busyChat(app, look)
-            // The roster's other places, and Everything else's.
-            for (n, row, screen) in [("09", "roster.needs", "needs.screen"), ("10", "roster.settings", "settings.screen"), ("11", "roster.everything", "everything.screen")] {
+            // Needs you, and Settings with what it leads to.
+            for (n, row, screen) in [("09", "roster.needs", "needs.screen"), ("10", "roster.settings", "settings.screen")] {
                 try home(app, look, node)
                 app.openRoster()
                 guard tapIfThere(reach(app.rosterRow(row), app), app) else { continue }
                 wait(app, screen)
                 settle(2)
                 shot("\(n)-\(row.dropFirst("roster.".count))", look)
-                // About, from Settings.
-                if row == "roster.settings", tapIfThere(reach(app.buttons["settings.about"], app), app) {
-                    wait(app, "about.screen")
-                    settle(1)
-                    shot("12-about", look)
-                }
-                if row == "roster.everything" {
-                    for (m, place, there) in [("13", "agents", "agents.screen"), ("14", "chats", "chats.screen"), ("16", "keys", "keys.screen"), ("17", "connectors", "connectors.screen")] {
-                        guard tapIfThere(app.buttons["everything.\(place)"], app) else { continue }
+                if row == "roster.settings" {
+                    for (m, button, there) in [("11", "settings.about", "about.screen"), ("12", "settings.keys", "keys.screen"), ("13", "settings.connectors", "connectors.screen")] {
+                        guard tapIfThere(reach(app.buttons[button], app), app) else { continue }
                         wait(app, there)
-                        settle(2)
-                        shot("\(m)-\(place)", look)
-                        if place == "chats" { dismissSheet(app) } else { back(app) }
-                        wait(app, "everything.screen")
+                        settle(1.5)
+                        shot("\(m)-\(there.dropLast(".screen".count))", look)
+                        back(app)
+                        wait(app, "settings.screen")
                     }
                 }
             }
@@ -207,8 +204,8 @@ final class ShotsTests: XCTestCase {
         return app.descendants(matching: .any)[screen].waitForExistence(timeout: 15)
     }
 
-    /// The primary's chat while it answers, from a new one it takes its time over: a message queued behind it, a question
-    /// asked on the side, and once it's stopped, the queue held.
+    /// The primary's chat while it answers, from a new one it takes its time over: a message queued behind it, and once
+    /// it's stopped, the queue held.
     @MainActor
     private func busyChat(_ app: XCUIApplication, _ look: Look) {
         let chat = app.descendants(matching: .any)["chat.screen"]
@@ -230,12 +227,6 @@ final class ShotsTests: XCTestCase {
         chat.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
         settle(1.5)
         shot("08-chat-busy", look)
-        if tapIfThere(app.buttons["chat.more"], app), tapIfThere(app.buttons["chat.aside"], app) {
-            wait(app, "aside.question")
-            settle(1)
-            shot("08-chat-aside", look)
-            dismissSheet(app)
-        }
         if tapIfThere(app.buttons["composer.stop"], app) {
             _ = app.descendants(matching: .any)["queue.held"].waitForExistence(timeout: 20)
             settle(1)
