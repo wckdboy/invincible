@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Checkbox
@@ -267,16 +268,24 @@ private fun Timeline(
     Column(Modifier.fillMaxSize().imePadding()) {
         val named = headerGone || barAlways
         PageBar(if (named) title else "", back, actions = actions, titleContent = if (named) barTitle else null)
+        // Every item it lists, each by its key, made in one place (TimelineItem.of: ChatItemsTest holds every key once).
+        val shown = TimelineItem.of(entries.map { it.key }, problem = problem != null, needs = needs != null)
         LazyColumn(Modifier.weight(1f), state = list, contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = Space.s4)) {
-            item { header() }
-            problem?.let { item { Problem(it) } }
-            // When it went on, small and centred over what went on with it (ChatList.timeMarks, the PWA's).
-            itemsIndexed(entries, key = { _, e -> e.key }) { i, e ->
-                if (i in marks) TimeMark(times.mark(e.at, minute * 60_000))
-                if (e.task != null) TaskCard(app, e.task, openTask) else Said(e, face = { SpeakerFace(e.speakerId, agents) }, named = assignee == null)
+            items(shown, key = { it.key }) { item ->
+                when (item) {
+                    TimelineItem.Header -> header()
+                    TimelineItem.Problem -> problem?.let { Problem(it) }
+                    // When it went on, small and centred over what went on with it (ChatList.timeMarks, the PWA's).
+                    is TimelineItem.Entry -> {
+                        val i = item.index
+                        val e = entries[i]
+                        if (i in marks) TimeMark(times.mark(e.at, minute * 60_000))
+                        if (e.task != null) TaskCard(app, e.task, openTask) else Said(e, face = { SpeakerFace(e.speakerId, agents) }, named = assignee == null)
+                    }
+                    // What it asks of you: in the flow after its words, never pinned over the box.
+                    TimelineItem.Needs -> needs?.invoke()
+                }
             }
-            // What it asks of you: in the flow after its words, never pinned over the box.
-            needs?.let { asks -> item(key = "asks") { asks() } }
         }
         Composer(
             placeholder = placeholder,

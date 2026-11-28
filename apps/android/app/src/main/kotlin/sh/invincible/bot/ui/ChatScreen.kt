@@ -176,20 +176,32 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
         val welcome = bubbles.isEmpty() && !live && !opening
         val kept by chat.chats.collectAsState()
         LaunchedEffect(welcome) { if (welcome) chat.loadChats() }
+        // (What needs your answer is counted once: the head above says it, live, so the card leaves its own count out.)
+        val awayShown = sh.invincible.bot.core.Away.shown(away, countShown = table.primary.tone == "warn")
+        // Every item it lists, each by its key, made in one place (ChatItem.of: ChatItemsTest holds every key once).
+        val shown = ChatItem.of(
+            reading = opening && bubbles.isEmpty(),
+            welcome = welcome,
+            away = bubbles.isEmpty() && awayShown.isNotEmpty() && !opening,
+            messages = bubbles.size,
+            steers = steering.size,
+            tasks = underway.tasks.map { it.id },
+            looks = underway.looks.map { it.id },
+            queued = queue.isNotEmpty(),
+            notice = notice != null,
+            problem = problem != null,
+        )
         LazyColumn(Modifier.weight(1f), state = list) {
-            // A new conversation: the welcome, as the web's (Welcome.kt): your agent's mark, large, and what it does; what you
-            // might ask it first, a press puts it in the message box; your recent chats and All chats.
-            // (Its latest kept chat being read: said so, in place of the welcome, which would only be replaced.)
-            if (opening && bubbles.isEmpty()) item { Text("Reading your latest chat…", style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = Space.margin, vertical = Space.s2)) }
-            if (welcome) {
-                item(key = "welcome") { WelcomeHero() }
-                item(key = "asks") { WelcomeAsks(SUGGESTIONS) { words -> offered = (offered?.first ?: 0) + 1 to words } }
-                item(key = "recent") { RecentChatsList(kept, open = { chat.open(it) }, all = { listing = true }) }
-            }
-            // (What needs your answer is counted once: the head above says it, live, so the card leaves its own count out.)
-            val awayShown = sh.invincible.bot.core.Away.shown(away, countShown = table.primary.tone == "warn")
-            if (bubbles.isEmpty() && awayShown.isNotEmpty() && !opening) {
-                item {
+            items(shown, key = { it.key }) { item ->
+                when (item) {
+                // (Its latest kept chat being read: said so, in place of the welcome, which would only be replaced.)
+                ChatItem.Reading -> Text("Reading your latest chat…", style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = Space.margin, vertical = Space.s2))
+                // A new conversation: the welcome, as the web's (Welcome.kt): your agent's mark, large, and what it does; what
+                // you might ask it first, a press puts it in the message box; your recent chats and All chats.
+                ChatItem.Welcome -> WelcomeHero()
+                ChatItem.Suggestions -> WelcomeAsks(SUGGESTIONS) { words -> offered = (offered?.first ?: 0) + 1 to words }
+                ChatItem.Recent -> RecentChatsList(kept, open = { chat.open(it) }, all = { listing = true })
+                ChatItem.Away -> {
                     Panel {
                         Text("While you were away", style = MaterialTheme.typography.titleSmallEmphasized)
                         val brand = LocalBrand.current
@@ -202,28 +214,31 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
                         }
                     }
                 }
+                // Its latest answer's choices may be tapped, once it's done: the choice goes as your reply. When it went on is
+                // said small and centred over the message it went on with (ChatList.timeMarks, the PWA's).
+                is ChatItem.Message -> {
+                    val i = item.index
+                    val b = bubbles[i]
+                    if (i in marks) b.at?.let { TimeMark(times.mark(it, minute * 60_000)) }
+                    Message(b, if (i == bubbles.lastIndex && !live) { choice -> chat.send(choice) } else null)
+                }
+                // Your words on their way into its turn (a steer): your bubbles, as they went, until it takes them.
+                is ChatItem.Steer -> MyBubble(steering[item.index], pending = true)
+                // What waits on you here that is no agent's (a device asking to join, a key, a service's question, a loop it
+                // drafted, a connector asked for, an approval no agent of yours asked for): each a message, its answers under it.
+                ChatItem.Needs -> rememberWork(app)?.let { work -> NeedsYou(app, work, openTask = openTask, openAll = { waitingShown = true }, watch = { go("mac:$it") }, openConnectors = { go("connectors") }, chat = Primary.HANDLE, flow = true) }
+                // What is under way from here: each task it gave an agent, a row and a word (a tap opens it, Stop is there);
+                // each look it set itself, a line with Cancel.
+                is ChatItem.Task -> underway.tasks.firstOrNull { it.id == item.id }?.let { task -> UnderwayRow(task, table.rows.firstOrNull { it.kind == "agent" && it.id == task.assignee }?.avatar, openTask) }
+                is ChatItem.Look -> underway.looks.firstOrNull { it.id == item.id }?.let { look ->
+                    LookLine(look) { scope.launch { runCatching { app.client?.post("/api/looks/cancel", Json.obj("id" to look.id)) }; underwayAsked++ } }
+                }
+                // What you queued behind the chat, in a line a tap from it; what became of something you sent.
+                ChatItem.Queued -> QueueLine(queue.size, held, live) { queueShown = true }
+                ChatItem.Notice -> notice?.let { (title, detail) -> NoticeLine(title, detail, chat::dismissNotice) }
+                ChatItem.Problem -> problem?.let { Problem(it) }
+                }
             }
-            // Its latest answer's choices may be tapped, once it's done: the choice goes as your reply. When it went on is said
-            // small and centred over the message it went on with (ChatList.timeMarks, the PWA's).
-            itemsIndexed(bubbles) { i, b ->
-                if (i in marks) b.at?.let { TimeMark(times.mark(it, minute * 60_000)) }
-                Message(b, if (i == bubbles.lastIndex && !live) { choice -> chat.send(choice) } else null)
-            }
-            // Your words on their way into its turn (a steer): your bubbles, as they went, until it takes them.
-            items(steering) { words -> MyBubble(words, pending = true) }
-            // What waits on you here that is no agent's (a device asking to join, a key, a service's question, a loop it
-            // drafted, a connector asked for, an approval no agent of yours asked for): each a message, its answers under it.
-            item(key = "asks") { rememberWork(app)?.let { work -> NeedsYou(app, work, openTask = openTask, openAll = { waitingShown = true }, watch = { go("mac:$it") }, openConnectors = { go("connectors") }, chat = Primary.HANDLE, flow = true) } }
-            // What is under way from here: each task it gave an agent, a row and a word (a tap opens it, Stop is there); each
-            // look it set itself, a line with Cancel.
-            items(underway.tasks, key = { "u:${it.id}" }) { task -> UnderwayRow(task, table.rows.firstOrNull { it.kind == "agent" && it.id == task.assignee }?.avatar, openTask) }
-            items(underway.looks, key = { "l:${it.id}" }) { look ->
-                LookLine(look) { scope.launch { runCatching { app.client?.post("/api/looks/cancel", Json.obj("id" to look.id)) }; underwayAsked++ } }
-            }
-            // What you queued behind the chat, in a line a tap from it; what became of something you sent.
-            if (queue.isNotEmpty()) item(key = "queued") { QueueLine(queue.size, held, live) { queueShown = true } }
-            notice?.let { (title, detail) -> item(key = "notice") { NoticeLine(title, detail, chat::dismissNotice) } }
-            problem?.let { p -> item { Problem(p) } }
         }
         ChatComposer(app, live, offered = offered)
     }
