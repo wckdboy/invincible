@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { desktopArgv, desktopBriefing, hardwareBriefing, LOOKING } from "./desktop-command.ts";
-import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, beginFor, roundKey, roundNotice, heldModels, looksToNeedAScreen, randomId, redact, SENSITIVE_WORK, taskKindOf, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_GATE_UID_FIRST, VM_GATE_UIDS, VM_GATES, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
+import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamTrailEntry, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, beginFor, roundKey, roundNotice, heldModels, looksToNeedAScreen, randomId, redact, SENSITIVE_WORK, taskKindOf, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_GATE_UID_FIRST, VM_GATE_UIDS, VM_GATES, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
 import { seatVmClearCommand } from "./agent-process.ts";
@@ -26,7 +26,8 @@ export interface TeamRunContext {
   /** A new worker, made by this one (never a field a model supplies): it joins this room unless the room is a
    * direct conversation, and what it then does here spends this same causal budget. */
   recruit(worker: TeamRecruitInput): Agent;
-  emit(progress: string): void;
+  /** A line on its trail; a command's line with the length of all the run showed the model of it (TeamTrailEntry). */
+  emit(progress: string, data?: Pick<TeamTrailEntry, "outputChars">): void;
   /**
    * Before anything that changes something (a message, notes, a task proposed, an agent made, a command in its VM, a
    * connector's action): a reply a planned restart cuts off after this waits for you, instead of being taken up again
@@ -1491,7 +1492,9 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           else if (event.type === "review") proof.review = event.verdict;
           // (A step with nothing to say, a run's end, writes no line: the task's verdict says how it ended.)
           const said = progress(event);
-          if (said) ctx.emit(said);
+          // (A command's line carries the whole of what the model was shown of it, beside its words: the trail cuts them.)
+          if (said && event.type === "observation") ctx.emit(said, { outputChars: event.output.length });
+          else if (said) ctx.emit(said);
           if (steps.on && event.type === "command") steps.command = event.command;
           else if (steps.on && event.type === "observation") keepStep(event.step);
         },

@@ -247,6 +247,9 @@ The run loop is carried and renamed (§10), the most proven part of it:
     tasks that finished then or after (a time needs its zone). The agents' page shows a quiet line per kind
     at a desk's width, never on a phone. It reads the latest finished tasks the node lists, up to 512 less those in
     hand.
+  - A command's line on a task's trail carries `outputChars` (core's `TeamTrailEntry`): the length of all the run
+    showed the model of it, where the trail keeps the line's first 2,000 characters. It's data, not words, and no app
+    says it. `invincible agents trail <task> --json` gives each line as kept, for a script such as the scouts' cost case.
 - **Harnesses:**
   - the native tools loop (the default, measured level with OpenCode);
   - Claude Code, Codex and OpenCode through the key gateway (a run uses your keys without seeing them);

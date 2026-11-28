@@ -382,6 +382,20 @@ test("an agent's next task of a kind begins where its last of that kind was veri
   expect(pinned.record.routing).toBeUndefined();
 });
 
+test("a command's line goes to the trail with the length of all the run showed the model of it, as data beside its words; no other line has one", async () => {
+  const told: { line: string; data?: { outputChars?: number } }[] = [];
+  const f = fixture([say("1. Read the log."), say("```sh\ncat big.log\n```"), say("DONE\nRead it."), say("PASS\nFine.")], {
+    exec: async (_m, command) => (command.includes("cat big.log") ? result({ stdout: "x".repeat(9_000) }) : result()),
+  });
+  expect((await f.runtime.executeTask(member, task, { ...f.context, emit: (line, data) => void told.push({ line, ...(data ? { data } : {}) }) })).verified).toBe(true);
+  const exit = told.find((t) => t.line.startsWith("Exit 0 · exit 0 · 1 ms\nxxx"))!;
+  // The whole of what the model was shown (the loop's own cut of a long output: its head and tail), where the trail
+  // keeps 2,000 characters of the line.
+  expect(exit.data).toEqual({ outputChars: exit.line.length - "Exit 0 · ".length });
+  expect(exit.data!.outputChars!).toBeGreaterThan(8_000);
+  expect(told.filter((t) => t !== exit && t.data)).toEqual([]);
+});
+
 test("work going round on both tiers: you are told at once, a notice of the node's own, and the work goes on; the notice goes as the task ends", async () => {
   const REREADS = 8;
   const read = (file: string) => say(`\`\`\`sh\ncat src/${file}.ts\n\`\`\``);

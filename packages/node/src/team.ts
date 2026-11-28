@@ -753,7 +753,7 @@ export class TeamService {
         this.changed(); this.kick(); return given ?? saved;
       },
       recruit: (worker) => { budget(); const made = this.store.recruit(worker, job.agent, job.room); this.recruited(made); return made; },
-      emit: (progress) => { current(); this.store.progress(job.id, progress); this.changed(); },
+      emit: (progress, data) => { current(); this.store.progress(job.id, progress, data); this.changed(); },
       // A task's run takes what was said to it at its safe points: each once, at the step it reached (a reply takes none).
       // And it goes on on the account its work began on, alone among that vendor's (the rule): kept with the task.
       ...(job.kind === "task"

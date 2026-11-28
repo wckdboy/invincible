@@ -9,6 +9,12 @@ const EDIT = "edit 'packages/link/sync.ts' <<'END'\n-  retry()\n+  resume()\nEND
 const WRITE = "cat > 'packages/link/resume.ts' <<'END'\nexport const resume = 1;\nEND";
 
 describe("a task's work, folded", () => {
+  test("a command's line with the length of all the run showed the model folds as it did without it: the page's words are the same", () => {
+    const lines = trail("Running · cat big.log", "Exit 0 · exit 0 · 12 ms\nxxx", "Running · bun test", "Exit 0 · 4 pass");
+    const counted = lines.map((entry) => (entry.text.startsWith("Exit ") ? { ...entry, outputChars: 8_000 } : entry));
+    expect([stepGroups(counted), workSummary(counted)]).toEqual([stepGroups(lines), workSummary(lines)]);
+  });
+
   test("its folded line says how long its agent worked, and never \"0s\": under half a second, only that it worked", () => {
     expect(workedLine("Ada", 372_000)).toBe("Ada worked for 6m 12s");
     expect(workedLine("Ada", 900)).toBe("Ada worked for 1s");

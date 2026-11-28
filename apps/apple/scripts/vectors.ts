@@ -1615,7 +1615,9 @@ const fullTrail = trailOf([
   [19, "Gate 2/2 · exit 0 · bun run typecheck\n(no output)"],
   [18, "Review · by the same model that did the work (deepseek/deepseek-v4-pro): no other reviewer model could answer"],
   [17, "Review · pass\nThe test covers the drop.\nShip it."],
-]);
+  // (A command's line carries the length of all the run showed the model of it, beside its words: data the apps don't
+  // say. Every app reads this trail with it, and folds it as it did without: the groups and summaries are unchanged.)
+]).map((entry): core.TeamTrailEntry => (entry.text.startsWith("Exit ") ? { ...entry, outputChars: 12 * entry.text.length } : entry));
 const roundsTrail = trailOf([
   [60, "Gates · 1. bun test\n2. bun run typecheck\n3. bun run lint"],
   [59, "Running · bun test"],

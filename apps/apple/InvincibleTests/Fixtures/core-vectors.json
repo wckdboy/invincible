@@ -36557,7 +36557,8 @@
         {
           "n": 6,
           "at": 1763198236000,
-          "text": "Exit 0 · export function sync() {"
+          "text": "Exit 0 · export function sync() {",
+          "outputChars": 396
         },
         {
           "n": 7,
@@ -36567,7 +36568,8 @@
         {
           "n": 8,
           "at": 1763198248000,
-          "text": "Exit 0 · export function resume() {"
+          "text": "Exit 0 · export function resume() {",
+          "outputChars": 420
         },
         {
           "n": 9,
@@ -36577,7 +36579,8 @@
         {
           "n": 10,
           "at": 1763198260000,
-          "text": "Exit 0 · ok"
+          "text": "Exit 0 · ok",
+          "outputChars": 132
         },
         {
           "n": 11,
@@ -36587,7 +36590,8 @@
         {
           "n": 12,
           "at": 1763198326000,
-          "text": "Exit 0 · edited"
+          "text": "Exit 0 · edited",
+          "outputChars": 180
         },
         {
           "n": 13,
@@ -36597,7 +36601,8 @@
         {
           "n": 14,
           "at": 1763198356000,
-          "text": "Exit 0 · written"
+          "text": "Exit 0 · written",
+          "outputChars": 192
         },
         {
           "n": 15,
@@ -36607,7 +36612,8 @@
         {
           "n": 16,
           "at": 1763198440000,
-          "text": "Exit 1 · 1 fail"
+          "text": "Exit 1 · 1 fail",
+          "outputChars": 180
         },
         {
           "n": 17,
@@ -36617,7 +36623,8 @@
         {
           "n": 18,
           "at": 1763198560000,
-          "text": "Exit 0 · 13 pass"
+          "text": "Exit 0 · 13 pass",
+          "outputChars": 192
         },
         {
           "n": 19,
@@ -36627,7 +36634,8 @@
         {
           "n": 20,
           "at": 1763198596000,
-          "text": "Exit 0 · M sync.ts"
+          "text": "Exit 0 · M sync.ts",
+          "outputChars": 216
         },
         {
           "n": 21,

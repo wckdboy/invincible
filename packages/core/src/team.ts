@@ -742,6 +742,12 @@ export interface TeamTrailEntry {
   n: number;
   at: number;
   text: string;
+  /**
+   * A command's line ("Exit …"): the length in characters of all the run showed the model of it (its observation, as the
+   * loop cut a long output), whole, where `text` keeps the trail's first 2,000 of the line. Data, not words: no client
+   * says it, and a reader that doesn't know it reads the line as ever. Absent: any other line, or one from before it.
+   */
+  outputChars?: number;
 }
 
 export interface TeamSnapshot {

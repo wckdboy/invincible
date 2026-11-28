@@ -256,6 +256,27 @@ describe("private team persistence", () => {
     for (let page = store.trail(task.id, last); page.entries.length; page = store.trail(task.id, last)) { last = page.entries.at(-1)!.n; pages++; }
     expect({ last, pages }).toEqual({ last: 702, pages: 3 });
   });
+  test("a command's line keeps the length of all the run showed the model beside it, as data: its words are cut, the length isn't, and no other line has one", () => {
+    const store = make(); setup(store);
+    const task = store.createTask({ room: "workshop", assignee: "ada", title: "Loud", goal: "Print a lot" }); store.claim(task.id);
+    const seen = `exit 0 · 12 ms\n${"x".repeat(7_985)}`;
+    store.progress(task.id, "Running · cat big.log");
+    store.progress(task.id, `Exit 0 · ${seen}`, { outputChars: seen.length });
+    const [command, exit] = store.trail(task.id).entries;
+    expect(Object.keys(command!)).toEqual(["n", "at", "text"]);
+    expect([exit!.outputChars, exit!.text.length <= 2_000, exit!.text.startsWith("Exit 0 · exit 0 · 12 ms\nxxx")]).toEqual([8_000, true, true]);
+    // (The words are as they were: the length is beside them, never in them.)
+    expect(exit!.text).not.toContain("8000");
+  });
+  test("a trail an older node kept (its table without lengths) gains the column, and its lines read as they were", () => {
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-")); dirs.push(dir); const path = join(dir, "team.db");
+    const old = new Database(path);
+    old.exec("CREATE TABLE team_trail (task TEXT NOT NULL, n INTEGER NOT NULL, at INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY(task, n))");
+    old.query("INSERT INTO team_trail(task,n,at,text) VALUES(?,?,?,?)").run("task-oldtrail0001", 1, 5, "Exit 0 · exit 0 · 3 ms\nREADME.md");
+    old.close();
+    const store = make(path);
+    expect(store.trail("task-oldtrail0001").entries.map((e) => [Object.keys(e), e.text])).toEqual([[["n", "at", "text"], "Exit 0 · exit 0 · 3 ms\nREADME.md"]]);
+  });
   test("an agent whose VM has no repository may be given one; from then on it is bound like any other", () => {
     // (Seen on ultra, 14 November 2026: the first agent was made without a repository, and with its VM made it could never have one.)
     const store = make(); setup(store);

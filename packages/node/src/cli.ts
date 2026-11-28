@@ -107,8 +107,11 @@ of its own; "agents" and "team" are the same command)
   agents files <agent> [/work/path]  a folder of its workspace (its VM's /work; primary: its computer's)
   agents read <agent> </work/path>  one file of it (anything like a key redacted)
   agents changes <agent> [--task <id>] [--files]  what its latest task (or that one) changed: files, then the diff
-  agents trail <task-id> [--follow]  what a task did, as it happened: its plan, each command and what it printed,
-                                    the gates, the review; --follow keeps reading until the task has ended
+  agents trail <task-id> [--follow] [--json]
+                                    what a task did, as it happened: its plan, each command and what it printed,
+                                    the gates, the review; --follow keeps reading until the task has ended; --json:
+                                    each line as kept, one JSON object a line, a command's with outputChars (the
+                                    length of all the run showed the model of it)
   agents provision <id> [--on node] [--cpus 1 --mem 2 --disk 20] [--network online|gateway] [--no-desktop|--hardware]
                                     its VM: online (the default) it can reach the internet, gateway only the models;
                                     with a desktop (a display, a browser, a terminal and an editor, at least 4 GB; in

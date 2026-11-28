@@ -1,4 +1,4 @@
-import { beginsByKind, KIND_WORDS, moneyPrices, routingReport, type RoutingReport, type RoutingTally, capLabel, TEAM_LIMITS, interventionWords, agentFromFile, agentToFile, plainLine, plainText, type Prices, type TeamChangesView, type TeamFilesView, type TeamFileView, type RouteName, taskRecordFacts, type TeamModelChoice, type TeamSnapshot, type TeamRoomView, type TeamRoom, type TeamTask, type Agent, type TeamCheckpoint, mergeRepository } from "@invincible/core";
+import { beginsByKind, KIND_WORDS, moneyPrices, routingReport, type RoutingReport, type RoutingTally, capLabel, TEAM_LIMITS, interventionWords, agentFromFile, agentToFile, plainLine, plainText, type Prices, type TeamChangesView, type TeamFilesView, type TeamFileView, type RouteName, taskRecordFacts, type TeamModelChoice, type TeamSnapshot, type TeamTrailEntry, type TeamRoomView, type TeamRoom, type TeamTask, type Agent, type TeamCheckpoint, mergeRepository } from "@invincible/core";
 import { MARK_PALETTE } from "@invincible/core/agent-mark";
 import { GLASS_RAMPS, GLASS_SHAPES, glassOf, readGlassProfile } from "@invincible/core/glass";
 
@@ -59,7 +59,7 @@ export const taskChangesLine = (task: Pick<TeamTask, "changes">): string => (tas
  */
 const yourMoney = (api: Api): Promise<Prices> => api.call<{ prices: Prices; plans?: string[] }>("prices").then((answer) => moneyPrices(answer.prices, answer.plans ?? []), (): Prices => ({}));
 
-const usage = "invincible agents [add <id> | avatar <id> | models <id> [provider/model…] | sensitive <id> [on|off] [provider/model…] | dm <id> [message] | room <name> <member…> | chat <room> [message] | task <room> <assignee> <goal> [--sensitive] [--models provider/model,…] | steps <task-id> | again <task-id> [--from <step>] [goal] | keys <id> [add <secret> [--write] | rm <secret>] | export <id> [--out file.md] | import <file.md> [--id <new id>] [-y] | give <goal> | trail <task-id> [--follow] | routing [<id>] [--since <day or time>] [--json] | provision <id> | memory <id> [text] | engram [on|off] | ci [on|off] | daily [<usd>] | merge <owner/repo> [on|off] | pause|resume|stop <room|agent|task> <id> | approve|decline <task-id> | remove <id> [--destroy-workspace] [--yes]]";
+const usage = "invincible agents [add <id> | avatar <id> | models <id> [provider/model…] | sensitive <id> [on|off] [provider/model…] | dm <id> [message] | room <name> <member…> | chat <room> [message] | task <room> <assignee> <goal> [--sensitive] [--models provider/model,…] | steps <task-id> | again <task-id> [--from <step>] [goal] | keys <id> [add <secret> [--write] | rm <secret>] | export <id> [--out file.md] | import <file.md> [--id <new id>] [-y] | give <goal> | trail <task-id> [--follow] [--json] | routing [<id>] [--since <day or time>] [--json] | provision <id> | memory <id> [text] | engram [on|off] | ci [on|off] | daily [<usd>] | merge <owner/repo> [on|off] | pause|resume|stop <room|agent|task> <id> | approve|decline <task-id> | remove <id> [--destroy-workspace] [--yes]]";
 
 /** Where a group of tasks' work began, in words (core's routingReport keys); one this CLI doesn't know, as it is. */
 const BEGAN_WORDS: Readonly<Record<string, string>> = {
@@ -367,18 +367,19 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     return;
   }
   if (sub === "trail") {
-    // What a task did, as it happened: once, or with --follow until the task has ended.
-    if (!args[0]) throw new Error("usage: invincible agents trail <task-id> [--follow]");
+    // What a task did, as it happened: once, or with --follow until the task has ended. `--json`: each line as it was
+    // kept, one JSON object a line (a command's with outputChars: TeamTrailEntry), and nothing else, for a script.
+    if (!args[0]) throw new Error("usage: invincible agents trail <task-id> [--follow] [--json]");
     const wait = Math.max(1, Number(string("poll-ms") ?? 1000));
     let after = 0;
     for (;;) {
-      const page = await api.call<{ task: { id: string; status: string }; entries: { n: number; at: number; text: string }[]; more: boolean }>("teamTrail", { task: args[0], after });
-      for (const entry of page.entries) print(`${new Date(entry.at).toTimeString().slice(0, 8)}  ${plainText(entry.text).trimEnd().split("\n").join("\n          ")}`);
+      const page = await api.call<{ task: { id: string; status: string }; entries: TeamTrailEntry[]; more: boolean }>("teamTrail", { task: args[0], after });
+      for (const entry of page.entries) print(flags.json ? JSON.stringify(entry) : `${new Date(entry.at).toTimeString().slice(0, 8)}  ${plainText(entry.text).trimEnd().split("\n").join("\n          ")}`);
       after = page.entries.at(-1)?.n ?? after;
       if (page.more) continue;
       const working = page.task.status === "running" || page.task.status === "queued";
-      if (!working) { if (flags.follow) print(`(ended: ${page.task.status})`); return; }
-      if (!flags.follow) { print(`(still ${page.task.status}: invincible agents trail ${page.task.id} --follow)`); return; }
+      if (!working) { if (flags.follow && !flags.json) print(`(ended: ${page.task.status})`); return; }
+      if (!flags.follow) { if (!flags.json) print(`(still ${page.task.status}: invincible agents trail ${page.task.id} --follow)`); return; }
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
   }

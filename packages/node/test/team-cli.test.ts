@@ -490,6 +490,21 @@ test("agents trail prints what a task did as it happened, and --follow keeps rea
   expect(lines).toEqual([`${at(13, 5, 20)}  Exit 0 · exit 0 · 3 ms`, "(ended: failed)"]);
 });
 
+test("`agents trail <task> --json`: each line as kept, one JSON object a line, a command's with the length of all the run showed the model; the words without --json as ever", async () => {
+  const entries = [{ n: 1, at: 1_000, text: "Running · cat big.log" }, { n: 2, at: 2_000, text: "Exit 0 · exit 0 · 12 ms\nxxx", outputChars: 8_000 }];
+  const page = (status: string) => ({ task: { id: "task-abcdefghijkl", status }, entries, more: false });
+  const json: string[] = [];
+  await teamCommand(answering({ teamTrail: page("done") }), "trail", ["task-abcdefghijkl"], { json: true }, (line) => json.push(line));
+  expect(json.map((line) => JSON.parse(line))).toEqual(entries);
+  // Nothing but the lines, even of a task still at work (a script reads them one a line).
+  const running: string[] = [];
+  await teamCommand(answering({ teamTrail: page("running") }), "trail", ["task-abcdefghijkl"], { json: true }, (line) => running.push(line));
+  expect(running).toEqual(json);
+  // Without it, the words as they were: the length is nowhere in them.
+  const said = await printed(answering({ teamTrail: page("done") }), "trail", ["task-abcdefghijkl"]);
+  expect([said.length, said.join("\n").includes("8000")]).toEqual([2, false]);
+});
+
 test("agents give puts a task to the agents: it says who takes it and why, then how the others stood", async () => {
   const lines: string[] = [];
   const asked: { name: RouteName; input: unknown }[] = [];

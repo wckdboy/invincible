@@ -184,6 +184,9 @@ export class TeamStore {
     // A database from before files among the agents: a message of yours may carry some (kept on the node: uploads.ts).
     const fields = new Set(this.db.query<{ name: string }, []>("PRAGMA table_info(team_messages)").all().map((c) => c.name));
     if (!fields.has("attachments")) this.db.exec("ALTER TABLE team_messages ADD COLUMN attachments TEXT");
+    // A trail from before lengths were kept: a command's line gains the length of all the run showed the model (TeamTrailEntry).
+    const trailFields = new Set(this.db.query<{ name: string }, []>("PRAGMA table_info(team_trail)").all().map((c) => c.name));
+    if (!trailFields.has("output_chars")) this.db.exec("ALTER TABLE team_trail ADD COLUMN output_chars INTEGER");
     // When you last looked at each agent's page and each room (`agent:<id>`, `room:<id>`): what ended there after it
     // is new to you. A database from before it counts everything until now as seen.
     const seenBefore = this.db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'team_seen'").get();
@@ -965,14 +968,14 @@ export class TeamStore {
       return true;
     })();
   }
-  progress(key: string, text: string): void {
+  progress(key: string, text: string, line?: Pick<TeamTrailEntry, "outputChars">): void {
     const row = this.jobRow(key);
     if (!row || row.kind !== "task" || row.status !== "running") return;
     const at = this.now();
     const data = { ...JSON.parse(row.data), progress: teamOutput(text, TEAM_LIMITS.progress) };
     this.db.transaction(() => {
       this.db.query("UPDATE team_jobs SET data=?,updated_at=? WHERE id=?").run(JSON.stringify(data), at, key);
-      this.trailLine(key, at, text);
+      this.trailLine(key, at, text, line?.outputChars);
     })();
   }
   /**
@@ -1055,17 +1058,21 @@ export class TeamStore {
   noteTask(key: string, text: string): void {
     if (this.jobRow(key)) this.trailLine(key, this.now(), text);
   }
-  private trailLine(key: string, at: number, text: string): void {
+  private trailLine(key: string, at: number, text: string, outputChars?: number): void {
     const n = (this.db.query<{ n: number | null }, [string]>("SELECT MAX(n) AS n FROM team_trail WHERE task=?").get(key)?.n ?? 0) + 1;
     // (A steer's line is kept whole: its words are what every client says it was told.)
     const limit = text.startsWith("Steered · ") ? Math.max(TRAIL.text, TEAM_LIMITS.steer + 64) : TRAIL.text;
-    this.db.query("INSERT INTO team_trail(task,n,at,text) VALUES(?,?,?,?)").run(key, n, at, teamOutput(text, limit));
+    // (Its whole length, where it is a command's line: a count, never anything of what it said.)
+    const chars = outputChars !== undefined && Number.isSafeInteger(outputChars) && outputChars >= 0 ? outputChars : null;
+    this.db.query("INSERT INTO team_trail(task,n,at,text,output_chars) VALUES(?,?,?,?,?)").run(key, n, at, teamOutput(text, limit), chars);
     if (n > TRAIL.keep) this.db.query("DELETE FROM team_trail WHERE task=? AND n<=?").run(key, n - TRAIL.keep);
   }
   /** What a task did, as it happened: its lines after number `after` (0: from the first kept), a page at a time; `more`: there are further lines. */
   trail(task: string, after = 0): { entries: TeamTrailEntry[]; more: boolean } {
-    const rows = this.db.query<TeamTrailEntry, [string, number, number]>("SELECT n, at, text FROM team_trail WHERE task=? AND n>? ORDER BY n LIMIT ?").all(task, Math.max(0, Math.trunc(after)), TRAIL.page + 1);
-    return { entries: rows.slice(0, TRAIL.page), more: rows.length > TRAIL.page };
+    const rows = this.db.query<{ n: number; at: number; text: string; output_chars: number | null }, [string, number, number]>("SELECT n, at, text, output_chars FROM team_trail WHERE task=? AND n>? ORDER BY n LIMIT ?").all(task, Math.max(0, Math.trunc(after)), TRAIL.page + 1);
+    // (A line with no length kept has no field: as it read before lengths were.)
+    const entries = rows.slice(0, TRAIL.page).map(({ n, at, text, output_chars }): TeamTrailEntry => ({ n, at, text, ...(output_chars === null ? {} : { outputChars: output_chars }) }));
+    return { entries, more: rows.length > TRAIL.page };
   }
   finish(key: string, status: Exclude<TeamWorkStatus, "queued" | "running">, error: string | null = null, result?: { verified: boolean; output: string; record?: TeamTaskRecord; changes?: TeamTaskChanges }): void {
     const row = this.jobRow(key);
