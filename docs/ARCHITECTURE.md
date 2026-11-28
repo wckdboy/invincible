@@ -400,18 +400,18 @@ The run loop is carried and renamed (§10), the most proven part of it:
     dialog as it opens, and closes apps as a person does before it stops them. Light by default (C1 step 10): the
     desktop starts on its first use (a desktop task's as its work begins, beside its first model call, so its cold
     start is behind that call: core's `looksToNeedAScreen`), and stops, as `desktop stop` stops it, after 10 minutes
-    with nothing asked of it, no one holding it and no one watching it; the next command starts it again, and the agent's next command says why its
-    screen is fresh. The VM is made with 2 GB, desktop or not, and grown, live, to 4 GB just before its desktop's first
-    use (the sandbox host's desktopRoom), never made again for it: so an agent that never looks holds of the ceiling
-    what one without a desktop does ([DESKTOP.md](DESKTOP.md)). Beside the pixels, the accessibility
-    tree (AT-SPI): `desktop tree` lists what can be acted on in the window with the focus, and what each field holds
-    (an entry's text, a combo box's chosen option; never a password field's), `desktop find` gives where one is, and
-    `desktop click ref=N` clicks it where it is at that moment. A node keeps its ref from one tree to the next, and a
-    ref whose node is gone fails, so several actions on one tree's refs are safe in one command; `desktop fill` fills
-    a form in one, each field read back before the next, and never sends it. An agent is told to do several actions
-    in one command where each one's target is known before it starts, and to check a form by the tree, not by a
-    look. An agent's model that takes Claude's computer
-    toolset is offered it in the engineer's tool loop: each action is one of its commands, the VM's `desktop` verb of the
+    with nothing asked of it, no one holding it and no one watching it; the next command starts it again, and the
+    agent's next command says why its screen is fresh. The VM is made with 2 GB, desktop or not, and grown, live, to 4
+    GB just before its desktop's first use (the sandbox host's desktopRoom), never made again for it: so an agent that
+    never looks holds of the ceiling what one without a desktop does ([DESKTOP.md](DESKTOP.md)). Beside the pixels,
+    the accessibility tree (AT-SPI): `desktop tree` lists what can be acted on in the window with the focus, and what
+    each field holds (an entry's text, a combo box's chosen option; never a password field's), `desktop find` gives
+    where one is, and `desktop click ref=N` clicks it where it is at that moment. A node keeps its ref from one tree
+    to the next, and a ref whose node is gone fails, so several actions on one tree's refs are safe in one command;
+    `desktop fill` fills a form in one, each field read back before the next, and never sends it. An agent is told to
+    do several actions in one command where each one's target is known before it starts, and to check a form by the
+    tree, not by a look. An agent's model that takes Claude's computer toolset is offered it in the engineer's tool
+    loop: each action is one of its commands, the VM's `desktop` verb of the
     same name; the actions after one that fails aren't run; and a turn that acted ends with what can be acted on, as
     text, then a picture of the screen. Any other model works the desktop by the command: `desktop find`, then `desktop
     tree`, then its eyes (`desktop look`). The eyes' check measures the space they answer places in (the picture's
