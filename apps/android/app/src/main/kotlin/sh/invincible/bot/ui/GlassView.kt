@@ -11,6 +11,7 @@ import android.graphics.Shader
 import android.util.LruCache
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.FloatState
@@ -20,6 +21,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -33,6 +35,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
@@ -71,18 +74,23 @@ fun GlassMark(glass: Glass, size: Dp, state: Glass.State? = null, description: S
     val breath = breathing(glassBreathes(state, live, motionAllowed()))
     val named = if (description != null) Modifier.clearAndSetSemantics { contentDescription = description } else Modifier.clearAndSetSemantics { }
     val ramp = Glass.RAMPS[glass.color]
-    Box(Modifier.size(size).then(named)) {
+    Box(Modifier.size(size).then(named), contentAlignment = Alignment.Center) {
         // Its glow at its fullest, drawn once into a layer the render thread keeps: its breath is that layer's opacity alone
-        // (read only here, so it draws nothing again), the kept picture of it shown more or less strongly.
+        // (read only here, so it draws nothing again), the kept picture of it shown more or less strongly. The layer reaches
+        // GLOW_PAD past the box on each side, so the pool and the shadow are whole: kept in a layer only the box's size, they
+        // were cut square.
         if (glows(size.value, dark)) {
             Canvas(
-                Modifier.matchParentSize().graphicsLayer {
+                Modifier.requiredSize(size * (1 + 2 * GLOW_PAD)).graphicsLayer {
                     compositingStrategy = CompositingStrategy.Offscreen
                     alpha = glowOpacity(size.value, dark, breath.floatValue)
                 },
-            ) { drawGlow(ramp, size.value, dark, state) }
+            ) {
+                val box = this.size.minDimension / (1 + 2 * GLOW_PAD)
+                translate(GLOW_PAD * box, GLOW_PAD * box) { drawGlow(ramp, size.value, dark, state, box) }
+            }
         }
-        Canvas(Modifier.matchParentSize()) { drawPicture(picture, size.value, dark, state) }
+        Canvas(Modifier.matchParentSize()) { drawPicture(picture, size.value, dark, state, this.size.minDimension) }
     }
 }
 
@@ -106,7 +114,7 @@ fun GuardianMark(size: Dp, description: String? = null) {
         if (picture != null) {
             // Lit as an agent's glass is: on a dark page its pool; on a light one the inked glass on nothing, no tile behind it
             // (the owner's word, 27 November 2026: the logo is just the I-beam).
-            if (dark) glow(Glass.PEARL, size.value, dark = true, alpha = glowOpacity(size.value, dark = true, breath = -1f))
+            if (dark) glow(Glass.PEARL, size.value, dark = true, alpha = glowOpacity(size.value, dark = true, breath = -1f), box = this.size.minDimension)
             drawImage(picture.image, Offset(-picture.origin.toFloat(), -picture.origin.toFloat()))
         } else {
             // The bare I-beam in the page's ink: the squircle round it is the launcher icon's alone (the owner's word, 27
@@ -136,6 +144,10 @@ internal object GuardianSetting {
     private fun prefs(context: Context) = (context.applicationContext ?: context).getSharedPreferences("invincible", Context.MODE_PRIVATE)
 }
 
+/** How far past the box, on each side, as a share of it, what a glass draws can reach: its pool (Glow.POOL_SPREAD), its
+ * shadow (Glow.SHADOW_BOTTOM), and its picture's blur all fall inside it. */
+private const val GLOW_PAD = 0.4f
+
 /** Whether a glass this size has a glow on this page: a pool from 24 dp on a dark one, a shadow from 20 dp on a light one. */
 private fun glows(sizeDp: Float, dark: Boolean): Boolean = if (dark) sizeDp >= Glass.Glow.POOL_FROM else sizeDp >= Glass.Glow.SHADOW_FROM
 
@@ -147,36 +159,34 @@ internal fun glowOpacity(sizeDp: Float, dark: Boolean, breath: Float): Float =
 /** Where its state's dot sits, and how far its cut reaches, in the box's pixels. */
 private class DotPlace(val at: Offset, val cut: Float)
 
-private fun DrawScope.dotPlace(sizeDp: Float): DotPlace {
-    val box = size.minDimension
+private fun dotPlace(sizeDp: Float, box: Float): DotPlace {
     val dot = Glass.Dot.size(sizeDp)
     val unit = box / sizeDp
     return DotPlace(Offset(box + (dot.out - dot.size / 2) * unit, box + (dot.out - dot.size / 2) * unit), (dot.size / 2 + dot.cut) * unit)
 }
 
 /** What goes past the box, in a layer its dot's cut is taken out of (with a dot), so the dot sits on nothing. */
-private fun DrawScope.cutForTheDot(sizeDp: Float, state: Glass.State?, draw: DrawScope.() -> Unit) {
+private fun DrawScope.cutForTheDot(sizeDp: Float, state: Glass.State?, box: Float, draw: DrawScope.() -> Unit) {
     if (state == null) return draw()
-    val box = size.minDimension
-    drawContext.canvas.saveLayer(Rect(-box * 0.4f, -box * 0.4f, box * 1.4f, box * 1.4f), Paint())
+    drawContext.canvas.saveLayer(Rect(-box * GLOW_PAD, -box * GLOW_PAD, box * (1 + GLOW_PAD), box * (1 + GLOW_PAD)), Paint())
     draw()
-    val place = dotPlace(sizeDp)
+    val place = dotPlace(sizeDp, box)
     drawCircle(Color.Black, radius = place.cut, center = place.at, blendMode = BlendMode.Clear)
     drawContext.canvas.restore()
 }
 
 /** Its glow at its fullest (its layer's opacity says how strongly it shows), its dot's cut taken out of it. */
-private fun DrawScope.drawGlow(ramp: Glass.Ramp, sizeDp: Float, dark: Boolean, state: Glass.State?) {
-    cutForTheDot(sizeDp, state) { glow(ramp, sizeDp, dark, alpha = 1f) }
+private fun DrawScope.drawGlow(ramp: Glass.Ramp, sizeDp: Float, dark: Boolean, state: Glass.State?, box: Float) {
+    cutForTheDot(sizeDp, state, box) { glow(ramp, sizeDp, dark, alpha = 1f, box = box) }
 }
 
 /** Its picture, its dot's cut taken out of it, then the dot. The picture goes past the box. */
-private fun DrawScope.drawPicture(picture: GlassPictures.Picture, sizeDp: Float, dark: Boolean, state: Glass.State?) {
-    cutForTheDot(sizeDp, state) { drawImage(picture.image, Offset(-picture.origin.toFloat(), -picture.origin.toFloat())) }
+private fun DrawScope.drawPicture(picture: GlassPictures.Picture, sizeDp: Float, dark: Boolean, state: Glass.State?, box: Float) {
+    cutForTheDot(sizeDp, state, box) { drawImage(picture.image, Offset(-picture.origin.toFloat(), -picture.origin.toFloat())) }
     if (state == null) return
-    val at = dotPlace(sizeDp).at
+    val at = dotPlace(sizeDp, box).at
     val dot = Glass.Dot.size(sizeDp)
-    val unit = size.minDimension / sizeDp
+    val unit = box / sizeDp
     val colour = Color(hex(Glass.Dot.COLORS.getValue(state).on(dark)))
     if (state == Glass.State.IDLE) {
         val ring = Glass.Dot.IDLE_RING * unit
@@ -187,9 +197,8 @@ private fun DrawScope.drawPicture(picture: GlassPictures.Picture, sizeDp: Float,
 }
 
 /** A pool of its light behind it on a dark page (from 24 dp), a tinted shadow under it on a light one (from 20 dp), at [alpha]. */
-private fun DrawScope.glow(ramp: Glass.Ramp, sizeDp: Float, dark: Boolean, alpha: Float) {
+private fun DrawScope.glow(ramp: Glass.Ramp, sizeDp: Float, dark: Boolean, alpha: Float, box: Float) {
     val stops = ramp.on(dark)
-    val box = size.minDimension
     if (dark && sizeDp >= Glass.Glow.POOL_FROM) {
         val r = box * (1 + 2 * Glass.Glow.POOL_SPREAD) / 2
         val c = Offset(box / 2, box / 2)
