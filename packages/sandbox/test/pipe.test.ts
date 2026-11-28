@@ -235,6 +235,21 @@ describe("a pipe's end in its VMs (the seventh fabric review's I-c)", () => {
     }
   }, 60_000);
 
+  test("broken twenty times over: no write to a receiving side that is gone is left for nothing to wait for, so none fails later", async () => {
+    // (A write the pipe didn't wait for rejected with EPIPE once its receiving side was gone, outside what the pipe
+    // catches: in a node, "a failure nothing waited for" in its log; here, whichever test was running then failed.)
+    for (let i = 0; i < 20; i++) {
+      const { piped, child } = await brokenPipe();
+      try {
+        expect([i, piped.cut, piped.to.exitCode, piped.from.exitCode]).toEqual([i, false, 0, 137]);
+      } finally {
+        tidy([child]);
+      }
+    }
+    // (One that comes late gets its turn to show here, not in the next test.)
+    await Bun.sleep(200);
+  }, 60_000);
+
   test("a pipe that comes to its end asks no end of either VM", async () => {
     const mark = randomBytes(6).toString("hex");
     const piped = await host().pipe(side("a", `: ${mark}; head -c 100000 /dev/zero`), side("b", `: ${mark}; wc -c`), { timeoutSec: 30, maxBytes: 64 << 20 });

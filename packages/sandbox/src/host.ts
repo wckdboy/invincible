@@ -2246,16 +2246,23 @@ export class SandboxHost {
       let cut = false;
       // Whether what the sending side gave was read to its end (or to the cut, which has ended both already).
       let drained = false;
+      /** The receiving side's client has exited: nothing reads what is carried to it now. */
+      let gone = false;
       const carried = (async () => {
         try {
           for await (const chunk of source.stdout) {
+            // (Once the receiving side is gone, the rest isn't carried, nor counted: a write to its stdin may then go
+            // nowhere without a word, and the sender's output, which the broken pipe's end stops, would count up to a cut.)
+            if (gone) return;
             bytes += chunk.byteLength;
             if (bytes > opts.maxBytes) {
               cut = true;
               end();
               break;
             }
-            sink.stdin.write(chunk);
+            // (Waited for, as its flush is: a write to a receiving side that is gone rejects with EPIPE, which is the
+            // pipe's to catch, never a failure nothing waited for.)
+            await sink.stdin.write(chunk);
             await sink.stdin.flush();
           }
           drained = true;
@@ -2274,6 +2281,7 @@ export class SandboxHost {
       // own VM: the receiver's client exited because its command did. A sender whose output was all read is let finish,
       // however soon after it the receiver exits.
       void sink.exited.then(() => {
+        gone = true;
         if (!drained && source.exitCode === null && source.signalCode === null) endFrom();
       });
       const [fromErr, toOut, toErr, fromCode, toCode] = await Promise.all([readCapped(source.stderr, MAX_OUTPUT), readCapped(sink.stdout, MAX_OUTPUT), readCapped(sink.stderr, MAX_OUTPUT), source.exited, sink.exited, carried]);
