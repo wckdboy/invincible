@@ -402,23 +402,25 @@ function unhidden(text: string): string {
     const plain = percentDecoded(text);
     if (shows(plain)) text = plain;
   }
-  // Wrapped: lines of encoded characters, each but the last the same width (at least 40), the last no wider.
+  // Wrapped: lines of encoded characters, each but the last the same width (at least 40), the last no wider. One pass:
+  // each line is looked at once, and a block is judged once (the second re-check of 28 November 2026, N1: a search that
+  // started again at each line of a block it didn't take held the node's event loop for seconds a line).
   const lines = text.split("\n");
+  const bare = lines.map((line) => line.replace(/\r$/, ""));
+  const encoded = bare.map((line) => ENCODED_LINE.test(line));
   const out: string[] = [];
   for (let i = 0; i < lines.length; ) {
-    const bare = (k: number) => lines[k]!.replace(/\r$/, "");
-    let j = i;
-    while (j < lines.length && ENCODED_LINE.test(bare(j))) j++;
-    const width = bare(i).length;
-    const wrapped = j - i > 1 && width >= 40 && Array.from({ length: j - i - 1 }, (_, k) => bare(i + k).length === width).every(Boolean) && bare(j - 1).length <= width;
-    if (wrapped) {
-      const joined = Array.from({ length: j - i }, (_, k) => bare(i + k)).join("");
-      out.push(...(shows(joined) || decodedAs(joined).some(shows) ? [HIDDEN] : lines.slice(i, j)));
-      i = j;
-    } else {
-      out.push(lines[i]!);
-      i++;
+    const width = bare[i]!.length;
+    let end = i + 1;
+    if (encoded[i] && width >= 40) {
+      while (end < lines.length && encoded[end] && bare[end]!.length === width) end++;
+      if (end < lines.length && encoded[end] && bare[end]!.length < width) end++;
     }
+    if (end - i > 1) {
+      const joined = bare.slice(i, end).join("");
+      out.push(...(shows(joined) || decodedAs(joined).some(shows) ? [HIDDEN] : lines.slice(i, end)));
+    } else out.push(lines[i]!);
+    i = end;
   }
   return out.join("\n").replace(ENCODED_RUN, (run) => (decodedAs(run).some(shows) ? HIDDEN : run));
 }

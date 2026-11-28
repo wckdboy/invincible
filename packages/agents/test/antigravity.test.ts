@@ -419,6 +419,23 @@ describe("Antigravity's sign-in, printed", () => {
     test("wrapped: an ID token at 76 columns, and at 64", () => {
       for (const width of [76, 64]) expect([width, leaked(kept(wrap(ID_TOKEN, width)))]).toEqual([width, []]);
     });
+    // The second re-check of 28 November 2026, N1: that look ran in the node's own process, synchronously, and its search
+    // for wrapped lines started again at each line of a block it didn't take as wrapped, so a run's command could write
+    // lines that held the node's event loop about 47 s for each 2 MB batch read (every vendor tool's driver reads so).
+    test("a run's 2 MB batch of lines reads in a bounded time: the look is one pass over each line, for any shape", () => {
+      const forged = JSON.stringify({ type: "text", text: "a\n".repeat(6600) });
+      const tool = JSON.stringify({ type: "tool", id: "call-1", tool: "run_command", input: "seq", output: "a\n".repeat(2000), ok: true });
+      const wide = JSON.stringify({ type: "text", text: `${"A".repeat(40)}\n`.repeat(450) });
+      const batch = [...Array.from({ length: Math.floor(1_400_000 / forged.length) }, () => forged), ...Array.from({ length: Math.floor(300_000 / tool.length) }, () => tool), ...Array.from({ length: Math.floor(300_000 / wide.length) }, () => wide)];
+      const bytes = batch.reduce((sum, line) => sum + line.length + 1, 0);
+      const from = performance.now();
+      for (const line of batch) ANTIGRAVITY.read(line);
+      const ms = performance.now() - from;
+      expect(bytes).toBeGreaterThan(1_900_000);
+      // (Linear, it takes well under a second on a loaded machine; quadratic, it took about 47 s.)
+      expect([Math.round(bytes / 1000), ms < 5_000]).toEqual([Math.round(bytes / 1000), true]);
+    }, 120_000);
+
     test("what holds none of it comes through as the usual redaction leaves it: a query, commits' ids, a list, a file's base64", () => {
       const harmless = [
         "GET /search?q=a%20b%2Fc&page=2 HTTP/1.1",
