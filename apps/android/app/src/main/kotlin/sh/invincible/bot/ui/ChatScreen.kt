@@ -125,6 +125,10 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
         // scrolled to: the refusal, Try again, Forget this node, as Work and the agents do at their heads.
         val nodeProblem by app.problem.collectAsState()
         sh.invincible.bot.core.refusalShown(nodeProblem)?.let { Refused(app, it) }
+        // A new conversation's welcome, and your kept chats it lists (read as it shows).
+        val welcome = bubbles.isEmpty() && !live && !opening
+        val kept by chat.chats.collectAsState()
+        LaunchedEffect(welcome) { if (welcome) chat.loadChats() }
         LazyColumn(Modifier.weight(1f), state = list) {
             item {
                 Row(Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s2), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s3)) {
@@ -133,21 +137,14 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
                     Text(table.primary.line, style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 }
             }
-            // A new conversation: what you might ask it first (the PWA's welcome's), a press puts it in the message box.
+            // A new conversation: the welcome, as the web's (Welcome.kt): your agent's mark, large, and what it does; what you
+            // might ask it first, a press puts it in the message box; your recent chats and All chats.
             // (Its latest kept chat being read: said so, in place of the welcome, which would only be replaced.)
             if (opening && bubbles.isEmpty()) item { Text("Reading your latest chat…", style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = Space.margin, vertical = Space.s2)) }
-            if (bubbles.isEmpty() && !live && !opening) {
-                item {
-                    androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s2), horizontalArrangement = Arrangement.spacedBy(Space.s2), verticalArrangement = Arrangement.spacedBy(Space.s2)) {
-                        for ((label, words) in SUGGESTIONS) {
-                            androidx.compose.material3.OutlinedButton(
-                                onClick = { offered = (offered?.first ?: 0) + 1 to words },
-                                border = androidx.compose.foundation.BorderStroke(1.dp, LocalBrand.current.line),
-                                modifier = Modifier.heightIn(min = Space.touch),
-                            ) { Text(label) }
-                        }
-                    }
-                }
+            if (welcome) {
+                item(key = "welcome") { WelcomeHero() }
+                item(key = "asks") { WelcomeAsks(SUGGESTIONS) { words -> offered = (offered?.first ?: 0) + 1 to words } }
+                item(key = "recent") { RecentChatsList(kept, open = { chat.open(it) }, all = { listing = true }) }
             }
             // (What needs your answer is counted once: the head above says it, live, so the card leaves its own count out.)
             val awayShown = sh.invincible.bot.core.Away.shown(away, countShown = table.primary.tone == "warn")

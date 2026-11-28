@@ -233,48 +233,58 @@ internal fun choiceLook(choice: String, chosen: String?, offered: Boolean) = Cho
     dashed = !offered,
 )
 
-/** A choice's words: as the web's, a step firmer than the body. */
-private val ChoiceWords = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight(550))
+/** A pill's words: as the web's, a step firmer than the body. */
+private val PillWords = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight(550))
 
 /**
- * Answers to tap, as the web's lighter chips: pills that wrap, each its words on the page's surface in a firm outline; one
- * tapped is sent as your reply, and then none is offered. Without [choose] (an older answer) they're shown, not offered.
+ * A pill to tap, as the web's lighter chips (an answer's choices, a new chat's asks): its words on the page's surface in a
+ * firm outline (the web's --border-strong, a step firmer than a card's hairline), at a thumb's height. Without [onClick]
+ * it is shown, not offered. [inked]: its outline in the ink (the choice made); [faded]: stepped back; [dashed]: an older
+ * answer's, in grey.
+ */
+@Composable
+internal fun Pill(text: String, onClick: (() -> Unit)?, inked: Boolean = false, faded: Boolean = false, dashed: Boolean = false) {
+    val brand = LocalBrand.current
+    val outline = if (brand.paper.luminance() < 0.5f) Color(0xFF2E2E33) else Color(0xFFD4D4D8)
+    val pill = androidx.compose.foundation.shape.CircleShape
+    Box(
+        Modifier
+            .heightIn(min = Space.touch)
+            .let { if (faded) it.then(Modifier.alpha(0.5f)) else it }
+            .clip(pill)
+            .background(MaterialTheme.colorScheme.surface)
+            .then(
+                if (dashed) Modifier.drawBehind {
+                    val inset = 0.5.dp.toPx()
+                    drawRoundRect(
+                        outline,
+                        topLeft = Offset(inset, inset),
+                        size = Size(size.width - 2 * inset, size.height - 2 * inset),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2),
+                        style = Stroke(1.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))),
+                    )
+                } else Modifier.border(1.dp, if (inked) brand.ink else outline, pill),
+            )
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .semantics { if (inked) selected = true }
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(text, style = PillWords, color = if (dashed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+/**
+ * Answers to tap, as the web's lighter chips: pills that wrap; one tapped is sent as your reply, and then none is offered.
+ * Without [choose] (an older answer) they're shown, not offered.
  */
 @Composable
 fun ChoicesBlock(choices: List<String>, choose: ((String) -> Unit)?) {
-    val brand = LocalBrand.current
-    // The web's --border-strong: a pill's outline a step firmer than a card's hairline, on each page.
-    val outline = if (brand.paper.luminance() < 0.5f) Color(0xFF2E2E33) else Color(0xFFD4D4D8)
     var chosen by rememberSaveable(choices) { mutableStateOf<String?>(null) }
     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s2), verticalArrangement = Arrangement.spacedBy(Space.s2)) {
         for (c in choices) {
             val look = choiceLook(c, chosen, offered = choose != null)
-            val pill = androidx.compose.foundation.shape.CircleShape
-            Box(
-                Modifier
-                    .heightIn(min = Space.touch)
-                    .let { if (look.faded) it.then(Modifier.alpha(0.5f)) else it }
-                    .clip(pill)
-                    .background(MaterialTheme.colorScheme.surface)
-                    .then(
-                        if (look.dashed) Modifier.drawBehind {
-                            val inset = 0.5.dp.toPx()
-                            drawRoundRect(
-                                outline,
-                                topLeft = Offset(inset, inset),
-                                size = Size(size.width - 2 * inset, size.height - 2 * inset),
-                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2),
-                                style = Stroke(1.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))),
-                            )
-                        } else Modifier.border(1.dp, if (look.inked) brand.ink else outline, pill),
-                    )
-                    .then(if (look.tappable) Modifier.clickable(role = Role.Button) { chosen = c; choose?.invoke(c) } else Modifier)
-                    .semantics { if (look.inked) selected = true }
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                Text(c, style = ChoiceWords, color = if (look.dashed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
-            }
+            Pill(c, if (look.tappable) ({ chosen = c; choose?.invoke(c) }) else null, inked = look.inked, faded = look.faded, dashed = look.dashed)
         }
     }
 }
