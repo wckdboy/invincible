@@ -122,8 +122,19 @@ import Observation
 
     /// The agents as it is drawn: the node's word, or until it has answered, the kept one.
     private var drawnTeam: TeamSnapshot? { team ?? kept?.team }
-    /// The same, for what is drawn from it beyond the session (Home's times).
-    var drawnSnapshot: TeamSnapshot? { drawnTeam }
+    /// The list's agents and rooms (Home.rows, the web's homeRows): the node's word, or until it has answered, the kept one.
+    var homeRows: [Home.Row] {
+        let now = Date.now.timeIntervalSince1970 * 1000
+        if let team { return Home.rows(snapshot: team, asks: asks, now: now) }
+        return kept.map { Home.rows(snapshot: $0.team, asks: $0.asks, now: now) } ?? []
+    }
+
+    /// What waits on you that is no agent's, your agent's row's count (Roster.primaryNeeds, the web's): the Inbox's count
+    /// less the approvals each agent's own row counts; as kept until the node has answered, nothing until it has.
+    var primaryNeeds: Int {
+        guard inboxLoaded else { return team == nil ? kept?.waiting ?? 0 : 0 }
+        return Roster.primaryNeeds(inbox: inboxCount, asks: asks, agents: drawnTeam?.agents.map(\.id) ?? [])
+    }
 
     /// An agent as the agents draw it (its name, its face): the node's word, or the kept team's until the node
     /// has answered. For drawing alone: an agent's page, and anything you change, take `agent`, the node's word.

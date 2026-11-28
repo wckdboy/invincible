@@ -44,7 +44,6 @@ struct HomeList: View {
     let settings: () -> Void
     let newChat: () -> Void
     @State private var query = ""
-    @State private var desk = DecisionDesk()
     @State private var history = ChatHistory()
     @State private var creating = false
     @State private var push = PushCenter.shared
@@ -125,29 +124,17 @@ struct HomeList: View {
         }
     }
 
-    /// Every row: your agent's first, then the agents' and the rooms' by their latest activity.
+    /// Every row: your agent's pinned first (its line, and what waits on you that is no agent's), then the agents' and the
+    /// rooms' by when each last did something (Home.rows, the web's homeRows).
     private var rows: [Home.Row] {
-        let needs = Self.needs(session.attended.map { desk.decisions(session, $0, go: { _ in }) } ?? [])
         let chat = session.chat
         let latest = chat.thread.turns.last { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }?.content
         let primary = Home.Row(
             kind: .primary, id: Primary.handle, name: Primary.name,
             line: Home.primaryLine(session.primaryWork, latest: latest, title: chat.title),
-            at: nil, needs: needs[Primary.handle] ?? 0, standing: session.primaryStanding
+            at: nil, count: session.primaryNeeds, standing: session.primaryStanding
         )
-        return Home.rows(primary: primary, agents: session.rows, rooms: session.roomRows, snapshot: session.drawnSnapshot, needs: needs)
-    }
-
-    /// What waits on you, by whose chat it waits in: an agent's own decisions in its chat, the rest in your agent's.
-    static func needs(_ decisions: [Decision]) -> [String: Int] {
-        var out: [String: Int] = [:]
-        for decision in decisions {
-            switch decision.lead {
-            case .agent(let id, _): out[id, default: 0] += 1
-            case .symbol: out[Primary.handle, default: 0] += 1
-            }
-        }
-        return out
+        return [primary] + session.homeRows
     }
 
     private func rowButton(_ row: Home.Row) -> some View {
@@ -323,7 +310,8 @@ struct HomeRowView<Face: View>: View {
                     Text(row.name).font(.body.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
                     Spacer(minLength: Space.s2)
                     if let at = row.at {
-                        Text(Home.when(at)).font(.footnote).foregroundStyle(.tertiary).monospacedDigit().lineLimit(1)
+                        // (Said once, as the list is drawn: "now", "4m", "3h", "2d".)
+                        Text(Work.shortSpan(Date.now.timeIntervalSince1970 * 1000 - at)).font(.footnote).foregroundStyle(.tertiary).monospacedDigit().lineLimit(1)
                     }
                 }
                 HStack(alignment: .center, spacing: Space.s2) {
@@ -332,8 +320,8 @@ struct HomeRowView<Face: View>: View {
                         .foregroundStyle(row.standing == .failed ? AnyShapeStyle(Color.danger) : AnyShapeStyle(.secondary))
                         .lineLimit(1)
                     Spacer(minLength: Space.s2)
-                    if row.needs > 0 {
-                        Text("\(row.needs)")
+                    if row.count > 0 {
+                        Text("\(row.count)")
                             .font(.footnote.weight(.bold))
                             .monospacedDigit()
                             .foregroundStyle(Color.onAccent)
@@ -349,7 +337,7 @@ struct HomeRowView<Face: View>: View {
         .frame(minHeight: 64)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.name)
-        .accessibilityValue([row.line, row.needs > 0 ? PrimaryNow.needsYou(row.needs) : nil, row.unread ? "New" : nil].compactMap(\.self).joined(separator: ", "))
+        .accessibilityValue([row.line, row.count > 0 ? PrimaryNow.needsYou(row.count) : nil, row.unread ? "New" : nil].compactMap(\.self).joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
     }
 }
@@ -381,7 +369,7 @@ private struct HomeChatRow: View {
             if chat.unread == true { Circle().fill(Color.ink).frame(width: 7, height: 7).accessibilityLabel("New answer") }
             Text(chat.title).font(.body).foregroundStyle(.primary).lineLimit(1)
             Spacer(minLength: Space.s2)
-            Text(Home.when(chat.updatedAt)).font(.footnote).foregroundStyle(.tertiary).lineLimit(1)
+            Text(Work.shortSpan(Date.now.timeIntervalSince1970 * 1000 - chat.updatedAt)).font(.footnote).foregroundStyle(.tertiary).monospacedDigit().lineLimit(1)
         }
         .frame(minHeight: 44)
         .accessibilityElement(children: .combine)

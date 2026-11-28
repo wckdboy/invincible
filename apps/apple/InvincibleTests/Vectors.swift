@@ -115,6 +115,15 @@ struct Vectors: Decodable {
         let approvalProof: String
     }
 
+    /// A row of the list that is home on a phone (lib/roster.ts homeRows): its key (`person:<handle>`, `room:<id>`), when it
+    /// last did something (ms), and its count for the capsule; in the list's order.
+    struct HomeRow: Decodable, Equatable, CustomStringConvertible {
+        let key: String
+        let at: Double
+        let count: Int
+        var description: String { "\(key)@\(Int(at))#\(count)" }
+    }
+
     struct AgentsSection: Decodable {
         struct Row: Decodable { let id: String; let line: String; let needs: Bool; let expression: String?; let state: String }
         struct Beside: Decodable { let line: String; let state: String; let beside: String }
@@ -127,12 +136,14 @@ struct Vectors: Decodable {
         let besides: [Beside]
         let primary: [Now]
         let needs: [Needs]
+        let home: [HomeRow]
     }
 
     struct Rooms: Decodable {
         struct Row: Decodable { let id: String; let line: String; let needs: Bool }
         let snapshot: TeamSnapshot
         let rows: [Row]
+        let home: [HomeRow]
     }
 
     /// What is new to you among the agents (a snapshot with `seen`): each row, agents then rooms, as the PWA has it.
@@ -140,6 +151,7 @@ struct Vectors: Decodable {
         struct Row: Decodable { let id: String; let kind: String; let line: String; let needs: Bool; let unread: Bool; let state: String? }
         let snapshot: TeamSnapshot
         let rows: [Row]
+        let home: [HomeRow]
     }
 
     struct AgentForms: Decodable {

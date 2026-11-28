@@ -20,44 +20,70 @@ enum Home {
         let name: String
         /// One line of what it is doing, or last did.
         let line: String
-        /// When it last did something (ms); nil where that isn't known.
+        /// When it last did something (ms); nil for your agent's, whose row says no time.
         let at: Double?
-        /// What waits on you there (a room's: only whether something does, as 1).
-        let needs: Int
+        /// What of it waits on you, for its capsule (0: nothing).
+        let count: Int
         let standing: Standing
         /// Something ended there since you last looked: new to you until you open it.
         var unread = false
+
+        /// Its key, as every app orders two at the same moment: `person:<handle>`, `room:<id>`.
+        var key: String { kind == .room ? "room:\(id)" : "person:\(id)" }
     }
 
-    /// The rows, top to bottom: your agent pinned first, then the agents and the rooms, the latest activity first (none
-    /// known: after every known one), ties as the node lists them.
-    static func rows(primary: Row, agents: [RosterRow], rooms: [RoomRow], snapshot: TeamSnapshot?, needs: [String: Int]) -> [Row] {
-        let agentRows: [Row] = agents.map { agent in
-            let at: Double? = snapshot.flatMap { latest(agent: agent.id, room: agent.room, in: $0) }
-            return Row(kind: .agent, id: agent.id, name: agent.name, line: agent.standing.beside(agent.line), at: at, needs: needs[agent.id] ?? 0, standing: agent.standing, unread: agent.unread)
+    /// Every agent and room for the list (the PWA's lib/roster.ts homeRows, held to it by the vectors' agents.home,
+    /// rooms.home and unread.home): each with when it last did something (its work's last move or the last word in its
+    /// conversation; a room's own last word or its work's; an agent that has done nothing yet, when it was made) and its
+    /// count (each approval it asks for and each task proposed to it, a room's proposed in it, else one for anything else
+    /// only you can move on there), the latest first and two at the same moment by their keys, so every app agrees. Your
+    /// agent's own row, pinned above them, is the view's (PrimaryNow, Roster.primaryNeeds).
+    static func rows(snapshot: TeamSnapshot, asks: [Ask], now: Double) -> [Row] {
+        let agents: [Row] = Roster.rows(snapshot: snapshot, asks: asks, now: now).map { row in
+            let jobs = agentJobs(snapshot, row.id)
+            let own = row.room.flatMap { id in snapshot.rooms.first { $0.id == id } }
+            let made = snapshot.agents.first { $0.id == row.id }?.createdAt ?? 0
+            let waits = asks.filter { Roster.agentOfCaller($0.by) == row.id }.count + proposals(jobs)
+            return Row(
+                kind: .agent, id: row.id, name: row.name, line: row.standing.beside(row.line), at: latest(max(made, own?.updatedAt ?? 0), jobs),
+                count: waits > 0 ? waits : (row.needs ? 1 : 0), standing: row.standing, unread: row.unread
+            )
         }
-        let roomRows: [Row] = rooms.map { room in
-            let at: Double? = snapshot?.rooms.first { $0.id == room.id }?.updatedAt
-            return Row(kind: .room, id: room.id, name: room.name, line: room.line, at: at, needs: room.needs ? 1 : 0, standing: room.needs ? .needs : .resting, unread: room.unread)
+        let rooms: [Row] = Roster.roomRows(snapshot: snapshot).map { row in
+            let jobs = roomJobs(snapshot, row.id)
+            let waits = proposals(jobs)
+            let room = snapshot.rooms.first { $0.id == row.id }
+            return Row(
+                kind: .room, id: row.id, name: row.name, line: row.line, at: latest(room?.updatedAt ?? 0, jobs),
+                count: waits > 0 ? waits : (row.needs ? 1 : 0), standing: row.needs ? .needs : .resting, unread: row.unread
+            )
         }
-        let others = agentRows + roomRows
-        let sorted = others.enumerated().sorted { (a: (offset: Int, element: Row), b: (offset: Int, element: Row)) -> Bool in
-            switch (a.element.at, b.element.at) {
-            case let (x?, y?) where x != y: x > y
-            case (.some, nil): true
-            case (nil, .some): false
-            default: a.offset < b.offset
-            }
+        return (agents + rooms).sorted { a, b in
+            let (x, y) = (a.at ?? 0, b.at ?? 0)
+            return x != y ? x > y : a.key < b.key
         }
-        return [primary] + sorted.map(\.element)
     }
 
-    /// When an agent last did something: its tasks' latest change and its own conversation's.
-    static func latest(agent: String, room: String?, in snapshot: TeamSnapshot) -> Double? {
-        var times: [Double] = snapshot.tasks.filter { $0.assignee == agent }.map(\.updatedAt)
-        if let room, let talk = snapshot.rooms.first(where: { $0.id == room })?.updatedAt { times.append(talk) }
-        return times.max()
+    /// One of an agent's or a room's jobs: a task (proposed, or not) or a reply, as far as the list counts them.
+    private struct Job {
+        let updatedAt: Double
+        let proposed: Bool
     }
+
+    /// An agent's work: the tasks given to it, and its replies, wherever they are.
+    private static func agentJobs(_ snapshot: TeamSnapshot, _ id: String) -> [Job] {
+        snapshot.tasks.filter { $0.assignee == id }.map { Job(updatedAt: $0.updatedAt, proposed: $0.status == "proposed") }
+            + snapshot.deliveries.filter { $0.agent == id }.map { Job(updatedAt: $0.updatedAt, proposed: false) }
+    }
+
+    /// A room's work: the tasks given in it, and the replies written there.
+    private static func roomJobs(_ snapshot: TeamSnapshot, _ id: String) -> [Job] {
+        snapshot.tasks.filter { $0.room == id }.map { Job(updatedAt: $0.updatedAt, proposed: $0.status == "proposed") }
+            + snapshot.deliveries.filter { $0.room == id }.map { Job(updatedAt: $0.updatedAt, proposed: false) }
+    }
+
+    private static func latest(_ from: Double, _ jobs: [Job]) -> Double { jobs.reduce(from) { max($0, $1.updatedAt) } }
+    private static func proposals(_ jobs: [Job]) -> Int { jobs.filter(\.proposed).count }
 
     /// Your agent's line: what it is doing (answering, the turns and runs in hand), an answer you haven't read, else the
     /// latest words of your chat with it, or its title. What waits on you is the row's count, never said again here.
@@ -77,20 +103,6 @@ enum Home {
     static func firstLine(_ text: String) -> String {
         let line = text.split(whereSeparator: \.isNewline).first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
         return line.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "#*_`>- "))
-    }
-
-    /// When, as a chat list says it: the time today, "Yesterday", the weekday within the week, else the date.
-    static func when(_ ms: Double, now: Date = .now, calendar: Calendar = .current, locale: Locale = .current) -> String {
-        let date = Date(timeIntervalSince1970: ms / 1000)
-        // (In the calendar's own time zone, as its days are counted.)
-        let style = { (day: Date.FormatStyle.DateStyle, time: Date.FormatStyle.TimeStyle) in
-            Date.FormatStyle(date: day, time: time, locale: locale, calendar: calendar, timeZone: calendar.timeZone)
-        }
-        if calendar.isDate(date, inSameDayAs: now) { return date.formatted(style(.omitted, .shortened)) }
-        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day ?? 0
-        if days == 1 { return "Yesterday" }
-        if days > 1 && days < 7 { return date.formatted(style(.omitted, .omitted).weekday(.wide)) }
-        return date.formatted(style(.numeric, .omitted))
     }
 
     /// The rows whose name or line says these words, your agent kept first; every row when there are none.

@@ -3,43 +3,40 @@ import Testing
 @testable import Invincible
 
 /// Home as a chat app's list (the owner's word of 28 November 2026: Grok Bot's look): your agent pinned first, then the
-/// agents and the rooms by their latest work, each row's line, its time as a chat list says it, and what waits on you in
-/// whose chat.
+/// agents and the rooms as every app orders them (the vectors), your agent's line, search, and what waits on you in whose
+/// chat.
 struct HomeTests {
     let agents = Vectors.shared.agents
 
     private func primary(needs: Int = 0) -> Home.Row {
-        Home.Row(kind: .primary, id: Primary.handle, name: "Your agent", line: "Start a chat", at: nil, needs: needs, standing: .resting)
+        Home.Row(kind: .primary, id: Primary.handle, name: "Your agent", line: "Start a chat", at: nil, count: needs, standing: .resting)
     }
 
-    @Test func yourAgentIsFirstThenTheLatestWorkFirst() throws {
-        let snapshot = agents.snapshot
-        let roster = Roster.rows(snapshot: snapshot, asks: agents.asks, now: agents.now)
-        let rooms = Roster.roomRows(snapshot: snapshot)
-        let rows = Home.rows(primary: primary(), agents: roster, rooms: rooms, snapshot: snapshot, needs: [:])
-        #expect(rows.first?.kind == .primary)
-        #expect(rows.count == 1 + roster.count + rooms.count)
-        // The rest by when each last did something: none known after every known one.
-        let times = rows.dropFirst().map(\.at)
-        let known = times.compactMap(\.self)
-        #expect(known == known.sorted(by: >))
-        if let firstUnknown = times.firstIndex(where: { $0 == nil }) { #expect(times[firstUnknown...].allSatisfy { $0 == nil }) }
-        // An agent's time is its tasks' latest change, or its own conversation's.
-        for row in rows where row.kind == .agent {
-            let latest = snapshot.tasks.filter { $0.assignee == row.id }.map(\.updatedAt).max()
-            if let latest { #expect((row.at ?? 0) >= latest, "\(row.id)") }
+    /// The list as every app holds it (the PWA's lib/roster.ts homeRows, by the vectors' agents.home, rooms.home and
+    /// unread.home): each agent's and room's key, when it last did something and its count, the latest first, two at
+    /// the same moment by their keys.
+    @Test func theListIsTheVectorsRowsInTheirOrder() throws {
+        let vectors = Vectors.shared
+        let cases: [(String, TeamSnapshot, [Ask], [Vectors.HomeRow])] = [
+            ("agents", vectors.agents.snapshot, vectors.agents.asks, vectors.agents.home),
+            ("rooms", vectors.rooms.snapshot, [], vectors.rooms.home),
+            ("unread", vectors.unread.snapshot, [], vectors.unread.home),
+        ]
+        for (name, snapshot, asks, want) in cases {
+            let rows = Home.rows(snapshot: snapshot, asks: asks, now: vectors.agents.now)
+            let got = rows.map { Vectors.HomeRow(key: $0.key, at: $0.at ?? 0, count: $0.count) }
+            #expect(got == want, "\(name): \(got) against \(want)")
         }
     }
 
     #if os(iOS)
-    @MainActor @Test func whatWaitsOnYouIsCountedOnWhoseChatItWaitsIn() {
+    @MainActor @Test func whatWaitsOnYouIsAnsweredInTheChatItWaitsIn() {
         let decisions = [
             Decision(id: "action:a", lead: .agent(id: "builder", avatar: nil), who: "", what: "", answer: nil, rest: [], open: {}),
             Decision(id: "task:t", lead: .agent(id: "builder", avatar: nil), who: "", what: "", answer: nil, rest: [], open: {}),
             Decision(id: "pairing:p", lead: .symbol("iphone"), who: "", what: "", answer: nil, rest: [], open: {}),
             Decision(id: "key:k", lead: .symbol("key"), who: "", what: "", answer: nil, rest: [], open: {}),
         ]
-        #expect(HomeList.needs(decisions) == ["builder": 2, Primary.handle: 2])
         // In a chat: an agent's own approvals (its proposals are answered on its tasks' rows there); everything that is no
         // agent's in your agent's.
         #expect(NeedsCard.mine(decisions, agent: "builder").map(\.id) == ["action:a"])
@@ -60,28 +57,11 @@ struct HomeTests {
         #expect(Home.primaryLine(PrimaryWork(), latest: nil, title: nil) == "Start a chat")
     }
 
-    @Test func aTimeIsSaidAsAChatListSaysIt() throws {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = try #require(TimeZone(identifier: "UTC"))
-        let locale = Locale(identifier: "en_US")
-        let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 28, hour: 15)))
-        let ms = { (date: Date) in date.timeIntervalSince1970 * 1000 }
-        let morning = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 28, hour: 9, minute: 41)))
-        #expect(Home.when(ms(morning), now: now, calendar: calendar, locale: locale).contains("9:41"))
-        let yesterday = try #require(calendar.date(byAdding: .day, value: -1, to: now))
-        #expect(Home.when(ms(yesterday), now: now, calendar: calendar, locale: locale) == "Yesterday")
-        let tuesday = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 24, hour: 10)))
-        #expect(Home.when(ms(tuesday), now: now, calendar: calendar, locale: locale) == "Tuesday")
-        let october = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 2, hour: 10)))
-        #expect(!Home.when(ms(october), now: now, calendar: calendar, locale: locale).isEmpty)
-        #expect(Home.when(ms(october), now: now, calendar: calendar, locale: locale) != "Yesterday")
-    }
-
     @Test func searchFindsRowsByTheirNameOrLineYourAgentAmongThem() {
         let rows = [
             primary(),
-            Home.Row(kind: .agent, id: "builder", name: "Builder", line: "Sync survives a dropped connection", at: 2, needs: 0, standing: .working),
-            Home.Row(kind: .room, id: "room-1", name: "Release", line: "Ops · Ship 0.4", at: 1, needs: 1, standing: .needs),
+            Home.Row(kind: .agent, id: "builder", name: "Builder", line: "Sync survives a dropped connection", at: 2, count: 0, standing: .working),
+            Home.Row(kind: .room, id: "room-1", name: "Release", line: "Ops · Ship 0.4", at: 1, count: 1, standing: .needs),
         ]
         #expect(Home.filter(rows, query: "").count == 3)
         #expect(Home.filter(rows, query: "sync").map(\.id) == ["builder"])

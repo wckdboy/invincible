@@ -64,6 +64,8 @@ struct Agent: Decodable, Sendable, Identifiable {
     let avatar: JSONValue?
     /// Who made it: `owner` (also what its absence means), `primary`, or the agent that did.
     let createdBy: String?
+    /// When it was made (ms): Home's time for an agent that has done nothing yet (an older node says nothing).
+    var createdAt: Double? = nil
     /// Whose words its job is: `owner`, `primary`, or the agent that made it (absent: yours).
     var instructionsBy: String? = nil
     /// Its VM, once it has one; `workspaceNode`, the host chosen for one being made.
