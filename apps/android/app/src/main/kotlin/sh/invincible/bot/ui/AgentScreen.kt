@@ -49,6 +49,7 @@ import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.AgentState
 import sh.invincible.bot.core.NodeError
 import sh.invincible.bot.core.Roster
+import sh.invincible.bot.core.RosterRow
 import sh.invincible.bot.core.Steps
 import sh.invincible.bot.core.TeamTask
 import sh.invincible.bot.core.bool
@@ -98,6 +99,7 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
         title = person?.name ?: id,
         back = back,
         openTask = openTask,
+        barTitle = { AgentBarTitle(id, person?.name ?: id, person?.avatar ?: row?.avatar, row) },
         // Any VM, as the iPhone offers it: one without a desktop says so (the node's refusal) and how to get one.
         actions = {
             if (sandbox != null) {
@@ -133,6 +135,24 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
     if (colouring) person?.let { p -> GlassDialog(app, id, p.name, p.avatar) { colouring = false } }
 }
 
+/**
+ * An agent's page's bar once its head has scrolled away (I10's 16dae258, as the iPhone's): its glass, its state's dot on
+ * it, beside its name, and under the name how it stands, in the needs ink where it needs you. The glass is the one in
+ * focus then, so its light breathes while it works.
+ */
+@Composable
+private fun AgentBarTitle(id: String, name: String, avatar: Json?, row: RosterRow?) {
+    Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+        AgentMarkView(id, avatar, 28.dp, state = AgentMark.state(row?.state), live = true)
+        Column {
+            Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            row?.line?.takeIf { it.isNotBlank() }?.let {
+                Text(it, style = MaterialTheme.typography.labelMedium, color = if (row.needs) LocalBrand.current.needs else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
 /** A room's page: who sits in it, what was said there and its tasks, and a box to write to them all. */
 @Composable
 fun RoomScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) -> Unit = {}) {
@@ -165,7 +185,7 @@ fun RoomScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) -
 /**
  * A conversation's timeline under its [header], oldest first, read again every four seconds while it's open (two while
  * work runs there), and a box to write in; [assignee] offers the same words as a task for that agent instead. The bar
- * above names it ([title]) once the header has scrolled out of sight.
+ * above names it ([title], or [barTitle] where the page draws more than words) once the header has scrolled out of sight.
  */
 @Composable
 private fun Timeline(
@@ -180,6 +200,7 @@ private fun Timeline(
     back: () -> Unit,
     openTask: (String) -> Unit,
     actions: @Composable RowScope.() -> Unit = {},
+    barTitle: (@Composable () -> Unit)? = null,
     header: @Composable () -> Unit,
 ) {
     val table by app.table.collectAsState()
@@ -219,7 +240,7 @@ private fun Timeline(
 
     val headerGone by remember { derivedStateOf { list.firstVisibleItemIndex > 0 } }
     Column(Modifier.fillMaxSize().imePadding()) {
-        PageBar(if (headerGone) title else "", back, actions = actions)
+        PageBar(if (headerGone) title else "", back, actions = actions, titleContent = if (headerGone) barTitle else null)
         LazyColumn(Modifier.weight(1f), state = list, contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = Space.s4)) {
             item { header() }
             problem?.let { item { Problem(it) } }

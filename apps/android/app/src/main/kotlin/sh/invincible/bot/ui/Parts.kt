@@ -85,9 +85,10 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun PageBar(title: String, back: () -> Unit, navigation: (@Composable () -> Unit)? = null, actions: @Composable RowScope.() -> Unit = {}) {
+fun PageBar(title: String, back: () -> Unit, navigation: (@Composable () -> Unit)? = null, actions: @Composable RowScope.() -> Unit = {}, titleContent: (@Composable () -> Unit)? = null) {
     TopAppBar(
-        title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        // (A page may name itself with more than words: an agent's, its glass beside its name.)
+        title = { if (titleContent != null) titleContent() else Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         // (Back, unless the page says otherwise: the primary's conversation, at the root, opens the roster there instead.)
         navigationIcon = navigation ?: { IconButton(onClick = back) { Icon(BackIcon, contentDescription = "Back") } },
         actions = actions,
