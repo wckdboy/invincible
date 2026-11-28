@@ -11,6 +11,7 @@ import { hasDesktop, hasHardware } from "../lib/desktop.ts";
 import { besideChip } from "../lib/agent-state.ts";
 import { keyWords } from "../lib/keys.ts";
 import { rosterRows } from "../lib/roster.ts";
+import { beginLines } from "../lib/routing.ts";
 import { handedFrom, type TaskAction, taskStanding } from "../lib/task-card.ts";
 import { activeTeamWork, engramLine, HARNESS, harnessNote, agentWorksOn, taskDependencies, teamSpeaker, agentMaker, type HarnessStatus } from "../lib/team.ts";
 import { giveAgain, timeline, timelineTasks } from "../lib/timeline.ts";
@@ -356,7 +357,10 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     const table = tableOf(ctx);
     const seated = table.seats.find((one) => one.id === person.id);
     const tasks = snapshot.tasks.filter((task) => task.assignee === person.id).sort((a, b) => b.updatedAt - a.updatedAt);
-    const version = JSON.stringify([person, seated, tasks.map((task) => [task.id, task.title, taskStanding(task).word, relativeTime(task.updatedAt)]), panelOpen()]);
+    // Where its next task of each kind begins (lib/routing.ts, core's rule): from its tasks in the node's own order, as the
+    // node begins them, not the panel's.
+    const begins = beginLines(snapshot.tasks.filter((task) => task.assignee === person.id));
+    const version = JSON.stringify([person, seated, tasks.map((task) => [task.id, task.title, taskStanding(task).word, relativeTime(task.updatedAt)]), begins, panelOpen()]);
     if (version === sideVersion) return;
     sideVersion = version;
     side.setAttribute("aria-label", `${person.name}, beside the timeline`);
@@ -370,6 +374,9 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
           h("div", { class: "team-side-name" }, h("h2", { class: "ellipsis" }, person.name), stateChip(seated?.state)),
           h("p", { class: "meta" }, [agentWorksOn(person), madeBy(person)].filter(Boolean).join(" · ")),
           seated ? h("p", { class: "team-side-line" }, besideChip(seated.line, seated.state)) : null,
+          // Where its next task of each kind begins: a quiet line each, why it begins there on hover. (The side panel is
+          // never on a phone.)
+          ...begins.map((line) => h("p", { class: "meta", title: line.why }, line.text)),
           canEdit
             ? h(
                 "div",
