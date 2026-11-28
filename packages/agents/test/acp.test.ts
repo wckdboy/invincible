@@ -1,9 +1,16 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ACP_BRIDGE, ACP_PROBE, acpDriver } from "../src/acp.ts";
 import { driverFor, OWN_SIGN_IN } from "../src/harnesses.ts";
+
+// Every test here starts the bridge and a stand-in agent as processes of their own, so its time is the machine's to
+// give: "whether the command starts an ACP agent" took 0.5 s on the Mac mini at a load of 59 on 18 cores, ran past
+// bun's 5 s in a full run at a load of 72 to 151 on 12 (27 November 2026), and took 11.4 s with 2 % of a core (what
+// each of about 585 runnable tasks gets of 12), its slowest here. The limit is how long a busy machine may take, never
+// what a test checks.
+setDefaultTimeout(60_000);
 import { HERMES } from "../src/hermes.ts";
 
 /*
