@@ -1400,8 +1400,10 @@ describe("a seat's status", () => {
 describe("a subscription's sign-in never reaches your agent", () => {
   test("no shipped source names where either tool keeps its sign-in, but to tell a seat's tool its own home: nothing reads, copies or moves one", () => {
     // Each tool's sign-in, and the variables that carry one: named nowhere.
-    // (Antigravity's CLI keeps its sign-in in its OS keyring, or in its profile in a file of this name: agy 1.5.18's.)
-    const kept = [".credentials.json", "CLAUDE_CODE_OAUTH", "auth.json", "CODEX_ACCESS_TOKEN", "CODEX_API_KEY", "jetski-standalone-oauth-token"];
+    // (Antigravity's CLI keeps its sign-in in its OS keyring, or with none, as in every VM, in its profile in a file of
+    // the first of these names: agy 1.5.18 reads and writes it there, strace showed on Ultra (the review of 28 November
+    // 2026, L2). The second is in its binary beside it, and is kept here too.)
+    const kept = [".credentials.json", "CLAUDE_CODE_OAUTH", "auth.json", "CODEX_ACCESS_TOKEN", "CODEX_API_KEY", "antigravity-oauth-token", "jetski-standalone-oauth-token"];
     // Where each tool keeps its home: named in one place only, to tell a seat's tool the seat's own home (I15 step 3),
     // as a path under it and nothing else, so no source finds or reads what a tool keeps there.
     const homes = ["CODEX_HOME", "CLAUDE_CONFIG_DIR"];

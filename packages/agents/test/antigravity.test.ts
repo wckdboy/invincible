@@ -31,7 +31,8 @@ const PYTHON = Bun.which("python3")!;
 // Fake, every one: Google's page with its state, and the code that page shows.
 const PAGE = "https://accounts.google.com/o/oauth2/v2/auth?client_id=FAKE-client.apps.googleusercontent.com&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&state=FAKE-state-0000";
 const CODE = "4/0FAKE-code-0000";
-const TOKEN = "jetski-standalone-oauth-token";
+// (Where agy 1.5.18 keeps its sign-in with no keyring, as in every VM: its profile, in a file of this name; strace, on Ultra.)
+const TOKEN = "antigravity-oauth-token";
 
 const AGY_STAND_IN = `#!${PYTHON}
 import json, os, signal, sys, time
