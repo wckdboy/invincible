@@ -1995,10 +1995,17 @@ export function createApp(ctx: AppContext) {
   const stopLedger = ctx.store.onApplied((events, rebuilt) => {
     if (mindCounts.take(events, rebuilt)) liveChanges.poke();
   });
+  // What moves in the background says so as it moves, as the mind's events do: a turn as it begins and ends, a run as it
+  // reports (and an agent's work, each step and each end, through the team service's onChange below). The look is the net
+  // under them, for what only the clock or another node moves.
+  const stopTurns = ctx.turns.onChange(() => liveChanges.poke());
+  const stopRuns = ctx.runs.onChange(() => liveChanges.poke());
   ctx.shutdown?.addEventListener(
     "abort",
     () => {
       stopLedger();
+      stopTurns();
+      stopRuns();
       liveChanges.close();
     },
     { once: true },
@@ -2921,7 +2928,7 @@ export function createApp(ctx: AppContext) {
     team.outcomes = outcomes;
     // What it gives or starts on its own word (TeamService.giveOwn, approveOwn) must fit what is left of your budget past
     // what approved work holds, when you set one, and else its own daily cap (TeamService.ownLeft).
-    ctx.team.service = new TeamService({ store: ctx.team.store, ...runtime, onChange: () => ctx.handoffs?.poke(), answer: answerInRoom, timeoutMs: 15 * 60_000, taskTimeoutMs: null, restartWaitMs: (TEAM_COMMAND_SECONDS + 60) * 1000, budgetLeft: () => ctx.usage.meter(ctx.nodeName, moneyOf(ctx.store)).leftUsd, onRecruit,
+    ctx.team.service = new TeamService({ store: ctx.team.store, ...runtime, onChange: () => { ctx.handoffs?.poke(); liveChanges.poke(); }, answer: answerInRoom, timeoutMs: 15 * 60_000, taskTimeoutMs: null, restartWaitMs: (TEAM_COMMAND_SECONDS + 60) * 1000, budgetLeft: () => ctx.usage.meter(ctx.nodeName, moneyOf(ctx.store)).leftUsd, onRecruit,
       // Another node's task, named by its id: taken up again only while its node and your grant hold, and followed from
       // then by the hand-offs (fabric/handoff.ts; the third re-review's R3-6). With no fabric here, nobody would follow it.
       mayResumeHanded: (task) => (ctx.handoffs ? ctx.handoffs.resumable(task) : "This node's fabric is off: a task another node handed over isn't taken up again here."),
@@ -5304,7 +5311,7 @@ export function createApp(ctx: AppContext) {
       ctx.log(`error ${req.method} ${new URL(req.url).pathname}: ${message}`);
       return json({ error: "internal error" }, 500);
     } finally {
-      // What a request wrote reaches your devices' streams as soon as it is answered (what else changes, within LOOK_MS).
+      // What a request wrote reaches your devices' streams as soon as it is answered (what nothing pokes, within LOOK_MS).
       if (req.method !== "GET" && listener !== "sandbox") liveChanges.poke();
     }
   };

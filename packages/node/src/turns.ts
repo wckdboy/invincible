@@ -223,11 +223,29 @@ export class TurnHub {
   private readonly log: (message: string) => void;
   private prepare: ((conversation: string, queued: Queued) => TurnSpec) | null = null;
   private closed = false;
+  /** Who is told as each turn begins and as each ends (the live stream's `turns`). */
+  private readonly changes = new Set<() => void>();
 
   constructor(private readonly opts: { chats: ChatStore; limits?: Partial<HubLimits>; now?: () => number; log?: (message: string) => void }) {
     this.limit = { ...HUB_LIMITS, ...opts.limits };
     this.now = opts.now ?? Date.now;
     this.log = opts.log ?? (() => {});
+  }
+
+  /** Told as each turn begins and as each ends, until what this returns is called. */
+  onChange(fn: () => void): () => void {
+    this.changes.add(fn);
+    return () => void this.changes.delete(fn);
+  }
+
+  private changed(): void {
+    for (const fn of [...this.changes]) {
+      try {
+        fn();
+      } catch {
+        /* one watcher's trouble is its own */
+      }
+    }
   }
 
   /** How a queued message becomes a turn: every check an ordinary message gets, as whoever queued it stands now. */
@@ -335,6 +353,7 @@ export class TurnHub {
     (turn.timer as { unref?: () => void }).unref?.();
     this.watched(turn);
     void this.run(turn);
+    this.changed();
     return turn;
   }
 
@@ -634,6 +653,7 @@ export class TurnHub {
     turn.endedAt = this.now();
     for (const listener of [...turn.listeners]) listener(null);
     turn.listeners.clear();
+    this.changed();
     // A page coming back a little later still sees how it went; then it's only in the kept chat.
     const gone = setTimeout(() => this.turns.delete(turn.id), this.limit.keepMs);
     (gone as { unref?: () => void }).unref?.();

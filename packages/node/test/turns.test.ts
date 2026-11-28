@@ -111,6 +111,24 @@ function watch(hub: TurnHub, id: string) {
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
 
 describe("a turn the node owns", () => {
+  test("says so as it begins and as it ends (the live stream's turns), as each is already so; a watcher that left is told nothing", async () => {
+    const t = setup();
+    const id = t.chat();
+    const told: string[][] = [];
+    const leave = t.hub.onChange(() => told.push(t.hub.running().map((turn) => turn.state)));
+    const turn = t.hub.start(t.spec(id, "Begin and end."));
+    expect(told).toEqual([["running"]]);
+    t.answers[0]!.say("Done.");
+    t.answers[0]!.end();
+    await turn.ended;
+    expect(told).toEqual([["running"], []]);
+    leave();
+    const next = t.hub.start(t.spec(id, "Again."));
+    t.answers[1]!.end();
+    await next.ended;
+    expect(told).toHaveLength(2);
+  });
+
   test("runs to its end with nobody listening, and is in the kept chat like any other", async () => {
     const t = setup();
     const id = t.chat();

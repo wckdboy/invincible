@@ -3,10 +3,11 @@ import { LIVE_TOPICS, type LiveTopic } from "@invincible/core";
 
 /*
  * What changed on this node, for the live stream (core's live.ts). Each topic has a stamp: a short string that changes
- * whenever its route would answer otherwise, cheap enough to read four times a second. The stamps are read again soon
- * after anything is written (`poke`: the mind took events, a request was answered) and every LOOK_MS while anyone
- * listens, for what changes by itself (an agent's work, a turn's end, a deadline passing). Whoever listens is told the
- * topics whose stamps moved, together, and nothing more. While nobody listens nothing is read.
+ * whenever its route would answer otherwise, cheap enough to read four times a second. The stamps are read again
+ * soon after anything is written (`poke`: the mind took events, a request was answered, an agent's work moved, a turn
+ * began or ended, a run reported) and every LOOK_MS while anyone listens, for what changes by itself (a deadline
+ * passing, a peer coming or going). Whoever listens is told the topics whose stamps moved, together, and nothing more.
+ * While nobody listens nothing is read.
  *
  * Where things stand is a count of the times anything moved since this began, each topic keeping the count at which it
  * last moved. A reader's cursor is the latest count among the topics it may read, sealed (Seal): it moves only with
@@ -17,7 +18,7 @@ import { LIVE_TOPICS, type LiveTopic } from "@invincible/core";
  * again: another key), one past where its reader stands, or one that isn't ours is one it can't answer for.
  */
 
-/** While anyone listens, the stamps are read this often: what no write pokes for (an agent's work, a deadline). */
+/** While anyone listens, the stamps are read this often: for what nothing pokes (a deadline passing, a peer). */
 export const LOOK_MS = 250;
 /** A poke is read this soon after it, so a burst of writes (a decision and its ledger line) is told once. */
 export const SOON_MS = 15;
