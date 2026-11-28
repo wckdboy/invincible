@@ -215,18 +215,22 @@ transport keys carries all of it:
          (`pack-objects`) and taken in the round's VM by that VM's own user (`index-pack`). Each is hashed as it comes,
          and every object of the tree is checked to be there, so the round holds that tree whatever the task's VM did.
          With no repository, the folder's tar is taken instead: each entry must be a file, a folder or a link inside it
-         (no name or link out of it, nothing written through a link, no device, and no `.git` at any level, which git
-         would hash the folder without and a gate's git would obey: the twelfth re-review's I-12a), and its tree is
-         hashed as git hashes it. The store is the round VM's user's: a gate's user reads it and never writes it. A file
-         the task's VM's user can't read fails the round, and says which: nothing is left out unsaid (the ninth
-         re-review's I-2);
+         (no name or link out of it, nothing written through a link, no device, no `.git` at any level, which git would
+         hash the folder without and a gate's git would obey: the twelfth re-review's I-12a, and no folder laid out as a
+         git directory, `HEAD`, `objects` and `refs`, which a gate's git would take for a repository: the thirteenth's
+         I-13a), and its tree is hashed as git hashes it. The store is the round VM's user's: a gate's user reads it and
+         never writes it. A file the task's VM's user can't read fails the round, and says which: nothing is left out
+         unsaid (the ninth re-review's I-2);
        - each gate, each check of the node's on what they judge (the digests of the test files they name) and, with no
          repository, the review's evidence then run there, each as a user of its own that no other of the round's has
          (`gate1`, `gate2` and on, uids 61001 to 61256, named in the VM's `/etc/passwd`, which the node mounts
          read-only; the twelfth re-review's R12-1). A round runs 256 of them at most, and refuses one more. Each runs on
          a copy of that store of its own, in a folder of its own user's alone (0700) in the sticky gates' folder
          (`/gates`), with a HOME and a temporary folder of its own there. It gets nothing of the VM's environment but a
-         PATH of its read-only folders, and of the login profiles only the image's own (`/etc/profile`);
+         PATH of its read-only folders, and of the login profiles only the image's own (`/etc/profile`). Its git takes
+         no bare repository it isn't named (`safe.bareRepository=explicit`, from its environment, which no repository's
+         config overrides) and looks for none above its copy (`GIT_CEILING_DIRECTORIES`), so a tree laid out as a git
+         directory, or a `.git` planted in the gates' folder, is never its repository (I-13a);
        - and nothing a gate before it left reaches it.
          - A gate's command runs the task's code as that gate's user (its test, say), and that code may leave anything
            running. The re-reviews found four kinds: a process that ended the gate's helper (the ninth's R9-2); a thread

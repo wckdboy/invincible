@@ -918,8 +918,9 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
         taken by the round VM's own user (`index-pack`), each hashed as it comes, and every object of the tree is
         checked to be there. With no repository, the folder's tar is taken: files, folders and links inside it alone,
         nothing written through a link, no `.git` at any level (the twelfth re-review's I-12a: git hashed the folder
-        without it, and a gate's `git status` in its copy ran its `core.fsmonitor`), and its tree hashed. The store is
-        that user's: a gate's user reads it and never writes it.
+        without it, and a gate's `git status` in its copy ran its `core.fsmonitor`), no folder laid out as a git
+        directory (`HEAD`, `objects` and `refs`: the thirteenth's I-13a, the same through a bare layout), and its tree
+        hashed. The store is that user's: a gate's user reads it and never writes it.
       - Each gate, each check of the node's on what they judge and, with no repository, the review's evidence then run
         there, each as a user of its own that no other of the round's has (`gate1` on, uids 61001 to 61256, named in an
         `/etc/passwd` and `/etc/group` the node writes from the image's and mounts read-only; at most 256 a round, and
@@ -927,7 +928,9 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
         a folder of its user's alone (0700) in the sticky gates' folder (`/gates`, 1777), with a HOME and temporary
         folder of its own there, `env -i` but a PATH of the VM's read-only folders, and of the login profiles only the
         image's own `/etc/profile` (`spec.test.ts`, `gate-users.test.ts`, `team-runtime.test.ts`,
-        `handed-repo.test.ts`).
+        `handed-repo.test.ts`). Its git takes no bare repository it isn't named (`safe.bareRepository=explicit`) and
+        looks for none above its copy (`GIT_CEILING_DIRECTORIES`), both from its environment, which no repository's
+        config overrides (I-13a, `handed-process.test.ts`).
       - So nothing a gate's run of the task's code leaves reaches a later gate: no process of one gate's user can trace,
         signal, read or write anything of another's. The kernel refuses a trace or a signal across users without a
         capability, which no process of the round's VM has or can gain (no capability, no-new-privileges), and each copy

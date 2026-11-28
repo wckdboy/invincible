@@ -1084,6 +1084,41 @@ describe("the round of another node's task's gates: its tree, its store, and eac
     }
   });
 
+  /*
+   * The thirteenth review's I-13a (zz-r13-folder-bare): a folder laid out as a bare git directory (HEAD, objects, refs, and
+   * a config naming core.worktree and core.fsmonitor), with no .git anywhere, was taken, and each gate's copy held it;
+   * a gate's `git status` there took the tree itself for a repository and ran what its config named. Now a folder laid
+   * out so, at its top or below, is refused as it is taken (and a gate's git takes no such repository: handed-process).
+   */
+  test("I-13a: with no repository, a folder laid out as a git directory, at its top or below, is refused as it is taken", () => {
+    for (const at of ["", "sub", "sub/deeper"]) {
+      const folder = temp("handed-folder-");
+      writeFileSync(join(folder, "app.txt"), "one\n");
+      const ran = join(temp("handed-ran-"), "FSMONITOR-RAN");
+      const dir = join(folder, ...at.split("/").filter(Boolean));
+      mkdirSync(join(dir, "objects", "info"), { recursive: true });
+      mkdirSync(join(dir, "refs", "heads"), { recursive: true });
+      writeFileSync(join(dir, "objects", "info", "keep"), "");
+      writeFileSync(join(dir, "refs", "heads", "keep"), "");
+      writeFileSync(join(dir, "HEAD"), "ref: refs/heads/main\n");
+      writeFileSync(join(dir, "config"), `[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = .\n\tfsmonitor = touch ${ran}; false\n`);
+      const r = given(folder, "");
+      expect([at, r.take.status]).toEqual([at, 0]);
+      // (Before: taken, and a gate's git in its copy, with nothing of this machine's own config, ran what its config names.)
+      if (r.kept.status === 0) {
+        const { on } = r.copy(r.kept.stdout.trim(), "folder");
+        sh(`cd ${q(join(on, "tree", ...at.split("/").filter(Boolean)))} && env -i PATH="$PATH" HOME=${q(join(on, "home"))} git status --porcelain`);
+      }
+      expect([at, r.kept.status, r.kept.stderr.trim()]).toEqual([at, 1, `its folder could not be taken: ${at || "its top"} is laid out as a git directory (HEAD, objects and refs), which a folder's gates never take`]);
+      expect([at, existsSync(ran)]).toEqual([at, false]);
+    }
+    // (A folder that holds only some of those names is an ordinary one.)
+    const some = temp("handed-folder-");
+    mkdirSync(join(some, "objects"));
+    writeFileSync(join(some, "HEAD"), "a file called HEAD\n");
+    expect(given(some, "").kept.status).toBe(0);
+  });
+
   test("with no repository, a file its VM's user can't read is no part left out: the round's tree, and so its gates, fail and say which (the ninth review's I-2)", () => {
     const folder = temp("handed-folder-");
     writeFileSync(join(folder, "report.md"), "the report\n");

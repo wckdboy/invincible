@@ -174,7 +174,10 @@ def run(mode, task, limit, command, on=""):
                 # And the node's install cache, where its round's VM has it (core's VM_BUN_CACHE, read-only, named in that VM's
                 # own environment as the node made it): bun takes its packages from there.
                 cache = {"BUN_INSTALL_CACHE_DIR": "/cache/bun"} if os.environ.get("BUN_INSTALL_CACHE_DIR") == "/cache/bun" else {}
-                os.execve("/bin/bash", ["bash", "--noprofile", "--norc", "-c", GATE_PATH + command], {"PATH": held_path(), "HOME": os.path.join(on, "home"), "TMPDIR": os.path.join(on, "tmp"), "LANG": "C.UTF-8", **cache})
+                # Its git takes no bare repository it isn't named (a tree laid out as one: the thirteenth fabric review's
+                # I-13a), and looks for none above its copy: from its environment, which no repository's config overrides.
+                git = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "safe.bareRepository", "GIT_CONFIG_VALUE_0": "explicit", "GIT_CEILING_DIRECTORIES": on}
+                os.execve("/bin/bash", ["bash", "--noprofile", "--norc", "-c", GATE_PATH + command], {"PATH": held_path(), "HOME": os.path.join(on, "home"), "TMPDIR": os.path.join(on, "tmp"), "LANG": "C.UTF-8", **cache, **git})
             os.execvp("bash", ["bash", "-c", command])
         except BaseException as e:
             try:

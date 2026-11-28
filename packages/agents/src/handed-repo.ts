@@ -587,8 +587,8 @@ sys.stdout.flush()`;
  * (`index-pack`), and every object of `tree` checked to be there: the store holds that tree, whatever the task's VM did.
  * With none (`tree` ""), its folder's tar, each entry a file, a folder or a link inside it and nothing else (no name out of
  * it, nothing written through a link, no device or set-id bit, and no .git at any level: the twelfth fabric re-review's
- * I-12a), each link then checked to resolve inside it, and its tree as git hashes it. It prints that tree. (Python 3.9's,
- * as the Macs that test it have: no tar filter of its own.)
+ * I-12a), each link then checked to resolve inside it, no folder laid out as a git directory (I-13a), and its tree as git
+ * hashes it. It prints that tree. (Python 3.9's, as the Macs that test it have: no tar filter of its own.)
  */
 const ROUND_STORE_SCRIPT = `import stat, tarfile
 store, tree = sys.argv[1], sys.argv[2]
@@ -647,6 +647,12 @@ else:
     for name, to in links:
         if os.path.isabs(to) or not within(os.path.join(folder, *name.split('/'))):
             sys.exit('its tree has a link out of it, ' + name + ' -> ' + to + ': its gates run on the tree alone')
+    # (Nor a folder laid out as a git directory, at any level: a gate's git would take it for a repository, and obey its
+    # config. The thirteenth fabric re-review's I-13a.)
+    for here, dirs, files in os.walk(folder):
+        if {'head', 'objects', 'refs'} <= {n.lower() for n in dirs + files}:
+            rel = os.path.relpath(here, folder)
+            sys.exit('its folder could not be taken: ' + ('its top' if rel == '.' else rel[:200]) + " is laid out as a git directory (HEAD, objects and refs), which a folder's gates never take")
     hashed = {'GIT_DIR': objects, 'GIT_INDEX_FILE': os.path.join(store, 'index'), 'GIT_WORK_TREE': folder}
     r = ran('init', '-q', '--bare', '--template=', objects)
     if not r.returncode: r = ran('-c', 'core.bare=false', 'add', '-A', '--force', '.', extra=hashed, cwd=folder)

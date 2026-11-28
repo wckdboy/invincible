@@ -394,6 +394,46 @@ test("a gate on its copy runs in the copy's tree, its HOME and TMPDIR the copy's
   }
 });
 
+/*
+ * The thirteenth fabric review's I-13a (zz-r13-folder-bare): a gate's git took its copy's tree for a repository when the
+ * tree was laid out as a bare git directory, and obeyed its config (core.worktree, core.fsmonitor). Now a gate's git takes
+ * no bare repository it isn't named (safe.bareRepository=explicit, from its environment, which no repository's config
+ * overrides), and looks for none above its copy (GIT_CEILING_DIRECTORIES).
+ */
+test("a gate's git takes no repository it wasn't given: a bare layout as its tree, or a repository above its copy, runs nothing of its config (I-13a)", () => {
+  const s = scratch();
+  // (Where what a config names would leave its mark: outside the copy.)
+  const marks = scratch();
+  try {
+    const on = realpathSync(s.path(""));
+    for (const sub of ["tree", "home", "tmp"]) mkdirSync(join(on, sub));
+    const gate = (command: string) => spawnSync("python3", ["-I", "-c", `${HANDED_PROCESS_PY}\nsys.exit(run("gate", "task-test", 20.0, sys.argv[1], sys.argv[2]))`, command, on], { encoding: "utf8", timeout: 30_000, env: { ...process.env } });
+    // Its tree laid out as a bare git directory, whose config makes the tree its work tree and names a command.
+    const bare = marks.path("BARE-RAN");
+    mkdirSync(join(on, "tree", "objects", "info"), { recursive: true });
+    mkdirSync(join(on, "tree", "refs", "heads"), { recursive: true });
+    writeFileSync(join(on, "tree", "HEAD"), "ref: refs/heads/main\n");
+    writeFileSync(join(on, "tree", "config"), `[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = .\n\tfsmonitor = touch ${bare}; false\n`);
+    const one = gate("git status --porcelain; echo \"git $?\"");
+    expect(existsSync(bare)).toBe(false);
+    expect(one.stdout.trim().split("\n").at(-1)).not.toBe("git 0");
+    expect(one.stderr).toContain("safe.bareRepository");
+    // A repository above its copy, whose config names a command: never looked for.
+    for (const name of ["HEAD", "config"]) rmSync(join(on, "tree", name));
+    for (const name of ["objects", "refs"]) rmSync(join(on, "tree", name), { recursive: true });
+    const above = marks.path("ABOVE-RAN");
+    expect(spawnSync("git", ["init", "-q", on], { encoding: "utf8" }).status).toBe(0);
+    expect(spawnSync("git", ["-C", on, "config", "core.fsmonitor", `touch ${above}; false`], { encoding: "utf8" }).status).toBe(0);
+    const two = gate("git status --porcelain; echo \"git $?\"");
+    expect(existsSync(above)).toBe(false);
+    expect(two.stdout.trim().split("\n").at(-1)).not.toBe("git 0");
+    expect(two.stderr).toContain("not a git repository");
+  } finally {
+    s.done();
+    marks.done();
+  }
+});
+
 /* A node coming back after a crash, or after its own stop cut a task's end off, ends what that task left running in its
  * agent's VM (the third re-review's R3-5): the lists of tasks that have ended, and no other. */
 test("what tasks that have ended left running is ended as the node comes back; an open task's list, and a name that isn't a task's, are left alone", async () => {
