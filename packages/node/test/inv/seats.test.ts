@@ -19,6 +19,8 @@ import { testIo } from "./fixtures.ts";
 const flags = (over: Partial<Flags> = {}): Flags => ({ json: false, stream: false, wait: false, noAsk: false, gate: [], forTask: false, needsYou: false, working: false, done: false, week: false, forget: false, help: false, ...over });
 const ID = `st_${"a".repeat(22)}`;
 const ATTEMPT = `sa_${"b".repeat(22)}`;
+/** A code of the shape Google's callback page shows ("4/0A" and 69 more), fake: made here, never anyone's (the review's H2: a short one hid that the node refused a real one). */
+const GOOGLE_CODE = `4/0A${Array.from({ length: 69 }, (_, i) => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[(i * 37 + 11) % 64]).join("")}`;
 const seatOf = (over: Partial<SeatView> = {}): SeatView => ({ id: ID, kind: "claude-subscription", vendor: "anthropic", label: "Claude 1", node: "n_node", provider: null, runs: 1, plan: null, method: null, state: { is: "signed-out", why: "never" }, windows: [], serves: [], ...over });
 
 /** This node's team: Ada and Bo, each as its team made them. */
@@ -84,11 +86,11 @@ describe("inv seat add", () => {
   test("a Gemini plan: the risk Google's terms put on your account said first, Google's page, then the code its last page shows read here", async () => {
     const google: SeatSignInCard = { attempt: ATTEMPT, seat: ID, kind: "paste-code", url: "https://accounts.google.com/o/oauth2/v2/auth?state=FAKE", until: 1 };
     const n = node([], google);
-    const io = { ...testIo({}), readLine: async (prompt: string) => (prompt === "Paste the code it shows: " ? "  4/0FAKE-code-0000  " : null) };
+    const io = { ...testIo({}), readLine: async (prompt: string) => (prompt === "Paste the code it shows: " ? `  ${GOOGLE_CODE}  ` : null) };
     expect(await seatCommand(n.conn, ["add", "gemini"], flags(), io)).toBe(EXIT.ok);
     expect(n.asked.find((a) => a.name === "addSeat")?.input).toEqual({ kind: "google-antigravity", label: "Gemini 1" });
     expect(io.stdout()).toContain("Google's Antigravity terms call reaching it through another tool, as Invincible does, a breach that may get your Antigravity and Gemini CLI accounts suspended: you chose this on 27 November 2026, accepting that risk to your Google account.\nOpen https://accounts.google.com/o/oauth2/v2/auth?state=FAKE and sign in to the account this seat is for.\n");
-    expect(n.asked.filter((a) => a.name === "answerSeatSignIn").map((a) => a.input)).toEqual([{ id: ID, attempt: ATTEMPT, code: "4/0FAKE-code-0000" }]);
+    expect(n.asked.filter((a) => a.name === "answerSeatSignIn").map((a) => a.input)).toEqual([{ id: ID, attempt: ATTEMPT, code: GOOGLE_CODE }]);
   });
 
   test("a kind a node of the fleet can't read yet: the node's words, which node to update first, and nothing signed in", async () => {

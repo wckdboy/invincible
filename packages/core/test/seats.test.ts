@@ -27,6 +27,7 @@ import {
   seatServes,
   servedBy,
   SeatSignInAnswerInput,
+  codeTokenShaped,
   SeatSignInCancelInput,
   seatState,
   seatVendor,
@@ -34,7 +35,6 @@ import {
   SHARED_RUNS_PROVEN,
   signInUrlOk,
   tokenShaped,
-  codeTokenShaped,
 } from "../src/seats.ts";
 
 /*
@@ -85,6 +85,8 @@ const fakeBytes = (seed: number, n: number): Uint8Array => {
  * R5: base64url of 32 random bytes, 43 characters), of fake bytes.
  */
 const claudeState = (seed: number): string => Buffer.from(fakeBytes(seed, 32)).toString("base64url");
+/** A code of the shape Google's callback page shows (antigravity.google/oauth-callback): "4/0A" and about 69 more. */
+const GOOGLE_CODE = `4/0A${fakeRun(4, 69)}`;
 
 const facts = (over: Partial<SeatFacts> = {}): SeatFacts => ({
   id: ID,
@@ -195,6 +197,19 @@ describe("the inputs", () => {
     const refused = [`sk-ant-oat01-${fakeRun(5, 40)}#${state}`, `${github}#${state}`, `FAKEcode0000#${github}`, signed, state, `FAKEcode0000#${state.slice(1)}`, `FAKEcode0000#${state}A`];
     for (const code of refused) expect([code.slice(0, 16), answer(code).success]).toEqual([code.slice(0, 16), false]);
     expect(refused.map(codeTokenShaped)).toEqual(["an Anthropic key or token", "GitHub token", "GitHub token", "a signed token", "high-entropy token", "high-entropy token", "high-entropy token"]);
+  });
+
+  test("the code Google's page shows, of its real shape, is taken: random by design, it is no token; a key or a token in that shape still isn't (the review's H2)", () => {
+    const answer = (code: string) => SeatSignInAnswerInput.safeParse({ id: ID, attempt: ATTEMPT, code });
+    // The scanner's high-entropy rule is what refused it: no Gemini seat could be signed in.
+    expect(tokenShaped(GOOGLE_CODE)).toBe("high-entropy token");
+    expect([answer(GOOGLE_CODE).success, answer("4/0FAKE-code-0000").success]).toEqual([true, true]);
+    // Still refused: an Anthropic key, and a key the scanner knows by name, in a code's shape; a signed token; and a
+    // long random run of no code's shape at all.
+    const signed = `${Buffer.from('{"alg":"RS256"}').toString("base64url")}.${Buffer.from('{"sub":"0"}').toString("base64url")}.${fakeRun(8, 40)}`;
+    const refused = [`4/sk-ant-oat01-${fakeRun(5, 40)}`, `4/ghp_${fakeRun(6, 36).replace(/[-_]/g, "F")}`, signed, fakeRun(7, 48)];
+    for (const code of refused) expect([code.slice(0, 14), answer(code).success]).toEqual([code.slice(0, 14), false]);
+    expect(refused.map(codeTokenShaped)).toEqual(["an Anthropic key or token", "GitHub token", "a signed token", "high-entropy token"]);
   });
 });
 

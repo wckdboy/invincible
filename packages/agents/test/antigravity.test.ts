@@ -30,7 +30,8 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 const PYTHON = Bun.which("python3")!;
 // Fake, every one: Google's page with its state, and the code that page shows.
 const PAGE = "https://accounts.google.com/o/oauth2/v2/auth?client_id=FAKE-client.apps.googleusercontent.com&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&state=FAKE-state-0000";
-const CODE = "4/0FAKE-code-0000";
+/** A code of the shape Google's callback page shows ("4/0A" and 69 more), fake: made here, never anyone's (the review's H2: a short one hid that the node refused a real one). */
+const CODE = `4/0A${Array.from({ length: 69 }, (_, i) => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[(i * 37 + 11) % 64]).join("")}`;
 // (Where agy 1.5.18 keeps its sign-in with no keyring, as in every VM: its profile, in a file of this name; strace, on Ultra.)
 const TOKEN = "antigravity-oauth-token";
 

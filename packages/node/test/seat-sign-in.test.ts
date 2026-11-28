@@ -217,7 +217,8 @@ describe("a ChatGPT seat's sign-in, by Codex's device code", () => {
  */
 describe("an Antigravity seat's sign-in, Google's to finish", () => {
   const GOOGLE = "https://accounts.google.com/o/oauth2/v2/auth?client_id=FAKE-client.apps.googleusercontent.com&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&state=FAKE-state-0000";
-  const GOOGLE_CODE = "4/0FAKE-code-0000";
+  /** A code of the shape Google's callback page shows ("4/0A" and 69 more), fake: made here, never anyone's (the review's H2: a short one hid that the node refused a real one). */
+  const GOOGLE_CODE = `4/0A${Array.from({ length: 69 }, (_, i) => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[(i * 37 + 11) % 64]).join("")}`;
 
   test("Google's page on the card, its code to agy once, then ready as agy says: no account's fingerprint, nothing of it in the log", async () => {
     const n = node({ status: { type: "status", signedIn: true, version: "1.5.18" } });
