@@ -4825,10 +4825,12 @@ export function createApp(ctx: AppContext) {
     // Seats (seats.ts): yours alone to add, set and remove, from a terminal or a device of yours; their homes on this node,
     // each serving the agents of this node's you chose, as its team made them (one you removed is no longer one of them).
     // (And this node's seats' use lately, from its agents' tasks: the meter.)
+    // A seat of a kind this release doesn't know, a later release's, is said apart (core's UnknownSeat): shown, never used.
     seats: () => {
       const seats = seatViews(ctx.store);
       const here = seats.filter((seat) => seat.node === ctx.identity.id);
-      return { seats, use: seatUse(here, ctx.team?.store.tasks() ?? [], (id) => seatRuns.runs(id), Date.now()) };
+      const unknown = ctx.store.unknownSeats();
+      return { seats, use: seatUse(here, ctx.team?.store.tasks() ?? [], (id) => seatRuns.runs(id), Date.now()), ...(unknown.length ? { unknown } : {}) };
     },
     addSeat: (input, p) => {
       if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can add a seat");

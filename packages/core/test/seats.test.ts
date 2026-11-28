@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { Bodies } from "../src/events.ts";
 import {
   accountSeat,
   chooseSeat,
   HOMED_KINDS,
   mayCarryOn,
+  readSeatKind,
+  readSignInMethod,
   readsSeatKind,
   SEATS_READ,
   seatKindBehind,
@@ -318,6 +321,35 @@ describe("which nodes can read a seat of a kind", () => {
     expect(seatKindBehind("google-antigravity", [older, newer])).toBe("Update mini first: it runs a release that doesn't know Gemini plans");
     // A node that has said nothing at all yet (no profile) is behind too.
     expect(seatKindBehind("google-antigravity", [older, { id: "n_new", name: "studio", caps: null }])).toBe("Update mini and studio first: they run a release that doesn't know Gemini plans");
+  });
+});
+
+/*
+ * A seat of a kind a later release brings, as a replica of this one reads it (the lead's word, 27 November 2026): in the
+ * log a seat's kind and its sign-in's method are words, so none is refused, nor holds back what its node writes after
+ * it; read here as a kind or a method this release doesn't know. What a route takes is a kind it knows, as ever.
+ */
+describe("a kind a later release brings", () => {
+  const NODE = `n_${"a".repeat(43)}`;
+  const ID = `st_${"0".repeat(22)}`;
+  const added = (kind: string) => Bodies["seat.added"].safeParse({ id: ID, kind, label: "Cursor 1", node: NODE, runs: 1 }).success;
+  const ended = (method: string) => Bodies["seat.signin"].safeParse({ id: ID, phase: "ended", outcome: "ready", method }).success;
+
+  test("its seat.added is taken, a kind as one word; read as no kind this release knows", () => {
+    for (const kind of SEAT_KINDS) expect([kind, added(kind), readSeatKind(kind)]).toEqual([kind, true, kind]);
+    expect([added("cursor-plan"), readSeatKind("cursor-plan")]).toEqual([true, null]);
+    // One word, short: never two, never a flag, never anything a token could hide in.
+    for (const kind of ["Cursor Plan", "cursor plan", "--tools", "cursor_plan", "1-plan", "", "x".repeat(41)]) expect([kind, added(kind)]).toEqual([kind, false]);
+    // A route adds only a kind this release knows.
+    expect(SeatAddInput.safeParse({ kind: "cursor-plan", label: "Cursor 1" }).success).toBe(false);
+    expect(SeatAddInput.safeParse({ kind: "google-antigravity", label: "Gemini 1" }).success).toBe(true);
+  });
+
+  test("its sign-in, in its tool's word: taken, and read as no method this release knows", () => {
+    for (const method of ["claude.ai", "api_key", "api-key", "signed in"]) expect([method, ended(method), readSignInMethod(method)]).toEqual([method, true, method]);
+    expect([ended("cursor"), readSignInMethod("cursor")]).toEqual([true, null]);
+    expect(readSignInMethod(undefined)).toBeNull();
+    for (const method of ["Bearer abc", "-x", "", "x".repeat(33)]) expect([method, ended(method)]).toEqual([method, false]);
   });
 });
 

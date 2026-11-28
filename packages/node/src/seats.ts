@@ -62,7 +62,8 @@ export function addSeat(store: LedgerStore, vault: Vault, node: NodeIdentity, in
   const others = store.devices().filter((device) => device.kind === "node" && device.id !== node.id);
   const behind = seatKindBehind(input.kind, others.map((device) => ({ id: device.id, name: device.name, caps: device.profile?.caps ?? null })));
   if (behind) throw new SeatError(behind, 409);
-  if (store.seats().length >= MAX_SEATS) throw new SeatError(`you may keep at most ${MAX_SEATS} seats: remove one first`, 400);
+  // (A seat of a kind this release doesn't know counts too: its node, whose release knows it, counts it.)
+  if (store.seats().length + store.unknownSeats().length >= MAX_SEATS) throw new SeatError(`you may keep at most ${MAX_SEATS} seats: remove one first`, 400);
   const serves = input.agent ? asMade(roster, [input.agent]) : [];
   if (input.provider) {
     const provider = providerRecords(store).find((p) => p.id === input.provider);

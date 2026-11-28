@@ -258,6 +258,11 @@ The run loop is carried and renamed (§10), the most proven part of it:
     reads (`caps.seats`, core's `SEATS_READ`, as `caps.requests` says which requests it reads); one that says nothing is
     older and reads the first six alone. The add is refused (409) naming the nodes to update first ("Update mini first:
     it runs a release that doesn't know Gemini plans"), before anything is written (`seatKindBehind`);
+  - a seat of a kind a replica doesn't know, a later release's, is kept, never refused: in the log a seat's kind and its
+    sign-in's method are words (`SeatKindWord`, `SignInMethodWord`), so no replica holds back what its node writes after
+    it. It is shown as "a kind this version doesn't know" (the ledger's `unknownSeats`, the seats listing's `unknown`)
+    and used for nothing there: never chosen for work, signed in, set or given agents; a method word it doesn't know is
+    read as none. A release that knows the kind replays the seats it kept, so what was refused of it is decided anew;
   - a subscription seat's sign-in lives in its own home on its node, made there by the vendor's own tool in the vendor's
     own flow. The node never reads its files: only the tool's own status command, and five things of what it says;
   - in the ledger (`seat.added`, `seat.policy`, `seat.serves`, `seat.removed` on your word alone; `seat.signin`,

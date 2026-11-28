@@ -39848,6 +39848,10 @@
         "how": "in the vault"
       }
     },
+    "unknownKind": {
+      "name": "A kind this version doesn't know",
+      "how": "update this node to see how it stands"
+    },
     "quickLabels": [
       {
         "have": [],

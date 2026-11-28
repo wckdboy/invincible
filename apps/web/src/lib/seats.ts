@@ -21,6 +21,9 @@ export const SEAT_KIND_WORDS: Readonly<Record<SeatKind, { name: string; how: str
   api: { name: "API key", how: "in the vault" },
 };
 
+/** A seat of a kind this version doesn't know (core's UnknownSeat), a later release's: shown, and used for nothing here. */
+export const UNKNOWN_KIND_WORDS = { name: "A kind this version doesn't know", how: "update this node to see how it stands" } as const;
+
 /** The kinds added in one tap, each signed in at once. */
 export const QUICK_ADDS: readonly { kind: SeatKind; button: string; name: string }[] = [
   { kind: "claude-subscription", button: "Add a Claude plan", name: "Claude" },

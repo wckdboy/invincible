@@ -1,5 +1,5 @@
-import { plainLine, type SeatKind, type SeatSignInCard, type SeatUse, type SeatView, type TeamSnapshot } from "@invincible/core";
-import { cardWords, quickLabel, seatMeterWords, seatStateWords, servesChoiceWords, servesWords, USE_ELSEWHERE } from "../../../../apps/web/src/lib/seats.ts";
+import { plainLine, type SeatKind, type SeatSignInCard, type SeatUse, type SeatView, type TeamSnapshot, type UnknownSeat } from "@invincible/core";
+import { cardWords, quickLabel, seatMeterWords, seatStateWords, servesChoiceWords, servesWords, UNKNOWN_KIND_WORDS, USE_ELSEWHERE } from "../../../../apps/web/src/lib/seats.ts";
 import { CliError, EXIT, usageError } from "./exit.ts";
 import type { Command, Io } from "./io.ts";
 
@@ -51,12 +51,12 @@ const servedNow = (seat: SeatView, roster: Roster): string[] => {
 export const seatsCommand: Command = async (conn, args, flags, io) => {
   if (args.length) throw usageError("usage: inv seats [--json]");
   const { client } = await conn();
-  const { seats, use } = await client.call<{ seats: SeatView[]; use?: Record<string, SeatUse> }>("seats");
+  const { seats, use, unknown = [] } = await client.call<{ seats: SeatView[]; use?: Record<string, SeatUse>; unknown?: UnknownSeat[] }>("seats");
   if (flags.json) {
-    io.out(`${JSON.stringify(use ? { seats, use } : { seats })}\n`);
+    io.out(`${JSON.stringify({ seats, ...(use ? { use } : {}), ...(unknown.length ? { unknown } : {}) })}\n`);
     return EXIT.ok;
   }
-  if (!seats.length) {
+  if (!seats.length && !unknown.length) {
     io.out("No seats yet: inv seat add claude, inv seat add chatgpt, or inv seat add gemini.\n");
     return EXIT.ok;
   }
@@ -69,6 +69,8 @@ export const seatsCommand: Command = async (conn, args, flags, io) => {
     const elsewhere = USE_ELSEWHERE[seat.kind];
     if (elsewhere) io.out(`    ${elsewhere.words} (${elsewhere.url})\n`);
   }
+  // (A later release's kind: named, and nothing to do with it from here.)
+  for (const seat of unknown) io.out(`${plainLine(seat.label)}  ${UNKNOWN_KIND_WORDS.name} (${UNKNOWN_KIND_WORDS.how})  ${seat.id}\n`);
   return EXIT.ok;
 };
 

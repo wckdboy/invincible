@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { RouteName, SeatSignInCard, SeatUse, SeatView } from "@invincible/core";
+import type { RouteName, SeatSignInCard, SeatUse, SeatView, UnknownSeat } from "@invincible/core";
 import type { NodeClient } from "../../src/inv/client.ts";
 import type { Connection } from "../../src/inv/connect.ts";
 import { refusal } from "../../src/inv/client.ts";
@@ -26,7 +26,7 @@ const TEAM = { agents: [{ id: "ada", name: "Ada", createdAt: 1_000, harness: "cl
 const made = (id: string) => TEAM.agents.find((agent) => agent.id === id)!.createdAt;
 
 /** A node with these seats; what it was asked, in order; how a sign-in goes (its card, and the state it ends in). */
-function node(seats: SeatView[], card: SeatSignInCard, ends: SeatView["state"] = { is: "ready", renewBy: null }, use?: Record<string, SeatUse>) {
+function node(seats: SeatView[], card: SeatSignInCard, ends: SeatView["state"] = { is: "ready", renewBy: null }, use?: Record<string, SeatUse>, unknown?: UnknownSeat[]) {
   const asked: { name: RouteName; input: unknown }[] = [];
   let looks = 0;
   const client: NodeClient = {
@@ -36,7 +36,7 @@ function node(seats: SeatView[], card: SeatSignInCard, ends: SeatView["state"] =
       if (name === "seats") {
         // Signing in for a look or two, then as it ended.
         const signing = asked.some((a) => a.name === "startSeatSignIn") && looks++ < 2;
-        return { seats: seats.map((seat) => ({ ...seat, ...(asked.some((a) => a.name === "startSeatSignIn") ? { state: signing ? { is: "signing-in", attempt: ATTEMPT, since: 0, until: 1 } : ends, plan: "max" } : {}) })), ...(use ? { use } : {}) } as T;
+        return { seats: seats.map((seat) => ({ ...seat, ...(asked.some((a) => a.name === "startSeatSignIn") ? { state: signing ? { is: "signing-in", attempt: ATTEMPT, since: 0, until: 1 } : ends, plan: "max" } : {}) })), ...(use ? { use } : {}), ...(unknown ? { unknown } : {}) } as T;
       }
       if (name === "addSeat") {
         const { kind, label, agent } = input as { kind: SeatView["kind"]; label: string; agent?: string };
@@ -129,6 +129,22 @@ describe("inv seats, sign-in and remove", () => {
     const none = testIo({});
     await seatsCommand(node([], PASTE).conn, [], flags(), none);
     expect(none.stdout()).toBe("No seats yet: inv seat add claude, inv seat add chatgpt, or inv seat add gemini.\n");
+  });
+
+  test("a seat of a kind this version doesn't know, a later release's, is said after the rest by its name, with nothing to do; --json carries it", async () => {
+    const later: UnknownSeat[] = [{ id: `st_${"c".repeat(22)}`, kind: "cursor-plan", label: "Cursor 1", node: "n_node", addedAt: 1 }];
+    const line = `Cursor 1  A kind this version doesn't know (update this node to see how it stands)  st_${"c".repeat(22)}\n`;
+    const n = node([seatOf({ label: "Work Max", plan: "max", state: { is: "ready", renewBy: null } })], PASTE, undefined, undefined, later);
+    const io = testIo({});
+    expect(await seatsCommand(n.conn, [], flags(), io)).toBe(EXIT.ok);
+    expect(io.stdout()).toBe(`Work Max  anthropic  Signed in · Max  ${ID}  Serves no agent yet\n${line}`);
+    const json = testIo({});
+    expect(await seatsCommand(n.conn, [], flags({ json: true }), json)).toBe(EXIT.ok);
+    expect(JSON.parse(json.stdout()).unknown).toEqual(later);
+    // Seats of such a kind alone are seats all the same: never "No seats yet".
+    const only = testIo({});
+    expect(await seatsCommand(node([], PASTE, undefined, undefined, later).conn, [], flags(), only)).toBe(EXIT.ok);
+    expect(only.stdout()).toBe(line);
   });
 
   test("a seat by its label or its id: signed in again, or removed with its sign-in", async () => {

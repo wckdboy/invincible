@@ -22,11 +22,14 @@ import {
   type OrderTerms,
   parseEvent,
   type Prov,
+  readSeatKind,
+  readSignInMethod,
   type Scope,
   type SeatAgent,
   type SeatFacts,
   type SeatSignInBody,
   type SeatWindowBody,
+  type UnknownSeat,
   SetHash,
   sha256B64u,
   signEvent,
@@ -1311,11 +1314,15 @@ export class LedgerStore {
         if (!isFullNode(signer)) return "only full nodes may record seats";
         if (event.prov?.trust !== "owner") return "a seat is yours alone to set";
         const id = bodyOf(event, event.kind).id;
-        const seat = this.lww<{ kind: SeatFacts["kind"] }>(`seat:${id}`)?.value;
+        const seat = this.lww<{ kind: string }>(`seat:${id}`)?.value;
         if (!seat) return "no such seat";
         if (event.kind === "seat.removed") this.putLww(`seat:${id}`, event, null);
         else if (event.kind === "seat.serves") {
-          if (!HOMED_KINDS.includes(seat.kind)) return "only a seat with a home of its own serves agents";
+          // (A kind this release doesn't know, a later release's, serves none here: a release that knows it replays the
+          // seats it kept, as SCHEMA_VERSION's steps do, and so decides this anew.)
+          const kind = readSeatKind(seat.kind);
+          if (!kind) return "a seat of a kind this version doesn't know serves no agents here";
+          if (!HOMED_KINDS.includes(kind)) return "only a seat with a home of its own serves agents";
           this.putLww(`seat-serves:${id}`, event, bodyOf(event, "seat.serves").agents as Json);
         } else this.putLww(`seat-policy:${id}`, event, bodyOf(event, "seat.policy").runs);
         return null;
@@ -1614,16 +1621,19 @@ export class LedgerStore {
       list.push({ window: window.window, status: window.status, usedPercent: window.usedPercent ?? null, resetsAt: window.resetsAt ?? null, at: decodeHlc(entry.hlc).ms });
       windows.set(window.id, list);
     }
-    return this.lwwPrefix<{ id: string; kind: SeatFacts["kind"]; label: string; node: string; provider?: string; runs: number }>("seat:")
-      .map((entry): SeatFacts => {
+    // (Of the kinds this release knows: one it doesn't is kept, and listed by unknownSeats alone, so nothing here uses it.)
+    return this.lwwPrefix<{ id: string; kind: string; label: string; node: string; provider?: string; runs: number }>("seat:")
+      .flatMap((entry): SeatFacts[] => {
         const added = entry.value!;
+        const kind = readSeatKind(added.kind);
+        if (!kind) return [];
         const sign = this.lww<SeatSignInBody>(`seat-signin:${added.id}`);
         const rest = this.lww<{ until: number; window?: string }>(`seat-rest:${added.id}`);
         const signedAt = sign ? decodeHlc(sign.hlc).ms : 0;
         const said = sign?.value ?? null;
-        return {
+        return [{
           id: added.id,
-          kind: added.kind,
+          kind,
           label: added.label,
           node: added.node,
           provider: added.provider ?? null,
@@ -1633,14 +1643,22 @@ export class LedgerStore {
             ? null
             : said.phase === "started"
               ? { phase: "started", attempt: said.attempt, at: signedAt }
-              : { phase: "ended", attempt: said.attempt ?? null, outcome: said.outcome, method: said.method ?? null, plan: said.plan ?? null, renewBy: said.renewBy ?? null, at: signedAt },
+              : { phase: "ended", attempt: said.attempt ?? null, outcome: said.outcome, method: readSignInMethod(said.method), plan: said.plan ?? null, renewBy: said.renewBy ?? null, at: signedAt },
           account: this.lww<string>(`seat-account:${added.id}`)?.value ?? null,
           // (The newest few: a seat's node names its windows, and a list of them stays short.)
           windows: (windows.get(added.id) ?? []).sort((a, b) => b.at - a.at || a.window.localeCompare(b.window)).slice(0, 8),
           rest: rest?.value ? { until: rest.value.until, window: rest.value.window ?? null, at: decodeHlc(rest.hlc).ms } : null,
           serves: this.lww<SeatAgent[]>(`seat-serves:${added.id}`)?.value ?? [],
-        };
+        }];
       })
+      .sort((a, b) => a.addedAt - b.addedAt || a.id.localeCompare(b.id));
+  }
+
+  /** The seats of a kind this release doesn't know (core's UnknownSeat): a later release's, kept as they were said, to be shown. */
+  unknownSeats(): UnknownSeat[] {
+    return this.lwwPrefix<{ id: string; kind: string; label: string; node: string }>("seat:")
+      .filter((entry) => readSeatKind(entry.value!.kind) === null)
+      .map((entry) => ({ id: entry.value!.id, kind: entry.value!.kind, label: entry.value!.label, node: entry.value!.node, addedAt: decodeHlc(entry.hlc).ms }))
       .sort((a, b) => a.addedAt - b.addedAt || a.id.localeCompare(b.id));
   }
 

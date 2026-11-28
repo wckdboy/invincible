@@ -1,9 +1,9 @@
 import type { TeamSnapshot } from "@invincible/core/team";
 import { HOMED_KINDS, SEAT_HARNESS, servedBy } from "@invincible/core/seat-agents";
-import type { SeatSignInCard, SeatUse, SeatView } from "@invincible/core/seats";
+import type { SeatSignInCard, SeatUse, SeatView, UnknownSeat } from "@invincible/core/seats";
 import { ApiError } from "../api.ts";
 import { errorMessage, type View } from "../context.ts";
-import { cardWords, QUICK_ADDS, quickAgent, quickLabel, SEAT_KIND_WORDS, seatMeterWords, seatStateWords, servesChoiceWords, servesWords, signInAction, USE_ELSEWHERE } from "../lib/seats.ts";
+import { cardWords, QUICK_ADDS, quickAgent, quickLabel, SEAT_KIND_WORDS, seatMeterWords, seatStateWords, servesChoiceWords, servesWords, signInAction, UNKNOWN_KIND_WORDS, USE_ELSEWHERE } from "../lib/seats.ts";
 import { HARNESS } from "../lib/team.ts";
 import { badge, busy, button, callout, card, errorState, list, listRow, note, pageBody, pageHead, section, skeletonRows } from "../ui/controls.ts";
 import { confirmAction, openSheet } from "../ui/dialog.ts";
@@ -27,6 +27,8 @@ export const seatsView: View = (root, ctx, { scope }) => {
   const listBox = h("div", {}, card({ flush: true }, skeletonRows(2)));
   const cardBox = h("div", { class: "stack" });
   let seats: SeatView[] = [];
+  /** Those of a kind this version doesn't know, a later release's: shown under the rest, with nothing to do. */
+  let unknown: UnknownSeat[] = [];
   /** This node's agents, as its team lists them (null: not to be read here). Only a seat whose home is on this node serves them. */
   let roster: TeamSnapshot["agents"] | null = null;
   /** This node's seats' use lately, by id (the meter: core's SeatUse). */
@@ -45,6 +47,11 @@ export const seatsView: View = (root, ctx, { scope }) => {
     pageHead("Seats", "The accounts you hold with Claude, ChatGPT and others, each signed in on its vendor's own page. Each serves one agent of yours (a new one, the first on its tool that has none), and agents share one only when you say so. A running task never moves to a second account of the same vendor.", adds),
     pageBody(cardBox, section("Your seats", {}, listBox), note("Invincible never signs in for you and never holds a sign-in: the vendor's own tool keeps it in the seat's home on this node, and says only whether it is signed in, how, its plan, and when its sign-in ends.")),
   );
+
+  /** A seat of a kind this version doesn't know: its name, and that this node is updated to see how it stands. */
+  function unknownRow(seat: UnknownSeat): HTMLElement {
+    return listRow({ lead: "user", leadTone: "neutral", title: seat.label, sub: `${UNKNOWN_KIND_WORDS.name} · ${UNKNOWN_KIND_WORDS.how}`, key: `seat:${seat.id}` });
+  }
 
   function row(seat: SeatView): HTMLElement {
     const now = Date.now();
@@ -117,10 +124,11 @@ export const seatsView: View = (root, ctx, { scope }) => {
 
   async function refresh(): Promise<void> {
     try {
-      const [listed, team] = await Promise.all([ctx.api.get<{ seats: SeatView[]; use?: Record<string, SeatUse> }>("/api/seats", scope.signal), yours ? ctx.api.get<TeamSnapshot>("/api/team", scope.signal).catch(() => null) : null]);
+      const [listed, team] = await Promise.all([ctx.api.get<{ seats: SeatView[]; use?: Record<string, SeatUse>; unknown?: UnknownSeat[] }>("/api/seats", scope.signal), yours ? ctx.api.get<TeamSnapshot>("/api/team", scope.signal).catch(() => null) : null]);
       if (scope.disposed) return;
       seats = listed.seats;
       use = listed.use ?? {};
+      unknown = listed.unknown ?? [];
       roster = team?.agents ?? null;
       // Its sign-in ended (ready, or not): the card goes, and the list says how.
       if (signing && seats.find((seat) => seat.id === signing!.card.seat)?.state.is !== "signing-in") {
@@ -130,7 +138,7 @@ export const seatsView: View = (root, ctx, { scope }) => {
         drawCard();
         stopPolling();
       }
-      replace(listBox, list(seats.map(row), { empty: { icon: "user", title: "No seats yet", body: yours ? "Add a Claude, ChatGPT or Gemini plan: it signs in on its vendor's page." : "The owner adds them." } }));
+      replace(listBox, list([...seats.map(row), ...unknown.map(unknownRow)], { empty: { icon: "user", title: "No seats yet", body: yours ? "Add a Claude, ChatGPT or Gemini plan: it signs in on its vendor's page." : "The owner adds them." } }));
     } catch (error) {
       if (!scope.disposed) replace(listBox, errorState("The seats can't be read", error, () => void refresh()));
     }

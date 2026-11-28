@@ -11,7 +11,7 @@ import { RuleName } from "./rules.ts";
 import { Scope } from "./scopes.ts";
 import { SkillId, SkillVersionId } from "./skills-input.ts";
 import { EvalId, EvalRecord, EvalRunId } from "./evals.ts";
-import { SEAT_LIMITS, SeatId, SeatKind, SeatSignInBody, SeatWindowBody, SeatWindowName } from "./seats.ts";
+import { SEAT_LIMITS, SeatId, SeatKindWord, SeatSignInBody, SeatWindowBody, SeatWindowName } from "./seats.ts";
 import { WORD_NONCE } from "./words.ts";
 
 /** How hard a model thinks for an answer (Anthropic's `effort`; other providers' models choose for themselves). */
@@ -360,11 +360,12 @@ export const Bodies = {
    * by no other.
    * None carries a sign-in's address, its code or a token, and a seat's email is in the vault. The last writer wins.
    * (Checked here only by length and alphabet, as every body is: the routes refuse anything shaped like a token, and a
-   * newer scanner must never make a replica refuse an event an older one took.)
+   * newer scanner must never make a replica refuse an event an older one took. So too a seat's kind and its sign-in's
+   * method are words here: a later release's are kept, and read as a kind or a method this release doesn't know.)
    */
   "seat.added": z.strictObject({
     id: SeatId,
-    kind: SeatKind,
+    kind: SeatKindWord,
     label: z.string().min(1).max(SEAT_LIMITS.label),
     node: DeviceRef,
     provider: Name.optional(),

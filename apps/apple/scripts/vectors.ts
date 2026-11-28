@@ -23,7 +23,7 @@ import { detectProvider, detectSignIn, planLine, providerSetup } from "../../web
 import { desktopAddress, screenPoint, shotSource } from "../../web/src/lib/desktop.ts";
 import { againIn, BEHIND, BEHIND_TIMES, BEHIND_WITHIN_MS, behindAgain, behindTooOften, chunkOf, codecOf, holdEnds, LIVE_TRIES } from "../../web/src/lib/desktop-stream.ts";
 import { bitsOf, readStrip, STRIP } from "../../../bench/desktop/glass-clock.ts";
-import { cardWords, quickLabel, SEAT_KIND_WORDS, seatMeterWords, seatStateWords, seatUseWords, seatWindowWords, servesChoiceWords, servesWords, signInAction, USE_ELSEWHERE } from "../../web/src/lib/seats.ts";
+import { cardWords, quickLabel, SEAT_KIND_WORDS, seatMeterWords, seatStateWords, seatUseWords, seatWindowWords, servesChoiceWords, servesWords, signInAction, UNKNOWN_KIND_WORDS, USE_ELSEWHERE } from "../../web/src/lib/seats.ts";
 import { DATA_GLYPHS, dataGlyph, GLYPH_LADDER, AGENT_SPHERE, agentArcs, orbSphere, paperShades, SPHERE_FLASH, SPHERE_TURN, sphereFrame, sphereGlyph, spherePoints, sphereShades } from "../../web/src/lib/orb-sphere.ts";
 import { ORB_TONES, orbLevel, orbPalette, orbParts, orbToneOfState } from "../../web/src/lib/orb.ts";
 import { AURUM, FIELD_KEY, FIELD_RIM, fieldAt, fieldBuffer, fieldLight, fieldModel, linear, project, shadeLit, type FieldColours, type FieldOptions } from "../../web/src/lib/field.ts";
@@ -1933,6 +1933,9 @@ const seatUses: (core.SeatUse | undefined)[] = [undefined, { since: SEAT_NOW, ta
 const seats = {
   now: SEAT_NOW,
   kinds: SEAT_KIND_WORDS,
+  // A seat of a kind this version doesn't know (core's UnknownSeat), a later release's: what is said of it. A Seats
+  // screen reads a seat's kind leniently and says these, never a failed screen (the lead's word, 27 November 2026).
+  unknownKind: UNKNOWN_KIND_WORDS,
   quickLabels: [[], [{ label: "Claude 1" }, { label: "Claude 3" }]].map((have) => ({ have, claude: quickLabel("claude-subscription", have), chatgpt: quickLabel("chatgpt-codex", have) })),
   states: seatStates.map((state) => ({ state, plan: "max", words: seatStateWords(state, "max", SEAT_NOW), action: signInAction({ kind: "claude-subscription", state }, SEAT_NOW) })),
   serves: [

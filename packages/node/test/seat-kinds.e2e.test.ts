@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { b64u, newNodeIdentity, type RouteName, routes, SEATS_READ, type SeatView } from "@invincible/core";
+import { b64u, newNodeIdentity, type Prov, type RouteName, routes, SEATS_READ, type SeatView, signEvent } from "@invincible/core";
 import { enrollDevice, foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -81,6 +81,30 @@ describe("a seat of a kind the fleet can't all read", () => {
     const after = await admin<{ seat: SeatView }>("addSeat", { kind: "google-antigravity", label: "Gemini 2" });
     expect(after.status).toBe(200);
     for (const id of [claude.body.seat.id, added.body.seat.id, after.body.seat.id]) expect((await admin("removeSeat", { id })).status).toBe(200);
+  });
+
+  test("a seat of a kind a later release brings, written by that release's node, is listed apart and used for nothing here; what that node writes after it applies", async () => {
+    // A node on a later release: a seat of a kind this one doesn't know, then a Claude plan, one after the other in its chain.
+    const later = newNodeIdentity();
+    enrollDevice(daemon.store, daemon.identity, { device: later.id, name: "studio", kind: "node", box: b64u(later.boxPublic) });
+    const yours: Prov = { trust: "owner", via: `c_${"p".repeat(44)}` };
+    let prev = daemon.store.head(later.id);
+    const write = (kind: string, body: unknown) => {
+      const event = signEvent({ v: 2, fleet: daemon.store.fleet!, hlc: daemon.store.clock.tick(), device: later.id, prev, kind, body: body as never, prov: yours }, later);
+      prev = event.id;
+      return event;
+    };
+    const cursor = `st_${"c".repeat(22)}`;
+    const work = `st_${"w".repeat(22)}`;
+    const written = [write("seat.added", { id: cursor, kind: "cursor-plan", label: "Cursor 1", node: later.id, runs: 1 }), write("seat.added", { id: work, kind: "claude-subscription", label: "Work Max", node: later.id, runs: 1 })];
+    expect(daemon.store.ingest(written).invalid).toEqual([]);
+    const listed = await admin<{ seats: SeatView[]; unknown?: unknown[] }>("seats");
+    expect(listed.status).toBe(200);
+    expect(listed.body.seats.map((seat) => seat.id)).toEqual([work]);
+    expect(listed.body.unknown).toEqual([{ id: cursor, kind: "cursor-plan", label: "Cursor 1", node: later.id, addedAt: expect.any(Number) }]);
+    // Nothing of it is done here: it is no seat of those this release knows.
+    expect((await admin("startSeatSignIn", { id: cursor })).status).toBe(404);
+    expect((await admin("setSeatServes", { id: cursor, agents: [] })).status).toBe(404);
   });
 
 });

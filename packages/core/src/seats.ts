@@ -44,8 +44,20 @@ export const SeatKind = z.enum(SEAT_KINDS);
 export type SeatKind = z.infer<typeof SeatKind>;
 
 /**
+ * A seat's kind as the log holds it (seat.added): one word, so a replica never refuses the seat.added of a kind it
+ * doesn't know, a later release's, and so never holds back everything its node writes after it (the lead's word, 27
+ * November 2026; AGENTS.md's rule for unknown kinds, applied to an enum inside a known event). What a route takes is a
+ * SeatKind, as ever: a node adds only a kind it knows.
+ */
+export const SeatKindWord = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/, "a seat's kind, in one word");
+/** The kind a word names, or null: a kind this release doesn't know, kept as it was said and used for nothing. */
+export const readSeatKind = (word: string): SeatKind | null => ((SEAT_KINDS as readonly string[]).includes(word) ? (word as SeatKind) : null);
+
+/**
  * The kinds every release has read, the six of the first: a node whose profile says nothing of seats reads these alone,
  * and refuses a seat.added of any other kind, which holds back its sync of everything the adding node writes after it.
+ * (Every release whose profile says which kinds it reads also keeps a seat of any other kind, as one it doesn't know:
+ * both came in one release.)
  */
 const FIRST_SEAT_KINDS: readonly SeatKind[] = ["claude-subscription", "chatgpt-codex", "chatgpt-siwc", "mistral-vibe", "plan", "api"];
 
@@ -124,6 +136,13 @@ export const SeatAttemptId = z.string().regex(/^sa_[A-Za-z0-9_-]{22}$/, "a sign-
 /** How a tool says it is signed in: one of these words is all that is passed on of what its status command prints. */
 export const SIGN_IN_METHODS = ["claude.ai", "oauth_token", "api_key", "api_key_helper", "third_party", "chatgpt", "api-key", "signed in"] as const;
 export const SignInMethod = z.enum(SIGN_IN_METHODS);
+/**
+ * How a tool said it is signed in, as the log holds it (seat.signin): one word, as a seat's kind is, since a later
+ * release's kind brings its tool's own word, and a replica that refused it would hold back everything the seat's node
+ * writes after it. Read as one of these, or as none (readSignInMethod).
+ */
+export const SignInMethodWord = z.string().regex(/^[a-z0-9][a-z0-9_. -]{0,31}$/, "how a tool says it is signed in, in a word");
+export const readSignInMethod = (word: string | undefined): z.infer<typeof SignInMethod> | null => ((SIGN_IN_METHODS as readonly string[]).includes(word ?? "") ? (word as z.infer<typeof SignInMethod>) : null);
 
 /** A plan's tier, as its tool says it ("pro", "max", "ultra", "plus", "team"…): one word. */
 export const SeatPlan = z.string().regex(/^[a-z0-9][a-z0-9_.-]{0,31}$/, "a plan's tier, in one word");
@@ -294,7 +313,7 @@ export const SeatSignInBody = z.discriminatedUnion("phase", [
     attempt: SeatAttemptId.optional(),
     phase: z.literal("ended"),
     outcome: SeatSignInOutcome,
-    method: SignInMethod.optional(),
+    method: SignInMethodWord.optional(),
     plan: SeatPlan.optional(),
     fingerprint: SeatFingerprint.optional(),
     renewBy: z.number().int().min(0).optional(),
@@ -336,6 +355,20 @@ export interface SeatFacts {
   rest: { until: number; window: string | null; at: number } | null;
   /** The agents it serves, as you chose them (seat.serves), each as that agent: none until you choose one. */
   serves: SeatAgent[];
+}
+
+/**
+ * A seat of a kind this release doesn't know (readSeatKind), as the log holds it: a later release's, kept, shown as "a
+ * kind this version doesn't know", and used for nothing here: never chosen for work, signed in, set or given agents.
+ */
+export interface UnknownSeat {
+  id: string;
+  /** The word its seat.added said (SeatKindWord). */
+  kind: string;
+  label: string;
+  /** The node that holds its home, whose release knows it. */
+  node: string;
+  addedAt: number;
 }
 
 export type SeatState =

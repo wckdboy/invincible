@@ -232,6 +232,65 @@ describe("seats in the mind", () => {
     expect(storeA.digest()).toBe(storeB.digest());
   });
 
+  /** Events as a later release's node writes them, each after the one before in its chain, whether or not this release takes them. */
+  const chained = (store: LedgerStore, signer: NodeIdentity, items: [kind: string, body: unknown, p?: Prov][]): GEvent[] => {
+    let prev = store.head(signer.id);
+    return items.map(([kind, body, p]) => {
+      const event = signEvent({ v: 2, fleet: store.fleet!, hlc: store.clock.tick(), device: signer.id, prev, kind, body: body as never, ...(p ? { prov: p } : {}) }, signer);
+      prev = event.id;
+      return event;
+    });
+  };
+
+  test("a seat of a kind a later release brings is kept and used for nothing, and what its node writes after it is never held back: the same on every replica, in any order and after a rebuild", () => {
+    const { a, b, storeA, storeB } = fleet();
+    // Ultra on a later release: a seat of a kind this one doesn't know, signed in in its tool's own word; then a Claude
+    // plan, its sign-in in a later release's word too; then the agents the first serves, as you chose them there.
+    const later = seatId();
+    const known = seatId();
+    const written = chained(storeA, a, [
+      ["seat.added", { id: later, kind: "cursor-plan", label: "Cursor 1", node: a.id, runs: 1 }, YOURS],
+      ["seat.signin", { id: later, attempt: attempt(), phase: "ended", outcome: "ready", method: "cursor", plan: "pro", fingerprint: ACCOUNT }],
+      ["seat.added", { id: known, kind: "claude-subscription", label: "Work Max", node: a.id, runs: 1 }, YOURS],
+      ["seat.signin", { id: known, attempt: attempt(), phase: "ended", outcome: "ready", method: "sso", plan: "max", fingerprint: OTHER }],
+      ["seat.serves", { id: later, agents: [ADA] }, YOURS],
+    ]);
+    for (const store of [storeA, storeB]) expect(store.ingest(written).invalid).toEqual([]);
+    const unknown = [{ id: later, kind: "cursor-plan", label: "Cursor 1", node: a.id, addedAt: expect.any(Number) }];
+    const kept = (store: LedgerStore) => ({ seats: seen(store), methods: store.seats().map((seat) => (seat.signIn?.phase === "ended" ? seat.signIn.method : "none")), unknown: store.unknownSeats() });
+    for (const store of [storeA, storeB]) {
+      // Kept, each in its place: the Claude plan after it applied, its method read as none this release knows.
+      expect(written.slice(0, 4).map((event) => store.rejection(event.id))).toEqual([null, null, null, null]);
+      expect(seen(store).map((seat) => [seat.id, seat.sign, seat.account])).toEqual([[known, "ready", OTHER]]);
+      expect(store.seats().map((seat) => (seat.signIn?.phase === "ended" ? seat.signIn.method : "none"))).toEqual([null]);
+      expect(seatState(store.seats()[0]!, Date.now())).toMatchObject({ is: "ready" });
+      // The later kind's seat is listed apart, and used for nothing here: it serves no agents.
+      expect(store.unknownSeats()).toEqual(unknown);
+      expect(store.rejection(written[4]!.id)).toBe("a seat of a kind this version doesn't know serves no agents here");
+    }
+    expect(storeA.digest()).toBe(storeB.digest());
+    // Deterministic under replay: any order, with duplicates, and a rebuild.
+    const everything = allEvents(storeA);
+    const reference = { digest: storeA.digest(), ...kept(storeA) };
+    for (let seed = 1; seed <= 6; seed++) {
+      const order = rng(seed);
+      const replica = new LedgerStore(":memory:");
+      replica.expectFleet(storeA.fleet!);
+      const shuffled = shuffle([...everything, ...everything.slice(0, 4)], order);
+      for (let i = 0; i < shuffled.length; i += 1 + Math.floor(order() * 3)) replica.ingest(shuffled.slice(i, i + 3));
+      replica.ingest(shuffled);
+      expect({ digest: replica.digest(), ...kept(replica) }).toEqual(reference);
+      replica.rebuild();
+      expect({ digest: replica.digest(), ...kept(replica) }).toEqual(reference);
+      replica.close();
+    }
+    // Removed by you from any node, it goes from every replica.
+    storeB.emit(b, "seat.removed", { id: later }, YOURS);
+    syncInto(storeB, storeA);
+    for (const store of [storeA, storeB]) expect([store.unknownSeats(), store.seats().map((seat) => seat.id)]).toEqual([[], [known]]);
+    expect(storeA.digest()).toBe(storeB.digest());
+  });
+
   test("PROPERTY: any delivery order, with duplicates, yields identical seats and the identical mind; a rebuild too", () => {
     const { a, b, storeA, storeB } = fleet();
     const random = rng(41);
