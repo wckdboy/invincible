@@ -2491,3 +2491,53 @@ test("a task another node handed over has its gates bounded in all, every round 
   await yours.runtime.executeTask(member, task, yours.context);
   expect(yoursTimeouts).toEqual([TEAM_COMMAND_SECONDS, TEAM_COMMAND_SECONDS, TEAM_COMMAND_SECONDS, TEAM_COMMAND_SECONDS]);
 });
+
+/*
+ * A Gemini plan works only on your own repositories (the owner's word, 28 November 2026; the review's H1): on a seat of
+ * it, or on agy's sign-in in the agent's own VM, your agent directs it as any plan, but another node's task, or an agent
+ * with no repository you set, ends before a seat or the tool is asked anything, in words that say how to get it run, and
+ * goes to no other harness or seat. So does an ACP agent whose command runs agy.
+ */
+function geminiTask(over: Partial<TeamTask>, options: { repository?: string | null; acp?: string } = {}) {
+  const asked: string[] = [];
+  const ran: string[] = [];
+  const agent: Agent = { ...member, harness: options.acp ? "acp" : "antigravity", ...(options.acp ? { acp: options.acp } : {}), repository: options.repository === undefined ? "https://github.com/example/app" : options.repository };
+  const f = fixture([], {
+    agent: () => agent,
+    // (Its repository's start answered as repoTask's is.)
+    exec: async (_m, command) => (ran.push(command), command.includes("from_commit") ? result({ stdout: `${BASE} fetched\n` }) : result()),
+    prepare: async () => void ran.push("prepare"),
+    seat: async () => (asked.push("seat"), { none: true }),
+  });
+  return { go: () => f.runtime.executeTask(agent, { ...task, ...over }, f.context), asked, ran };
+}
+const GEMINI_RULE = "The Gemini plan works only on your own repositories";
+const FIX = { connector: "github", owner: "example", repo: "app", branch: "invincible/units", pr: 7, head: "a".repeat(40) } as TeamTask["fix"];
+
+test("a Gemini plan takes your work and your agent's on its agent's repository: a task you gave, one your agent gave in any turn, a proposal approved by either of you, an outcome's step, a fix your agent gives back", async () => {
+  for (const over of [{}, { givenBy: "owner" }, { givenBy: "primary" }, { givenBy: "primary", proposedBy: "primary" }, { proposedBy: "bo" }, { givenBy: "primary", outcome: "oc_FAKE" }, { givenBy: "primary", fix: FIX }] as Partial<TeamTask>[]) {
+    const t = geminiTask(over);
+    // It goes on to its seats and its tool as any vendor's tool does (here there is none signed in, so it ends there).
+    const ended = await t.go().then(() => "", (error: Error) => error.message);
+    expect([JSON.stringify(over), ended.startsWith(GEMINI_RULE), t.ran.includes("prepare"), t.asked.length > 0]).toEqual([JSON.stringify(over), false, true, true]);
+  }
+});
+
+test("a Gemini plan refuses another node's task, its proposal among them, and an agent on no repository of yours, before anything of it runs, saying how to get it run", async () => {
+  const another = `${GEMINI_RULE}: another node's task never runs on it; give it to an agent of yours on another plan`;
+  const refused: [Partial<TeamTask>, { repository?: string | null; acp?: string }, string][] = [
+    [{ givenBy: "node:n_FAKE" }, {}, another],
+    [{ givenBy: "node:n_FAKE", proposedBy: "node:n_FAKE" }, {}, another],
+    [{}, { repository: null }, `${GEMINI_RULE}: Ada works on no repository of yours; set one, then give the task again`],
+    [{ givenBy: "primary" }, { repository: null }, `${GEMINI_RULE}: Ada works on no repository of yours; set one, then give the task again`],
+    // An ACP agent whose command runs agy is held to the same rule (the re-check's R10).
+    [{ givenBy: "node:n_FAKE" }, { acp: "agy acp" }, another],
+    [{}, { acp: "/opt/agy/bin/agy acp", repository: null }, `${GEMINI_RULE}: Ada works on no repository of yours; set one, then give the task again`],
+  ];
+  for (const [over, options, why] of refused) {
+    const t = geminiTask(over, options);
+    await expect(t.go()).rejects.toThrow(why);
+    // Nothing of it ran: its VM wasn't prepared, no seat or tool was asked, and no other harness or seat took it.
+    expect([why.slice(-40), t.asked, t.ran]).toEqual([why.slice(-40), [], []]);
+  }
+});

@@ -304,7 +304,9 @@ The run loop is carried and renamed (§10), the most proven part of it:
     seat's own profile (`--gemini-dir`), its client named truthfully, signed in with the profile's sign-in before
     anything else, its updates and telemetry off, and never an agy older than 1.5.1 (`packages/agents/src/antigravity.ts`).
     It speaks Gemini's API, which no provider of the gateway's does: it runs on its Google sign-in alone, never on a
-    roster model;
+    roster model. Its sign-in is a key to the owner's Google Cloud that any command agy runs can read, so it works only
+    on the owner's own repositories (core's `ownWorkRefusal`, as a task starts), as does an ACP agent whose command runs
+    agy: the primary directs it as any plan, but a task runs only on its agent's repository, and never another node's;
   - which seat a run takes is Invincible's to choose, and nothing asks you (`chooseSeat`, `seat-runs.ts`): of its node's
     seats that serve its agent, whose plan runs the agent's tool (Claude Code on a Claude plan, Codex on a ChatGPT
     plan, Antigravity on a Gemini plan), signed in, not resting, with a run to spare and some of their plan left, the one with the most headroom (the

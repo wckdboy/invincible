@@ -8,7 +8,9 @@ What a release has to say beyond its commits: what you must do, and by when. The
   - **What changes:** a seat of a new kind, `google-antigravity` (the web's "Add a Gemini plan", `inv seat add gemini`),
     and a harness, Antigravity, that an agent may be given. Its card opens Google's own sign-in page; the code the page
     that follows shows is pasted back once, to agy in the seat's own VM. agy 1.5.18 is pinned in the tools' image, its
-    updates off. It runs on its Google sign-in alone: no model of the gateway's speaks its API.
+    updates off. It runs on its Google sign-in alone: no model of the gateway's speaks its API. Your agent can direct
+    it, but it works only on your own repositories, never on another node's task. Its sign-in is a key to your Google
+    Cloud, in its VM, readable by what it runs.
   - **The risk, yours (27 November 2026):** Google's Antigravity terms call reaching it through another tool a breach
     that may get your Antigravity and Gemini CLI accounts suspended. You chose to run it so, as T3 Code does. The same
     terms let Google use what the seat sends (your code, your words, what its tools print) to improve its products and

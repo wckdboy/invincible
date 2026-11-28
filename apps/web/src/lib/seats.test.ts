@@ -29,7 +29,7 @@ describe("seats in words", () => {
       title: "Sign in on Google's page",
       open: "Open Google's page",
       steps: ["Open the page and sign in to the account this seat is for.", "Paste the code its last page shows you here."],
-      first: "Google's Antigravity terms call reaching it through another tool, as Invincible does, a breach that may get your Antigravity and Gemini CLI accounts suspended: you chose this on 27 November 2026, accepting that risk to your Google account. The same terms let Google use what the seat sends (your code, your words and what its tools print) to improve its products and models, and let its staff read it; Antigravity's own settings have an opt-out.",
+      first: "Your agent can direct this plan. It works only on your own repositories. A key to your Google Cloud is in its VM, readable by what it runs. Google's Antigravity terms call reaching it through another tool, as Invincible does, a breach that may get your Antigravity and Gemini CLI accounts suspended: you chose this on 27 November 2026, accepting that risk to your Google account. The same terms let Google use what the seat sends (your code, your words and what its tools print) to improve its products and models, and let its staff read it; Antigravity's own settings have an opt-out.",
     });
     // What it rests on: Google's own words, where Google says them, and what that lets its agents do.
     expect(SEAT_TERMS["google-antigravity"]).toEqual({

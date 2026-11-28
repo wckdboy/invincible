@@ -35,6 +35,7 @@ export * from "./rules.ts";
 export * from "./screen.ts";
 export * from "./desktop-frames.ts";
 export * from "./seats.ts";
+export * from "./own-work.ts";
 export * from "./pairing.ts";
 export * from "./qr.ts";
 export * from "./qamp.ts";

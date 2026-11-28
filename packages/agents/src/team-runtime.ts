@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { desktopArgv, desktopBriefing, hardwareBriefing, LOOKING } from "./desktop-command.ts";
-import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_WORK } from "@invincible/core";
+import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
@@ -838,6 +838,14 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // Another node's task (fabric/handoff.ts) is bounded by its budget: it runs only on models that budget counts at
       // more than $0 (paid), never on one it counts as nothing, nor on a coding tool's own sign-in (a seat).
       const handed = task.givenBy?.startsWith("node:") === true;
+      // A plan that works only on your own repositories (a Gemini plan, or an ACP agent that runs agy: core's ownWorkOnly)
+      // takes no other node's task, nor an agent with no repository you set, on a seat of it or on its tool's sign-in in
+      // the agent's own VM: refused before anything of the task runs (its VM isn't even prepared), and never moved to
+      // another harness or seat (the owner's word, 28 November 2026; the review's H1).
+      if (ownWorkOnly(agent)) {
+        const why = ownWorkRefusal(task, agent);
+        if (why) throw new Error(why);
+      }
       // Its VM's lease is held to the models that budget counts at more than $0, as sensitive mode's is to its own (its
       // coding tool's, and its eyes' when they're paid), so that its commands work on nothing its budget counts as
       // nothing: the gateway refuses any other model (the third re-review's R3-4). None of them: it reaches no provider.

@@ -1139,6 +1139,32 @@ describe("a steer of a running task", () => {
     expect(store.task(task.id)!.steers!.map((s) => s.taken?.step)).toEqual([3, 3]);
   });
 
+  // A Gemini plan works only on your own repositories, and your agent directs it as any plan (the owner's word, 28 November
+  // 2026): its steer and yours both reach a task that runs on it.
+  test("on a Gemini plan too: your agent's steer reaches the task's run, as yours does", async () => {
+    const started = deferred();
+    const go = deferred();
+    const handed: unknown[] = [];
+    const { store, service } = setup({
+      executeTask: async (_agent, _task, context) => {
+        started.resolve();
+        await go.promise;
+        handed.push(...(context.steers?.(1) ?? []));
+        return { verified: true, output: "Verified" };
+      },
+    });
+    store.saveAgent({ id: "gem", name: "Gem", harness: "antigravity", repository: "https://github.com/example/app" });
+    service.saveRoom({ id: "workshop", name: "Workshop", members: ["ada", "lin", "gem"] });
+    const task = service.createTask({ room: "workshop", assignee: "gem", title: "Fix the sum", goal: "Fix the sum in calc.py." });
+    service.start();
+    await started.promise;
+    expect(service.steer({ task: task.id, text: "Run its tests first." }, "primary").steer).toMatchObject({ by: "primary", text: "Run its tests first." });
+    expect(service.steer({ agent: "gem", text: "And keep the old reader." }, "owner").task.id).toBe(task.id);
+    go.resolve();
+    await service.settled();
+    expect(handed).toEqual([{ by: "primary", text: "Run its tests first." }, { by: "owner", text: "And keep the old reader." }]);
+  });
+
   test("an agent at no task is said to be, by its name; a task that has ended is refused in the store's words", async () => {
     const { service } = setup();
     expect(() => service.steer({ agent: "lin", text: "Use the new schema." }, "owner")).toThrow("Lin isn't at work on a task now: say it in its conversation, or give it a task.");
