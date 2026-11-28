@@ -58,10 +58,11 @@ async function api<T = any>(name: RouteName, input?: unknown): Promise<T> {
 /** What the node logged. */
 const logged: string[] = [];
 /**
- * Where the node is told to bind its sandbox gateway: a port this test holds, so on any machine its address never comes,
- * as it doesn't on a Mac before the networks' VMs hold it (a node's own machine has 172.31.248.1, so that can't be counted on).
+ * Where the node is told to bind its sandbox gateway: an address of the documentation's, no machine's, so on any machine
+ * it never comes, as it doesn't on a Mac before the networks' VMs hold it (a node's own machine has 172.31.248.1, so
+ * that can't be counted on; a port held on 127.0.0.1 is an address this machine has, and said so).
  */
-const held = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(null, { status: 404 }) });
+const absent = { hostname: "192.0.2.77", port: freePort() };
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
@@ -70,14 +71,13 @@ beforeAll(async () => {
   mind.close();
   home.writeConfig({ v: 1, name: "mini", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: (line) => void logged.push(line), loopIntervalMs: 60_000, docker: fake.runner, measure: false, defaultHeartbeat: false, macFirewall: async () => firewall,
-    sandboxGateway: { hostname: "127.0.0.1", port: held.port! },
+    sandboxGateway: absent,
     // (The stand-in's volumes aren't on this machine's disk: their budget is a Mac mini's, its 1 TB nearly free.)
     sandboxDisk: () => ({ totalBytes: 1000 * 2 ** 30, freeBytes: 900 * 2 ** 30 }) });
 });
 
 afterAll(async () => {
   await daemon?.stop();
-  held.stop(true);
   rmSync(root, { recursive: true, force: true });
 });
 

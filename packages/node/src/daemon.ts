@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonical, decodeHlc, type FabricSettingView, fitLedger, moneyPrices, type SandboxLayoutView, type NodeIdentity, pricesOf, QAMP_SIDECAR_PORT, type QampEndpoint, REQUESTS_READ, screenSessionView } from "@invincible/core";
@@ -990,33 +991,52 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     let said = false;
     let tries = 0;
     const gatewayAt = opts.sandboxGateway ?? { hostname: NETWORKS.gateway.gateway, port: SANDBOX_GATEWAY_PORT };
-    const bindGateway = (): boolean => {
-      try {
-        servers.push(
-          Bun.serve({ hostname: gatewayAt.hostname, port: gatewayAt.port, idleTimeout: 255, maxRequestBodySize: MAX_REQUEST_BODY, fetch: listening(app, "sandbox") }),
-        );
-        if (said) log("sandbox gateway listening");
-        return true;
-      } catch (error) {
-        // On a Mac the address comes a moment after the networks' VMs start, at every start (seen on the Mac mini, 17
-        // November 2026): waiting for it is said plainly, and only a minute of it reads as trouble (the doctor's word).
-        tries++;
-        if (apple && tries === 1) log("sandbox gateway: waiting for its address on this Mac, which comes with the networks' VMs (tried every 5 s)");
-        else if (!apple ? !said : tries === 13) log(`sandbox gateway listener unavailable: ${(error as Error).message}${apple ? " (for a minute now; still tried every 5 s, until a VM holds its address)" : ""}`);
-        said = true;
-        return false;
+    // Bun says "Is port N in use?" (EADDRINUSE) for any listen that fails, an address this machine doesn't have included:
+    // nothing held 7402 on the Mac mini that said so (27 November 2026). Whether the address is one of this machine's
+    // says which it is.
+    const addressHere = () => Object.values(networkInterfaces()).some((list) => list?.some((i) => i.address === gatewayAt.hostname));
+    // Whether this node makes sandboxes: its image there and, on a Mac, its sandbox firewall on (what the doctor names
+    // when it doesn't). One that makes none has no sandbox to reach a gateway, so it says nothing of one. Asked once, and
+    // only of a node whose gateway's address isn't its own.
+    let makes: Promise<boolean> | null = null;
+    const makesSandboxes = () =>
+      (makes ??= Promise.all([host.status().catch(() => null), host.firewallState().catch(() => null)]).then(([status, wall]) => !!status?.image && (!apple || !!wall?.on)));
+    const host = sandbox;
+    const bindGateway = async (): Promise<boolean> => {
+      tries++;
+      if (addressHere()) {
+        try {
+          servers.push(
+            Bun.serve({ hostname: gatewayAt.hostname, port: gatewayAt.port, idleTimeout: 255, maxRequestBodySize: MAX_REQUEST_BODY, fetch: listening(app, "sandbox") }),
+          );
+          if (said) log("sandbox gateway listening");
+          return true;
+        } catch {
+          // Its address is here, so its port is another program's.
+          if (!said) log(`sandbox gateway listener unavailable: ${gatewayAt.hostname}:${gatewayAt.port} is held by another program (tried every 5 s)`);
+          said = true;
+          return false;
+        }
       }
+      // Not yet this machine's: on a Mac it comes with the networks' VMs, a moment after they start (seen on the Mac mini,
+      // 17 November 2026). Waiting for it is said plainly, and only a minute of it reads as trouble (the doctor's word).
+      if (!(await makesSandboxes())) return false;
+      if (!said) log(`sandbox gateway: waiting for its address${apple ? " on this Mac, which comes with the networks' VMs" : ", which comes with the sandbox networks"} (tried every 5 s)`);
+      else if (tries === 13) log(`sandbox gateway unavailable: its address ${gatewayAt.hostname} hasn't come in a minute (still waited for every 5 s${apple ? ", until a VM holds it" : ""})`);
+      said = true;
+      return false;
     };
     // (A node whose sandboxes have no networks binds no gateway: its address is a live node's on a shared host.)
-    if (opts.sandboxNetworks !== false && !bindGateway() && apple) {
+    if (opts.sandboxNetworks !== false && !(await bindGateway())) {
       gatewayRetry = setInterval(() => {
-        if (bindGateway() && gatewayRetry) {
-          clearInterval(gatewayRetry);
-          gatewayRetry = null;
-        }
+        void bindGateway().then((bound) => {
+          if (bound && gatewayRetry) {
+            clearInterval(gatewayRetry);
+            gatewayRetry = null;
+          }
+        });
       }, 5_000);
     }
-    const host = sandbox;
     reaper = setInterval(() => {
       host
         .reap()
