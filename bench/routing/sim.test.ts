@@ -1,10 +1,5 @@
-import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { memoryTasks, runPolicy, type SimTask, simTasks } from "./sim.ts";
-
-// Whole policies through the real runtime have the time a loaded machine takes. Since the stand-ins cache (337d2220), a
-// budget lasts more calls, and work pinned to the worker that it can't do runs until its budget ends it: the pinned test
-// took 0.48 s alone on the Mac mini, and ran past bun's 5 s on the MacBook at a load of 180 (28 November 2026).
-setDefaultTimeout(60_000);
 
 /*
  * The routing suite's stand-in world (sim.ts): its tasks are the seed's, and what each way of routing does with a task
@@ -40,8 +35,11 @@ describe("the routing suite's stand-ins", () => {
   });
 
   test("pinned to the worker, its work stays there: nothing moves, and what is too hard for it needs you", async () => {
-    const r = await runPolicy("pinned", EVERY);
-    expect(done(r)).toEqual(["gate1", "gate2", "review1", "review2", "stall1", "stall2"]);
+    // Of each kind one it can do and one it can't, but no stall it can't do: that reads on until its budget ends it, 202
+    // of the worker's cached calls, the test's time near enough whole (twice in EVERY: 0.77 s, past bun's 5 s on a
+    // loaded MacBook). The suite holds it, over its 36 tasks: routing.rule.pinned-moved, at 0.
+    const r = await runPolicy("pinned", [task("gate", 2, 1), task("gate", 3, 2), task("review", 2, 3), task("review", 3, 4), task("stall", 2, 5)]);
+    expect(done(r)).toEqual(["gate2", "review2", "stall2"]);
     expect(r.tasks.every((t) => t.escalations.length === 0 && t.movedOffPins === 0)).toBe(true);
   });
 
@@ -61,7 +59,10 @@ describe("the routing suite's stand-ins", () => {
     expect(tasks.filter((t) => t.agent === "ada").every((t) => t.level <= 2 && !t.fix)).toBe(true);
     // di's: a fix its worker does, then a task that needs the lead, in turn.
     expect(tasks.filter((t) => t.agent === "di").map((t) => (t.fix ? (t.level <= 2 ? "fix" : "hard fix") : `level ${t.level}`))).toEqual(["fix", "level 3", "fix", "level 3", "fix", "level 3"]);
-    const on = await runPolicy("routed", tasks, { memory: true });
+    // (Run without cy's, which nothing here says of: a stall of its that nothing can do reads on until its budget ends it,
+    // 51 of the lead's calls a run, three runs of the test's time near enough. Core's routing.test.ts holds cy's case.)
+    const run = tasks.filter((t) => t.agent !== "cy");
+    const on = await runPolicy("routed", run, { memory: true });
     const began = (agent: string, fix?: boolean) =>
       on.tasks.filter((t) => t.task.agent === agent && (fix === undefined || Boolean(t.task.fix) === fix)).map((t) => `${t.began}${t.routed?.because ? `:${t.routed.because}` : ""}`);
     // The tier its last verified: the lead's, once one moved up; after two begun there by the memory, the worker's tried.
@@ -72,12 +73,12 @@ describe("the routing suite's stand-ins", () => {
     expect(began("di", false)).toEqual(["engineer", "planner:memory", "planner:memory"]);
     expect(on.tasks.filter((t) => t.task.agent === "di").map((t) => t.routed?.kind)).toEqual(["fix", "task", "fix", "task", "fix", "task"]);
     // Without it, every one of bo's begins on the worker and moves up.
-    const off = await runPolicy("routed", tasks);
+    const off = await runPolicy("routed", run);
     expect(off.tasks.filter((t) => t.task.agent === "bo").every((t) => t.began === "engineer" && t.escalations.length === 1)).toBe(true);
     expect(on.usd).toBeLessThan(off.usd);
     expect(on.verified).toBe(off.verified);
     // The same trail, the same tier: run again, every task begins where it did, for the same reason.
-    const again = await runPolicy("routed", tasks, { memory: true });
+    const again = await runPolicy("routed", run, { memory: true });
     expect(again.tasks.map((t) => [t.began, t.routed, t.verified, t.usd])).toEqual(on.tasks.map((t) => [t.began, t.routed, t.verified, t.usd]));
   });
 
