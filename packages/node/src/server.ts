@@ -2702,6 +2702,11 @@ export function createApp(ctx: AppContext) {
       return task?.givenBy?.startsWith("node:") === true && (task.status === "done" || task.status === "failed" || task.status === "stopped");
     };
     const sweepable = (id: string) => ended(id) || !store.task(id);
+    // What runs of them cut off left on an agent's side is asked of only where there can be any (the eighth fabric review's
+    // R8-2): with the fabric on, or of an agent another node handed a task this node knows. One whose fabric is off asks
+    // its other agents' VMs nothing more as it starts than it did before.
+    const fabricOn = (await ctx.fabricSetting?.().catch(() => null))?.on === true;
+    const handedTo = (agent: string) => store.tasks().some((task) => task.assignee === agent && task.givenBy?.startsWith("node:") === true);
     for (const member of store.agents()) {
       if (!member.workspace) continue;
       try {
@@ -2710,7 +2715,7 @@ export function createApp(ctx: AppContext) {
       } catch (error) {
         ctx.log(`fabric: ${member.name}'s VM couldn't be asked what handed tasks left running there: ${(error as Error).message}`);
       }
-      if (!member.repository) continue;
+      if (!member.repository || !(fabricOn || handedTo(member.id))) continue;
       try {
         const { failed } = await sweepLeftovers((command, timeout) => stopTellTeam(member, command, timeout), sweepable);
         if (failed.length) ctx.log(`fabric: what runs of ${failed.join(", ")} cut off left on ${member.name}'s side couldn't all be swept`);

@@ -165,3 +165,34 @@ test("as the node comes back, what runs of handed tasks cut off left on an agent
   expect([sent(handedSweep("/work/repo", ended)), sent(handedSweep("/work/repo", open))]).toEqual([true, false]);
   expect(said.filter((line) => line.startsWith("fabric:") && line.includes("Noa"))).toEqual([]);
 }, 60_000);
+
+/*
+ * And only where there can be any (the eighth fabric review's R8-2): on a node whose fabric is off, an agent of whom it
+ * knows no task another node handed is asked nothing of handed leftovers as the node starts. Her VM is asked what handed
+ * tasks left running there (endLeftovers, since R3-5), as every agent's is, and nothing more. (This node's fabric is off:
+ * its config names none, until the case below turns it on.)
+ */
+test("a node whose fabric is off asks an agent no node handed a task nothing of handed leftovers as it starts", async () => {
+  daemon ??= await start();
+  expect(await until(() => daemon!.store.lww(`calibration:${daemon!.identity.id}`) !== null)).toBe(true);
+  await api("saveAgent", { id: "lea", name: "Lea", role: "engineer", repository: "https://github.com/you/project" });
+  const { workspace } = await api<{ workspace: { id: string } }>("provisionAgent", { id: "lea" });
+  await daemon.stop();
+  daemon = null;
+  docker.execs.length = 0;
+
+  daemon = await start();
+  const hers = () => docker.execs.filter((e) => e.container === containerName(workspace.id)).map((e) => e.cmd.join(" "));
+  // (Her lists are asked first, and the leftovers' listing at once after them, where it is asked at all.)
+  expect(await until(() => hers().some((command) => command.includes(HANDED_LISTS_COMMAND)))).toBe(true);
+  await Bun.sleep(1_000);
+  expect(hers().filter((command) => command.includes("found = set()"))).toEqual([]);
+
+  // With the fabric on, it is asked of her too, as the node comes back.
+  await api("fabricSetting", { on: true });
+  await daemon.stop();
+  daemon = null;
+  docker.execs.length = 0;
+  daemon = await start();
+  expect(await until(() => hers().some((command) => command.includes("found = set()")))).toBe(true);
+}, 60_000);
