@@ -97,4 +97,27 @@ final class NavTests: XCTestCase {
         app.open(try XCTUnwrap(URL(string: "invincible://task/\(id)")))
         shown(app, "task.screen")
     }
+
+    /// Back from the work to your agent's chat by the screen's left edge, as a thumb goes back, and by its back button. On
+    /// an iPhone the work draws its own head where the system bar was (its scroll's cost: PerfTests.testScrollWork), and
+    /// a hidden bar takes the edge with it unless the work gives it back.
+    @MainActor
+    func testTheWorkGoesBackByTheEdgeAndByItsButton() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "An iPad's work is a sidebar's place, with nothing to go back to")
+        let app = try opened()
+        for way in ["the edge", "its back button"] {
+            pick(app, "roster.work")
+            shown(app, "work.screen")
+            if way == "the edge" {
+                let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.55))
+                edge.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.55)))
+            } else {
+                let back = app.buttons["work.back"]
+                XCTAssertTrue(back.waitForExistence(timeout: 5), "The work has no back button")
+                back.tap()
+            }
+            XCTAssertTrue(app.descendants(matching: .any)["work.screen"].waitForNonExistence(timeout: 5), "Still on the work after \(way)")
+            shown(app, "chat.screen")
+        }
+    }
 }

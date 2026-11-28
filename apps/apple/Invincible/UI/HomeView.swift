@@ -278,7 +278,8 @@ struct PlacesMenu: View {
 
 /// Work's own head where it is pushed over your agent's chat (an iPhone's), in the system bar's place (hidden): back in a
 /// glass of its own, the title in the middle of the screen, search and Give a task together in one glass, as the system bar
-/// draws them, on a hard edge. (Elsewhere the system bar, untouched.)
+/// draws them, at its sizes, over the list's soft edge; and the screen's left edge still going back (EdgeSwipeBack).
+/// (Elsewhere the system bar, untouched.)
 private struct WorkOwnHead: ViewModifier {
     let back: (() -> Void)?
     let search: (() -> Void)?
@@ -289,8 +290,8 @@ private struct WorkOwnHead: ViewModifier {
         if let back {
             content
                 .toolbar(.hidden, for: .navigationBar)
-                .scrollEdgeEffectStyle(.hard, for: .top)
                 .safeAreaBar(edge: .top) { WorkHead(back: back, search: search, give: give) }
+                .background(EdgeSwipeBack())
         } else {
             content
         }
@@ -299,6 +300,41 @@ private struct WorkOwnHead: ViewModifier {
         #endif
     }
 }
+
+#if os(iOS)
+/// The screen's left edge still going back from a page that hides the system bar: UIKit's own judge of that swipe (the
+/// stack's interactivePopGestureRecognizer's delegate) refuses it once the bar is hidden. While the page is on screen the
+/// swipe asks this one instead: yes when there is a page under it to go back to and no move is under way already (one
+/// begun mid-move can leave the stack stuck). UIKit's own judge is put back as the page goes, so every other page is as
+/// UIKit has it.
+private struct EdgeSwipeBack: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> Judge { Judge() }
+    func updateUIViewController(_ judge: Judge, context: Context) {}
+
+    final class Judge: UIViewController, UIGestureRecognizerDelegate {
+        private weak var stack: UINavigationController?
+        private weak var own: (any UIGestureRecognizerDelegate)?
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            guard let stack = navigationController, let swipe = stack.interactivePopGestureRecognizer, swipe.delegate !== self else { return }
+            self.stack = stack
+            own = swipe.delegate
+            swipe.delegate = self
+        }
+
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            if let swipe = stack?.interactivePopGestureRecognizer, swipe.delegate === self { swipe.delegate = own }
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let stack else { return false }
+            return stack.viewControllers.count > 1 && stack.transitionCoordinator == nil
+        }
+    }
+}
+#endif
 
 private struct WorkHead: View {
     let back: () -> Void
@@ -312,7 +348,7 @@ private struct WorkHead: View {
                 .lineLimit(1)
                 .accessibilityAddTraits(.isHeader)
             HStack(spacing: 0) {
-                Button(action: back) { glyph("chevron.left", weight: .semibold) }
+                Button(action: back) { glyph("chevron.left", weight: .medium, width: Metrics.touch) }
                     .glassEffect(.regular.interactive(), in: .circle)
                     .accessibilityLabel("Back")
                     .accessibilityIdentifier("work.back")
@@ -339,11 +375,14 @@ private struct WorkHead: View {
         .padding(.vertical, Space.s1)
     }
 
-    private func glyph(_ name: String, weight: Font.Weight = .regular) -> some View {
+    /// A button's symbol at the system bar's size (the body's, large) in a touch's height; a pair's items a little wider,
+    /// as the bar spaces them.
+    private func glyph(_ name: String, weight: Font.Weight = .regular, width: CGFloat = 50) -> some View {
         Image(systemName: name)
             .font(.body.weight(weight))
+            .imageScale(.large)
             .foregroundStyle(.primary)
-            .frame(width: Metrics.touch, height: Metrics.touch)
+            .frame(width: width, height: Metrics.touch)
             .contentShape(.rect)
     }
 }
