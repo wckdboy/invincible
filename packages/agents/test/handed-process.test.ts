@@ -1,9 +1,16 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { endLeftovers, HANDED_LISTS_COMMAND, HANDED_PROCESS_PY, handedCommand, handedEndCommand } from "../src/handed-process.ts";
+
+// Every test here runs the real helper, a shell and its processes, so its time is the machine's to give: "the 127" took
+// 0.34 s on the Mac mini at a load of 50 on 18 cores, failed in a full run at a load of 77 (27 November 2026), and ran
+// past bun's 5 s with its runner given 2 % of a core. Its work is in processes that make their own groups, so a load
+// of about 585 on 12 cores (2 % of a core each) can make all of it fifty times as long: 17 s. The limit is how long a
+// busy machine may take, never what a test checks; the clocks a test checks (a gate ended within 15 s) are its own.
+setDefaultTimeout(60_000);
 
 /*
  * The processes of another node's task (the fabric's second re-review, N7): a gate's own run was bounded, but what it
