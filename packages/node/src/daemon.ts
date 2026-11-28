@@ -619,6 +619,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       // (A scratch node beside a live one: the sandbox networks there are the live node's, so its sandboxes join none.)
       ...(opts.sandboxNetworks === false ? { sandboxNetworks: false } : {}),
       ...(apple ? {} : { resolvConf }),
+      // (The install cache a round of another node's task's gates takes its packages from, read-only: sandbox install-cache.ts.)
+      ...(apple ? {} : { installCache: join(home.dir, "cache", "bun") }),
       // Layout 2 (sandbox's layout.ts): an agent's HOME apart from its workspace, on a Linux host with Docker, when its own
       // setting says so (sandboxLayout). A Mac's VMs stay in layout 1: no VM there shares a workspace. An agent's VM moved to
       // it is said to you once, by name.

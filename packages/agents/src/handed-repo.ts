@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { VM_GATES } from "@invincible/core";
+import { BUN_LOCK_PY, VM_GATES } from "@invincible/core";
 import { heldGit } from "./held-git.ts";
 
 /*
@@ -761,6 +761,53 @@ export const handedApply = (root: string, base: string, task: string, nonce: str
 export const handedDrop = (task: string, nonce: string, keep = HANDED_KEEP): string => heldGit(DROP_SCRIPT, keep, task, nonce);
 export const handedTree = (root: string, base: string, task: string, keep = HANDED_KEEP): string => heldGit(TREE_SCRIPT, root, base, keep, task);
 export const handedSweep = (root: string, task: string, keep = HANDED_KEEP): string => heldGit(SWEEP_SCRIPT, root, task, keep);
+/**
+ * In the task's VM, as a round of its gates begins: the manifests the node's install cache is filled from (sandbox
+ * install-cache.ts), and nothing else of the tree: its bun.lock and the package.json of each workspace it names, as the
+ * tree `tree` holds them (with no repository, `tree` "": its folder's files, none through a link at its end), a gzipped
+ * tar, as base64 on stdout. Nothing at all when the tree has no bun.lock. The filler checks what it is given itself:
+ * this only takes it out of the tree.
+ */
+const ROUND_MANIFESTS_SCRIPT = `import base64, io, stat, tarfile
+${BUN_LOCK_PY}
+root, tree = sys.argv[1], sys.argv[2]
+LIMIT = 16 << 20
+if tree:
+    bad = refused(root)
+    if bad: sys.exit(bad)
+def blob(path):
+    if tree:
+        r = git(root, 'cat-file', 'blob', tree + ':' + path, timeout=120)
+        return r.stdout if r.returncode == 0 else None
+    try:
+        fd = os.open(os.path.join(root, path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    with os.fdopen(fd, 'rb') as f:
+        return f.read(LIMIT + 1) if stat.S_ISREG(os.fstat(f.fileno()).st_mode) else None
+lock = blob('bun.lock')
+if lock is None: sys.exit(0)
+if len(lock) > LIMIT: sys.exit('its bun.lock is too big to fill from')
+try:
+    parsed = strict(lock.decode('utf-8'), 'its bun.lock')
+except (Unread, UnicodeDecodeError) as e:
+    sys.exit(str(e)[:300] + ', so nothing is filled')
+files = {'bun.lock': lock}
+for path in (parsed.get('workspaces') or {}) if isinstance(parsed, dict) else ():
+    if not isinstance(path, str) or path.startswith('/') or '..' in path.split('/'): sys.exit('its bun.lock names a workspace out of its tree, so nothing is filled')
+    where = path + '/package.json' if path else 'package.json'
+    data = blob(where)
+    if data is None: sys.exit("its bun.lock names a workspace whose package.json isn't there, " + where[:100] + ', so nothing is filled')
+    files[where] = data
+if sum(len(data) for data in files.values()) > LIMIT: sys.exit('its manifests are too big to fill from')
+packed = io.BytesIO()
+with tarfile.open(fileobj=packed, mode='w:gz', format=tarfile.PAX_FORMAT) as out:
+    for name, data in sorted(files.items()):
+        info = tarfile.TarInfo(name)
+        info.size, info.mode = len(data), 0o644
+        out.addfile(info, io.BytesIO(data))
+sys.stdout.write(base64.b64encode(packed.getvalue()).decode())`;
+
 /** Where a round's VM keeps the tree its gates run on (ROUND_STORE_SCRIPT): its own /work, its own user's. */
 export const HANDED_ROUND_STORE = "/work/round";
 const TREE_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
@@ -768,6 +815,11 @@ const TREE_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 export const handedRoundTake = (root: string, tree: string): string => {
   if (tree !== "" && !TREE_ID.test(tree)) throw new Error("not a tree");
   return tree ? heldGit(ROUND_PACK_SCRIPT, root, tree) : heldGit(ROUND_TAR_SCRIPT, root);
+};
+/** The manifests the node's install cache is filled from, read in the task's VM (`tree`, its clone's; "" for its folder). */
+export const handedManifests = (root: string, tree: string): string => {
+  if (tree !== "" && !TREE_ID.test(tree)) throw new Error("not a tree");
+  return heldGit(ROUND_MANIFESTS_SCRIPT, root, tree);
 };
 /** The round's VM's side: what the task's side printed, kept in its store (`tree`, the pack's; "" for a folder's tar). */
 export const handedRoundStore = (tree: string, store = HANDED_ROUND_STORE): string => {

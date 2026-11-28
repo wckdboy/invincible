@@ -3,6 +3,7 @@ export * from "./desktop-session.ts";
 export * from "./desktop-stream.ts";
 export * from "./spec.ts";
 export * from "./gate.ts";
+export * from "./install-cache.ts";
 export * from "./layout.ts";
 export * from "./container.ts";
 export * from "./container-volumes.ts";

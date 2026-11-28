@@ -14,6 +14,12 @@ export const VM_HOME = "/home/agent";
 export const VM_GATES = "/gates";
 /** The user another node's task's gates run as in its VM, uid:gid: nobody, never the VMs' user the task runs as. */
 export const VM_GATES_USER = "65534:65534";
+/**
+ * Where a round of another node's task's gates finds its packages (bun's install cache, BUN_INSTALL_CACHE_DIR): the node's
+ * own cache, filled by the node from the registry as the round begins and mounted read-only, since the round's VM has no
+ * network. No VM writes it.
+ */
+export const VM_BUN_CACHE = "/cache/bun";
 /** The lease's file in a VM's HOME: its gateway token and where its gateway is (JSON, never a shell's configuration). */
 export const LEASE_FILE = ".invincible-gateway.json";
 /** Where the agent's notes (Engram) are kept, in its HOME: in layout 2 a tree of their own in its store, mounted there. */

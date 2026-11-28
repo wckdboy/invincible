@@ -39,11 +39,12 @@ const roundAnswer = (command: string): ExecResult | null => {
   return null;
 };
 /** A fake round of its gates: its commands go where `exec` sends them, its store and copies answered as made, its sweep finding none. */
-const roundOf = (exec: HandedVm["exec"]): HandedVm["round"] => async (take, store, timeout, signal) => {
+const roundOf = (exec: HandedVm["exec"]): HandedVm["round"] => async (take, store, _fill, timeout, signal) => {
   const from = await exec(take, timeout, signal);
   const kept = await exec(store, timeout, signal);
   return {
     taken: { from, to: roundAnswer(store) ?? kept, bytes: 0, cut: false },
+    cache: null,
     gates: async (command, t, s) => {
       const ran = await exec(command, t, s);
       return roundAnswer(command) ?? ran;
@@ -1166,6 +1167,7 @@ test("another node's task's gates each run in their round's own VM, on a copy of
         said.push({ via: "take", command: take }, { via: "store", command: store });
         return {
           taken: { from: result(), to: roundAnswer(store)!, bytes: 1, cut: false },
+          cache: null,
           gates: async (command: string) => {
             said.push({ via: "gates", command });
             return roundAnswer(command) ?? result({ exitCode: command.includes("bun test required-check") && said.some((c) => plain(c.command).includes("echo one")) ? 0 : 1 });
@@ -1213,6 +1215,57 @@ test("another node's task's gates each run in their round's own VM, on a copy of
   expect(done.verified).toBe(false);
 });
 
+test("another node's task's gate that fails where its round's install cache couldn't be filled says why: its round's VM has no network", async () => {
+  const f = fixture([say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("DONE\nBuilt."), say("DONE\nBuilt.")], {
+    models: () => [{ provider: "paid", model: "m" }],
+    paid: (ref: string) => ref === "paid/m",
+    handedVm: async () => {
+      const exec = async () => result();
+      const round = roundOf(exec);
+      return {
+        exec,
+        round: async (take: string, store: string, fill: string, timeout: number, signal: AbortSignal) => ({
+          ...(await round(take, store, fill, timeout, signal)),
+          cache: { filled: false, said: "its bun.lock names x@github:y/z, which isn't the default registry's, so nothing is filled", ms: 1 },
+          gates: async (command: string) => roundAnswer(command) ?? result({ exitCode: 1, stderr: "error: x@github:y/z failed to resolve" }),
+        }),
+        receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }),
+        send: async () => ({ from: result(), to: result({ stdout: "0" }), bytes: 0, cut: false }),
+        stop: async () => {},
+        release: async () => {},
+      };
+    },
+  });
+  f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  const done = await f.runtime.executeTask(member, { ...handedTask, gates: ["bun install --frozen-lockfile && bun test"] }, f.context);
+  expect(done.verified).toBe(false);
+  expect(JSON.stringify(f.bodies)).toContain("Its round's VM has no network, and the install cache it takes its packages from couldn't be filled: its bun.lock names x@github:y/z, which isn't the default registry's, so nothing is filled");
+  // Filled, and bun had something to fetch all the same (its read-only cache: all it says is that it can't write there).
+  const g = fixture([say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("DONE\nBuilt."), say("DONE\nBuilt.")], {
+    models: () => [{ provider: "paid", model: "m" }],
+    paid: (ref: string) => ref === "paid/m",
+    handedVm: async () => {
+      const exec = async () => result();
+      const round = roundOf(exec);
+      return {
+        exec,
+        round: async (take: string, store: string, fill: string, timeout: number, signal: AbortSignal) => ({
+          ...(await round(take, store, fill, timeout, signal)),
+          cache: { filled: true, said: "", ms: 1 },
+          gates: async (command: string) => roundAnswer(command) ?? result({ exitCode: 1, stderr: "error: EROFS accessing temporary directory. set $BUN_TMPDIR or $BUN_INSTALL" }),
+        }),
+        receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }),
+        send: async () => ({ from: result(), to: result({ stdout: "0" }), bytes: 0, cut: false }),
+        stop: async () => {},
+        release: async () => {},
+      };
+    },
+  });
+  g.store.emit(g.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  expect((await g.runtime.executeTask(member, { ...handedTask, gates: ["bunx some-tool"] }, g.context)).verified).toBe(false);
+  expect(JSON.stringify(g.bodies)).toContain("Bun had a package to fetch that its round's install cache doesn't hold");
+});
+
 /*
  * The eleventh fabric review's R11-2: the node's check that the tests its gates run are as they were took a check it
  * couldn't make as no change, and the gates then ran the rewritten test. Now a check that can't be made sends the work
@@ -1250,6 +1303,7 @@ for (const [what, breaks] of [
         round: async (_take: string, store: string) => ({
           // (Once the work is done, the round it is submitted to breaks as asked: its baseline's round is sound.)
           taken: { from: result(submitted && "take" in breaks ? { exitCode: 1, stderr: "its tree could not be packed: gone" } : {}), to: roundAnswer(store)!, bytes: 1, cut: false },
+          cache: null,
           gates: async (command: string) => {
             if (command.includes("not a copy for its gates")) return submitted && "copy" in breaks ? result({ exitCode: 1, stderr: "its tree could not be checked out: denied" }) : roundAnswer(command)!;
             if (command.includes("sha256sum")) return submitted && "check" in breaks ? result({ exitCode: 137, stdout: "" }) : result({ stdout: `${"a".repeat(64)}  required-check.test.ts\n` });

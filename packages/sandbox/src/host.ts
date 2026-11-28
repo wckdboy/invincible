@@ -1,7 +1,8 @@
-import { existsSync } from "node:fs";
+import { chownSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { type ActionClass, COMPUTER_START, type Decision, decide, type ExecResult, isReservedGatewayScope, LEASE_FILE, MAC_VM_OVERHEAD, NOTES_DIR, randomBytes, redact, type SandboxNetwork, type SandboxView, type SeatKind, TeamWorkspaceRun, VM_OVERHEAD, type VmOverhead, WORKSPACE_OWN } from "@invincible/core";
 import { gateSweepArgs } from "./gate.ts";
+import { FILLER_UID, fillerArgs } from "./install-cache.ts";
 import { layoutPath, MOVE_PY, WORK_TREE } from "./layout.ts";
 import {
   CONTAINER_MAJOR,
@@ -187,6 +188,12 @@ export interface SandboxHostOptions {
   sandboxNetworks?: boolean;
   /** The resolv.conf online microVMs get (see vmResolvConf). */
   resolvConf?: string;
+  /**
+   * The node's install cache's folder (install-cache.ts): filled by the node as each round of another node's task's gates
+   * begins (fillCache), and mounted read-only into that round's VM. Absent: none, and a round's gates have no packages
+   * but those their tree holds. A Linux host's alone.
+   */
+  installCache?: string;
   tokenStore?: SandboxTokenStore;
   /** The moves to layout 2 under way here (LayoutMove): in the node's own database. Absent: in this process's memory. */
   layoutMoves?: LayoutMoves;
@@ -1096,6 +1103,7 @@ export class SandboxHost {
       ...(seated.task ? { task: seated.task } : {}),
       ...(seated.beside ? { beside: seated.beside } : {}),
       ...(seated.gate ? { gate: true as const } : {}),
+      ...(seated.gate && this.opts.installCache && !this.apple ? { cache: this.opts.installCache } : {}),
       // One that shares an agent's workspace, and another node's task's, has a HOME of its own, empty and in memory: never the
       // agent's, nor its /work (a Linux host's alone).
       ...((seated.shares || seated.task) && !this.apple ? { ownHome: { path: await this.imagePath(image) } } : {}),
@@ -2634,11 +2642,59 @@ export class SandboxHost {
     if (this.apple) throw new SandboxError("another node's task is taken only on a Linux host with Docker", 424);
     const of = await this.get(input.of);
     if (!of || of.task !== input.task || of.gate) throw new SandboxError("a round of another node's task's gates is made beside that task's own VM on this host, and that one is not here", 404);
+    // (Its install cache's folder is there before it is mounted: a mount of none fails the VM.)
+    if (this.opts.installCache) this.cacheFolder();
     // (Its disk as big as its task's VM's, where this host holds a VM's disk to a size: its copies of the tree are in it.)
     return this.create(
       { network: "isolated", image: of.image, cpus: of.cpus, memoryGb: of.memoryGb, ...(of.disk ? { diskGb: of.disk.limitGb } : {}), ttlMinutes: input.ttlMinutes, persistent: false, run: input.run, isolation: of.isolation },
       { task: input.task, beside: input.beside, gate: true, ...(signal ? { signal } : {}) },
     );
+  }
+
+  /** Whether this host has an install cache for rounds of other nodes' tasks' gates to be filled (fillCache). */
+  hasInstallCache(): boolean {
+    return !!this.opts.installCache && !this.apple;
+  }
+
+  /** The install cache's folder, made the first time: the filler's user's (FILLER_UID where the node is root), readable by all. */
+  private cacheFolder(): string {
+    const folder = this.opts.installCache!;
+    if (!existsSync(folder)) {
+      mkdirSync(folder, { recursive: true, mode: 0o755 });
+      if (process.getuid?.() === 0) chownSync(folder, FILLER_UID, FILLER_UID);
+    }
+    return folder;
+  }
+
+  /**
+   * The node's install cache filled for a round of another node's task's gates (install-cache.ts), before its VM is made:
+   * a filler container of the node's own from the task's VM's image, given `manifests` (a gzipped tar of the tree's bun.lock and
+   * the package.json files it names) on its input and nothing else of the tree. No capability, a read-only root, its own
+   * user, the cache its one writable mount, Docker's default bridge to reach the registry, removed as it ends (and at its
+   * deadline). Exit 0: what bun.lock names from the registry is in the cache; else why not. A Linux host's alone.
+   */
+  async fillCache(of: string, manifests: Uint8Array, timeoutSec = 600): Promise<ExecResult> {
+    if (this.apple || !this.opts.installCache) throw new SandboxError("this node has no install cache to fill", 424);
+    const view = await this.get(of);
+    if (!view || !view.task) throw new SandboxError("a cache is filled for another node's task's VM on this host, and that one is not here", 404);
+    const cache = this.cacheFolder();
+    const user = process.getuid?.() ? `${process.getuid!()}:${process.getgid!()}` : `${FILLER_UID}:${FILLER_UID}`;
+    const name = containerName(`fill-${hex(randomBytes(5))}`);
+    const args = fillerArgs({ name, image: view.image, cache, user, path: await this.imagePath(view.image) });
+    const started = performance.now();
+    const proc = Bun.spawn([this.bin, ...args], { stdin: new Blob([new Uint8Array(manifests)]), stdout: "pipe", stderr: "pipe" });
+    let late = false;
+    const timer = setTimeout(() => {
+      late = true;
+      proc.kill("SIGKILL");
+    }, timeoutSec * 1000);
+    const [out, err, code] = await Promise.all([readCapped(proc.stdout, MAX_OUTPUT), readCapped(proc.stderr, MAX_OUTPUT), proc.exited]);
+    clearTimeout(timer);
+    // (A client killed leaves its container running: it goes by its own name.)
+    if (late) await this.docker(["rm", "-f", name], 60_000).catch(() => null);
+    const said = late ? `its fill ran out of its ${timeoutSec} s` : redact(err.text.trim()).slice(-600);
+    this.opts.ledger({ class: "modify", resource: "sandbox.install-cache", target: name, verdict: "allow", run: view.run, detail: `the install cache filled for another node's task ${view.task}, from ${view.image}: exit ${late ? 137 : code}` });
+    return { exitCode: late ? 137 : code, stdout: out.text, stderr: said, durationMs: Math.round(performance.now() - started), truncated: out.truncated || err.truncated };
   }
 
   /**

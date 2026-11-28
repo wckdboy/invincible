@@ -171,7 +171,10 @@ def run(mode, task, limit, command, on=""):
                 # Where that profile sets PATH afresh and puts none back (Debian's does; the lab image adds none), each
                 # read-only folder of the VM's own PATH it left off comes after what it set (GATE_PATH).
                 os.chdir(os.path.join(on, "tree"))
-                os.execve("/bin/bash", ["bash", "--noprofile", "--norc", "-c", GATE_PATH + command], {"PATH": held_path(), "HOME": os.path.join(on, "home"), "TMPDIR": os.path.join(on, "tmp"), "LANG": "C.UTF-8"})
+                # And the node's install cache, where its round's VM has it (core's VM_BUN_CACHE, read-only, named in that VM's
+                # own environment as the node made it): bun takes its packages from there.
+                cache = {"BUN_INSTALL_CACHE_DIR": "/cache/bun"} if os.environ.get("BUN_INSTALL_CACHE_DIR") == "/cache/bun" else {}
+                os.execve("/bin/bash", ["bash", "--noprofile", "--norc", "-c", GATE_PATH + command], {"PATH": held_path(), "HOME": os.path.join(on, "home"), "TMPDIR": os.path.join(on, "tmp"), "LANG": "C.UTF-8", **cache})
             os.execvp("bash", ["bash", "-c", command])
         except BaseException as e:
             try:

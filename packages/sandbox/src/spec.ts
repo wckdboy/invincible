@@ -1,5 +1,6 @@
-import { type SandboxNetwork, type SeatKind, VM_GATES, VM_GATES_USER, VM_HOME, VM_WORK } from "@invincible/core";
+import { type SandboxNetwork, type SeatKind, VM_BUN_CACHE, VM_GATES, VM_GATES_USER, VM_HOME, VM_WORK } from "@invincible/core";
 import { GATE_VM_ENV } from "./gate.ts";
+import { cacheMount } from "./install-cache.ts";
 import { HOME_TREE, LAYOUT_ENV, NOTES_TREE, VM_NOTES, WORK_TREE } from "./layout.ts";
 import { collectCommand } from "./walk.ts";
 
@@ -70,6 +71,8 @@ export interface SandboxSpec {
    * asks before it runs.
    */
   gate?: true;
+  /** The node's install cache's folder on its host (install-cache.ts), mounted read-only into a round of gates' VM alone. */
+  cache?: string;
   /**
    * The agent's VM another node's task's VM is made beside (createTaskVm), sharing nothing of it: its lease is renewed with
    * that agent's, and that agent's VM isn't idle while it is there (no move to layout 2 begins under the task's work).
@@ -302,6 +305,7 @@ export function runArgs(spec: SandboxSpec): string[] {
     ...(spec.ownHome ? ["--tmpfs", `${VM_HOME}:rw,nosuid,nodev,size=1g,uid=1000,gid=1000,mode=0700`] : []),
     // A round of another node's task's gates' own folder, their user's alone, where a tree's scripts may run (VM_GATES):
     // in that round's VM alone, where nothing of the task's runs.
+    ...(spec.gate && spec.cache ? cacheMount(spec.cache) : []),
     ...(spec.gate ? ["--tmpfs", `${VM_GATES}:rw,exec,nosuid,nodev,size=2g,uid=${VM_GATES_USER.split(":")[0]},gid=${VM_GATES_USER.split(":")[1]},mode=0700`] : []),
     ...((spec.layout ?? spec.ownHome) ? Object.entries({ ...LAYOUT_ENV, PATH: (spec.layout ?? spec.ownHome)!.path }).flatMap(([key, value]) => ["--env", `${key}=${value}`]) : ["--env", "HOME=/work"]),
     // Bounded resources: a runaway agent cannot starve the host.
@@ -328,7 +332,7 @@ export function runArgs(spec: SandboxSpec): string[] {
       : []),
   ];
   for (const [key, value] of Object.entries(labels(spec))) args.push("--label", `${key}=${value}`);
-  for (const [key, value] of Object.entries({ ...spec.env, ...(spec.seat ? seatEnv(spec.seat.id, spec.seat.kind) : {}), ...(spec.gate ? { [GATE_VM_ENV]: "1" } : {}) })) args.push("--env", `${key}=${value}`);
+  for (const [key, value] of Object.entries({ ...spec.env, ...(spec.seat ? seatEnv(spec.seat.id, spec.seat.kind) : {}), ...(spec.gate ? { [GATE_VM_ENV]: "1", ...(spec.cache ? { BUN_INSTALL_CACHE_DIR: VM_BUN_CACHE } : {}) } : {}) })) args.push("--env", `${key}=${value}`);
   args.push(spec.image, "sleep", "infinity");
   return args;
 }

@@ -5,7 +5,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
-import { handedApply, handedCopy, handedDrop, handedGive, handedNonce, handedReceive, handedRoundStore, handedRoundTake, handedSend, handedSweep, handedTake, handedTree } from "../src/handed-repo.ts";
+import { handedApply, handedCopy, handedDrop, handedGive, handedManifests, handedNonce, handedReceive, handedRoundStore, handedRoundTake, handedSend, handedSweep, handedTake, handedTree } from "../src/handed-repo.ts";
 import { changesCommand } from "../src/team-runtime.ts";
 
 // Every test here makes repositories and runs git on them, as processes of their own, so its time is the machine's to
@@ -1084,6 +1084,42 @@ describe("the round of another node's task's gates: its tree, its store, and eac
       expect([what, kept.stderr.trim()]).toEqual([what, expect.stringMatching(said)]);
       expect(existsSync(join(store, "..", "escaped")) || existsSync("/tmp/escaped")).toBe(false);
     }
+  });
+
+  test("the manifests its install cache is filled from are its tree's bun.lock and the package.json of each workspace it names, and nothing else; none where it has no bun.lock", () => {
+    const LOCK = `{\n  "lockfileVersion": 1,\n  "workspaces": {\n    "": { "name": "app" },\n    "packages/lib": { "name": "lib" },\n  },\n  "packages": {},\n}\n`;
+    /** What a read printed: the files of its gzipped tar, by name. */
+    const listed = (stdout: string) => {
+      const at = temp("handed-manifests-");
+      writeFileSync(join(at, "m.tgz"), Buffer.from(stdout.trim(), "base64"));
+      return sh(`tar -tzf ${q(join(at, "m.tgz"))}`).stdout.trim().split("\n").sort();
+    };
+    const w = worked();
+    // None yet: nothing.
+    expect(sh(handedManifests(w.theirs, w.tree))).toMatchObject({ status: 0, stdout: "" });
+    writeFileSync(join(w.theirs, "bun.lock"), LOCK);
+    writeFileSync(join(w.theirs, "package.json"), `{ "name": "app" }\n`);
+    mkdirSync(join(w.theirs, "packages", "lib"), { recursive: true });
+    writeFileSync(join(w.theirs, "packages", "lib", "package.json"), `{ "name": "lib" }\n`);
+    writeFileSync(join(w.theirs, "bunfig.toml"), `[install]\nregistry = "http://192.0.2.1/"\n`);
+    const tree = sh(handedTree(w.theirs, w.base, "task-x", w.keep.task)).stdout.trim();
+    // (As its tree holds them: what the worktree has since is no part of it.)
+    writeFileSync(join(w.theirs, "bun.lock"), "changed since\n");
+    const read = sh(handedManifests(w.theirs, tree));
+    expect([read.status, read.stderr]).toEqual([0, ""]);
+    expect(listed(read.stdout)).toEqual(["bun.lock", "package.json", "packages/lib/package.json"]);
+    // With no repository, its folder's, as it is.
+    const folder = temp("handed-folder-");
+    writeFileSync(join(folder, "bun.lock"), LOCK.replace(`    "packages/lib": { "name": "lib" },\n`, ""));
+    writeFileSync(join(folder, "package.json"), `{ "name": "app" }\n`);
+    writeFileSync(join(folder, ".npmrc"), "registry=http://192.0.2.1/\n");
+    expect(listed(sh(handedManifests(folder, "")).stdout)).toEqual(["bun.lock", "package.json"]);
+    // A workspace whose package.json isn't there, or a lockfile it can't read: nothing is filled, said.
+    writeFileSync(join(folder, "bun.lock"), LOCK);
+    expect(sh(handedManifests(folder, "")).stderr.trim()).toBe("its bun.lock names a workspace whose package.json isn't there, packages/lib/package.json, so nothing is filled");
+    writeFileSync(join(folder, "bun.lock"), "{ not json");
+    expect(sh(handedManifests(folder, "")).stderr.trim()).toStartWith("its bun.lock can't be read:");
+    expect(() => handedManifests(folder, "HEAD")).toThrow("not a tree");
   });
 
   test("its copy's folder is one of the gates' folder's, named by a nonce, and its tree a tree's id", () => {

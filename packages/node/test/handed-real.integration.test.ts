@@ -310,7 +310,21 @@ sleep 0.2
 p=$PPID; while [ "$p" -gt 1 ]; do if grep -qa 'PR_SET_CHILD_[S]UBREAPER' /proc/$p/cmdline 2>/dev/null; then kill -KILL $p; break; fi; p=$(cut -d' ' -f4 /proc/$p/stat); done
 echo written`,
 } as const;
-type Work = keyof typeof WORK;
+/**
+ * Work made as the run begins (DEPS): a task that adds a dependency of the registry's, as `bun add` would, with its
+ * honest bun.lock and a test that imports it; and the same asking for it from GitHub. Their gate installs it, offline.
+ */
+const LATE: Record<string, string> = {};
+type Work = keyof typeof WORK | "TASK_DEPS" | "TASK_DEPS_GIT";
+/** A bun.lock made the honest way, by the image's bun in a scratch container of this run's on Docker's default bridge. */
+function lockfile(deps: Record<string, string>): { manifest: string; lock: string } {
+  const manifest = JSON.stringify({ name: "project", private: true, dependencies: deps });
+  const made = docker("run", "--rm", "--name", `${PREFIX}lock`, "--network", "bridge", "--user", "65534:65534", "--read-only", "--cap-drop", "ALL", "--tmpfs", "/tmp:rw,size=512m,mode=1777", "--entrypoint", "/usr/bin/env", DEFAULT_IMAGE, "-i", "PATH=/opt/bun/bin:/usr/local/bin:/usr/bin:/bin", "HOME=/tmp/h", "BUN_INSTALL_CACHE_DIR=/tmp/c", "/bin/bash", "--noprofile", "--norc", "-c", `mkdir -p /tmp/a && cd /tmp/a && printf '%s' '${manifest}' > package.json && bun install --ignore-scripts >/dev/null 2>&1 && cat bun.lock`);
+  if (made.status !== 0) throw new Error(`no lockfile could be made: ${made.stderr}`);
+  return { manifest, lock: made.stdout };
+}
+const written = (files: Record<string, string>) => `# zz-work\n${Object.entries(files).map(([file, text]) => `cat > ${file} <<'ZZ'\n${text.replace(/\n$/, "")}\nZZ`).join("\n")}\necho written`;
+const ODD_TEST = `import { expect, test } from "bun:test";\nimport isOdd from "is-odd";\ntest("odd", () => expect(isOdd(3)).toBe(true));\n`;
 const fence = "```";
 const models = Bun.serve({
   port: 0,
@@ -324,7 +338,8 @@ const models = Bun.serve({
     // tasks had to move up to them, its next begins on them. Asked with tools, the planner's model works too.)
     if (body.model === "engineer" || (body.model === "planner" && body.tools?.length)) {
       const asked = JSON.stringify(body.messages);
-      const command = WORK[(Object.keys(WORK) as Work[]).find((work) => asked.includes(`${work}:`)) ?? "TASK_REAL"];
+      const named = [...Object.keys(LATE), ...Object.keys(WORK)].find((work) => asked.includes(`${work}:`)) ?? "TASK_REAL";
+      const command = LATE[named] ?? WORK[named as keyof typeof WORK];
       const worked = turns.some((m) => m.role === "assistant" || m.role === "tool");
       if (body.tools?.length && !worked) return sse({ tool_calls: [{ index: 0, id: "call_work", function: { name: "bash", arguments: JSON.stringify({ command }) } }] });
       return sse({ content: worked ? "DONE\nThe file is written." : `${fence}sh\n${command}\n${fence}` });
@@ -568,6 +583,34 @@ for (const runtime of ["kata", "runc"] as const) {
       console.log(`  ${runtime}, R11-2 control: proof ${JSON.stringify(done.proof)}; locked: ${done.trail.filter((t) => /changed locked\.test\.ts|Tests changed/.test(t.text)).length}`);
       expect(done.proof).toMatchObject({ state: "checked", verified: false });
       placement();
+    });
+
+    /*
+     * Its gates' VM has no network: a gate that installs its packages takes them from the node's install cache, filled
+     * by the node's filler from the registry as each round begins (sandbox install-cache.ts), mounted read-only. One whose
+     * lockfile names another source is filled with nothing, and its gate fails offline, saying why.
+     */
+    test("a gate that installs a dependency of the registry's takes it from the node's install cache, offline, and passes", async () => {
+      const { manifest, lock } = lockfile({ "is-odd": "3.0.1" });
+      LATE.TASK_DEPS = written({ "package.json": manifest, "bun.lock": lock, "odd.test.ts": ODD_TEST });
+      const { done, placement } = await handOff("TASK_DEPS", ["bun install --frozen-lockfile && bun test odd.test.ts"]);
+      console.log(`  ${runtime}, the install cache: proof ${JSON.stringify(done.proof)}`);
+      const calls = readFileSync(log, "utf8").split("\n").filter((line) => / run .*sbx-fill-/.test(line));
+      console.log(`  its fills: ${calls.length}`);
+      expect(done.proof).toMatchObject({ state: "checked", verified: true, proof: { before: [1], after: [0] } });
+      expect(calls.length).toBeGreaterThan(0);
+      placement();
+    });
+
+    test("a gate whose lockfile names a package from elsewhere than the registry fails offline, and says why", async () => {
+      const { manifest, lock } = lockfile({ "is-odd": "3.0.1" });
+      const git = JSON.stringify({ name: "project", private: true, dependencies: { "is-odd": "github:someone/is-odd" } });
+      LATE.TASK_DEPS_GIT = written({ "package.json": git, "bun.lock": lock.replace(manifest.slice(1, -1), git.slice(1, -1)), "odd.test.ts": ODD_TEST });
+      const { done } = await handOff("TASK_DEPS_GIT", ["bun install --frozen-lockfile && bun test odd.test.ts"]);
+      const said = done.trail.filter((t) => t.text.startsWith("Gate ")).map((t) => t.text).join("\n");
+      console.log(`  ${runtime}, the install cache refused: proof ${JSON.stringify(done.proof)}; said: ${/\(Its round's VM has no network[^)]*\)/.exec(said)?.[0] ?? "nothing"}`);
+      expect(done.proof).toMatchObject({ state: "checked", verified: false });
+      expect(said).toContain("Its round's VM has no network, and the install cache it takes its packages from couldn't be filled");
     });
 
     test("R11-2: the same task with a process the freeze misses, closing its .git around the check's copy, is sent back all the same", async () => {

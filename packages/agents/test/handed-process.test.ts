@@ -385,6 +385,10 @@ test("a gate on its copy runs in the copy's tree, its HOME and TMPDIR the copy's
     // (Its ls is the system's, a file: where every folder on the PATH is read-only, as a VM's are; none here is planted.)
     expect(said.slice(6).filter((line) => /profile|rc|bash_env|planted/.test(line))).toEqual([]);
     expect(said[6]).not.toBe("function");
+    // The node's install cache alone is passed on, where its round's VM names it, as the node mounts it (core's VM_BUN_CACHE).
+    const cache = (value: string) => spawnSync("python3", ["-I", "-c", `${HANDED_PROCESS_PY}\nsys.exit(run("gate", "task-test", 20.0, sys.argv[1], sys.argv[2]))`, 'printf "%s" "${BUN_INSTALL_CACHE_DIR-unset}"', on], { encoding: "utf8", timeout: 30_000, env: { ...process.env, BUN_INSTALL_CACHE_DIR: value } }).stdout;
+    expect(cache("/cache/bun")).toBe("/cache/bun");
+    expect(cache(join(on, "home"))).toBe("unset");
   } finally {
     s.done();
   }

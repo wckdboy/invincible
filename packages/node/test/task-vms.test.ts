@@ -13,14 +13,14 @@ const STARTED = Date.UTC(2026, 10, 27, 11, 0);
 const done = (stdout = ""): ExecResult => ({ exitCode: 0, stdout, stderr: "", durationMs: 1, truncated: false });
 
 /** A host as TaskVms uses it: VMs made for tasks, their commands, their streams, their removal. */
-function host(options: { left?: string[]; failRemove?: string; failTimes?: number; stays?: string; refused?: string; slow?: number; makes?: boolean; unlisted?: boolean } = {}) {
+function host(options: { left?: string[]; failRemove?: string; failTimes?: number; stays?: string; refused?: string; slow?: number; makes?: boolean; unlisted?: boolean; cache?: "fills" | "fails"; manifests?: string } = {}) {
   const vms = new Map<string, { createdAt: number; run: string }>();
   /** How often its engine was asked which VMs are other nodes' tasks'. */
   let listed = 0;
   for (const id of options.left ?? []) vms.set(id, { createdAt: STARTED - 60_000, run: `handed.task-${id}` });
   const asked: unknown[] = [], ran: { vm: string; cmd: string[]; as?: "gates" }[] = [], removed: string[] = [];
-  /** Each round's VM as it was asked for, and each sweep of one. */
-  const rounds: unknown[] = [], swept: string[] = [];
+  /** Each round's VM as it was asked for, each sweep of one, and each fill of the install cache. */
+  const rounds: unknown[] = [], swept: string[] = [], filled: { vm: string; manifests: string }[] = [];
   /** Each pipe between two VMs, as the host was asked for it: from which VM's command to which. */
   const piped: { from: { id: string; cmd: string[] }; to: { id: string; cmd: string[] }; maxBytes: number }[] = [];
   /** Each step of a removal, in order: a lease ended, a VM removed. */
@@ -54,10 +54,17 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
       swept.push(vm);
       return done();
     },
+    hasInstallCache: () => !!options.cache,
+    fillCache: async (vm: string, manifests: Uint8Array) => {
+      filled.push({ vm, manifests: Buffer.from(manifests).toString() });
+      return options.cache === "fails" ? { ...done(), exitCode: 1, stderr: "its bun.lock names x@github:y/z, which isn't the default registry's, so nothing is filled" } : done();
+    },
     // (A command that takes `slow` ms, as one in flight does: it returns then, whatever became of its VM meanwhile.)
     exec: async (vm: string, cmd: string[], _timeoutSec?: number, _check?: unknown, as?: "gates") => {
       ran.push({ vm, cmd, ...(as ? { as } : {}) });
       if (options.slow) await Bun.sleep(options.slow);
+      // (The manifests' read, in the task's VM: what it prints, base64.)
+      if (cmd.at(-1) === "read-the-manifests") return done(options.manifests ?? "");
       return done();
     },
     stream: async () => ({ lines: (async function* () {})(), write: () => {}, close: () => {}, kill: () => {}, exited: Promise.resolve(0) }),
@@ -86,7 +93,7 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
       return { from: done(), to: done(), bytes: 0, cut: false };
     },
   };
-  return { fake, vms, asked, rounds, swept, ran, removed, steps, signals, piped, listed: () => listed };
+  return { fake, vms, asked, rounds, swept, filled, ran, removed, steps, signals, piped, listed: () => listed };
 }
 
 const ask = { vm: "agent-vm", task: "task-abcdefghijkl", providers: ["anthropic"], models: ["anthropic/claude-paid"] };
@@ -117,7 +124,7 @@ describe("another node's task's VM, on this node", () => {
     const work = new AbortController();
     const vm = await vms.open(ask, work.signal);
     const live = new AbortController().signal;
-    const first = await vm.round("take-the-tree", "keep-the-tree", 900, live);
+    const first = await vm.round("take-the-tree", "keep-the-tree", "", 900, live);
     // (Made for its task, from its VM, beside its agent's: with its work's own signal, as its VM was.)
     expect(h.rounds).toEqual([{ task: ask.task, of: "vm-1", beside: "agent-vm", run: `handed.${ask.task}`, ttlMinutes: TASK_VM_MINUTES }]);
     expect(h.signals.at(-1)).toBe(live);
@@ -131,7 +138,7 @@ describe("another node's task's VM, on this node", () => {
     expect(h.swept).toEqual(["gate-2"]);
     expect(h.ran.filter((r) => r.as === "gates" && r.vm === "vm-1")).toEqual([]);
     // The next round's VM takes its place: the first is gone, and what is asked of it is refused.
-    const second = await vm.round("take-the-tree", "keep-the-tree", 900, live);
+    const second = await vm.round("take-the-tree", "keep-the-tree", "", 900, live);
     expect(h.removed).toEqual(["gate-2"]);
     await expect(first.gates("test -f x", 30, live)).rejects.toThrow("its work has stopped");
     await expect(first.sweep(live)).rejects.toThrow("its work has stopped");
@@ -142,12 +149,45 @@ describe("another node's task's VM, on this node", () => {
     expect(h.removed).toEqual(["gate-2", "gate-3", "vm-1"]);
   });
 
+  test("its install cache is filled before each round's VM is made, from the manifests its task's VM prints, given to the node's filler as they are; none is asked where the tree has none, nor where the node has no cache; one that fails says why", async () => {
+    const live = new AbortController().signal;
+    const gz = Buffer.from("gzipped manifests").toString("base64");
+    // Filled: the manifests read in the task's VM, then given to the filler for that VM, then the round's VM made.
+    const h = host({ cache: "fills", manifests: gz });
+    const vm = await new TaskVms({ host: () => h.fake as never, now: () => STARTED }).open(ask, new AbortController().signal);
+    const round = await vm.round("take", "keep", "read-the-manifests", 900, live);
+    expect(h.ran.at(-1)).toEqual({ vm: "vm-1", cmd: ["bash", "--noprofile", "--norc", "-c", "read-the-manifests"] });
+    expect(h.filled).toEqual([{ vm: "vm-1", manifests: "gzipped manifests" }]);
+    expect(round.cache).toMatchObject({ filled: true, said: "" });
+    expect(h.rounds).toHaveLength(1);
+    // No bun.lock in the tree: it prints nothing, and nothing is filled.
+    const none = host({ cache: "fills", manifests: "" });
+    const bare = await new TaskVms({ host: () => none.fake as never, now: () => STARTED }).open(ask, new AbortController().signal);
+    expect((await bare.round("take", "keep", "read-the-manifests", 900, live)).cache).toBeNull();
+    expect(none.filled).toEqual([]);
+    // A node with no install cache reads nothing.
+    const off = host({ manifests: gz });
+    const plain = await new TaskVms({ host: () => off.fake as never, now: () => STARTED }).open(ask, new AbortController().signal);
+    expect((await plain.round("take", "keep", "read-the-manifests", 900, live)).cache).toBeNull();
+    expect(off.ran.some((r) => r.cmd.at(-1) === "read-the-manifests")).toBe(false);
+    // A fill that fails says why, and the round goes on: its gates fail offline where they need it, saying so.
+    const fails = host({ cache: "fails", manifests: gz });
+    const failing = await new TaskVms({ host: () => fails.fake as never, now: () => STARTED }).open(ask, new AbortController().signal);
+    expect((await failing.round("take", "keep", "read-the-manifests", 900, live)).cache).toMatchObject({ filled: false, said: "its bun.lock names x@github:y/z, which isn't the default registry's, so nothing is filled" });
+    expect(fails.rounds).toHaveLength(1);
+    // What isn't base64 is no manifests.
+    const odd = host({ cache: "fills", manifests: "not base64!" });
+    const oddly = await new TaskVms({ host: () => odd.fake as never, now: () => STARTED }).open(ask, new AbortController().signal);
+    expect((await oddly.round("take", "keep", "read-the-manifests", 900, live)).cache).toMatchObject({ filled: false, said: "its manifests couldn't be read" });
+    expect(odd.filled).toEqual([]);
+  });
+
   test("its brake takes its gates' round's VM at once, with its own", async () => {
     const h = host();
     const vms = new TaskVms({ host: () => h.fake as never, now: () => STARTED });
     const work = new AbortController();
     const vm = await vms.open(ask, work.signal);
-    await vm.round("take", "keep", 900, new AbortController().signal);
+    await vm.round("take", "keep", "", 900, new AbortController().signal);
     work.abort();
     await Bun.sleep(10);
     expect(h.removed.sort()).toEqual(["gate-2", "vm-1"]);

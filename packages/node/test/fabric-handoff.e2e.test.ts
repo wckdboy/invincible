@@ -41,6 +41,8 @@ docker.onExec = async (_container, command) => {
   const words = [...text.matchAll(/ '([^']*)'/g)].map((m) => m[1]!);
   if (text.includes("not a store for its gates")) return { code: 0, stdout: words.at(-1) || "c".repeat(40) };
   if (text.includes("not a copy for its gates")) return { code: 0, stdout: `1 1 ${words.at(-3)}` };
+  // (The manifests its install cache is filled from: its tree has no bun.lock, so there are none.)
+  if (text.includes("its bun.lock is too big to fill from")) return { code: 0, stdout: "" };
   const gate = /gate-([a-z]+)/.exec(text)?.[1];
   if (gate) return written.has(gate) ? { code: 0, stdout: "the file is there" } : { code: 1, stdout: "", stderr: "no such file" };
   const write = /write-([a-z]+)/.exec(text)?.[1];

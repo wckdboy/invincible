@@ -21,7 +21,7 @@ import type { SandboxHost } from "@invincible/sandbox";
 const RETRY_MS = 60_000;
 const RETRY_MAX_MS = 15 * 60_000;
 
-type Host = Pick<SandboxHost, "createTaskVm" | "createGateVm" | "sweepGates" | "exec" | "destroy" | "stream" | "taskVms" | "get" | "endLease" | "pipe" | "makesSandboxes">;
+type Host = Pick<SandboxHost, "createTaskVm" | "createGateVm" | "sweepGates" | "hasInstallCache" | "fillCache" | "exec" | "destroy" | "stream" | "taskVms" | "get" | "endLease" | "pipe" | "makesSandboxes">;
 
 /**
  * A command of the node's in a task's VM: a shell that reads no profile of the task's (the eighth fabric review's R8-3).
@@ -31,6 +31,23 @@ type Host = Pick<SandboxHost, "createTaskVm" | "createGateVm" | "sweepGates" | "
  * (team-runtime.ts withGateway), under the node's helper, never around it.
  */
 const shell = (command: string): string[] => ["bash", "--noprofile", "--norc", "-c", command];
+
+/**
+ * The node's install cache filled for a round of a task's gates (sandbox install-cache.ts): the manifests `fill` prints in
+ * the task's VM (a gzipped tar, as base64), given as they are to the node's filler, which unpacks and checks them itself.
+ * Null when there are none (the tree has no bun.lock).
+ */
+async function filled(host: Host, vm: string, fill: string): Promise<HandedRound["cache"]> {
+  const began = Date.now();
+  const said = (r: { stderr: string; stdout: string }) => redact(r.stderr || r.stdout).trim().split("\n").at(-1)?.slice(0, 300) || "no reason given";
+  const read = await host.exec(vm, shell(fill), 120).catch((error: Error) => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
+  if (read.exitCode !== 0 || read.truncated) return { filled: false, said: read.truncated ? "its manifests were too big to read" : said(read), ms: Date.now() - began };
+  const text = read.stdout.trim();
+  if (!text) return null;
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(text)) return { filled: false, said: "its manifests couldn't be read", ms: Date.now() - began };
+  const ran = await host.fillCache(vm, Buffer.from(text, "base64"), 600).catch((error: Error) => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
+  return { filled: ran.exitCode === 0, said: ran.exitCode === 0 ? "" : said(ran), ms: Date.now() - began };
+}
 
 /** How long a task's VM may live: longer than any task, which removes it as it ends (a backstop, never its end). */
 export const TASK_VM_MINUTES = 2 * 24 * 60;
@@ -129,9 +146,12 @@ export class TaskVms {
       // first, and given the task's tree as `take` prints it here to `store` there (its own user's, through this host,
       // never kept here). Its gates and the node's checks then run there as their own user in their own folder (execArgs,
       // VM_GATES), and every process of theirs is ended there from an exec of its own before each copy (sweepGates).
-      round: async (take, store, timeoutSec, signal): Promise<HandedRound> => {
+      round: async (take, store, fill, timeoutSec, signal): Promise<HandedRound> => {
         if (signal.aborted) throw new Error("its work has stopped");
         await endRound();
+        // Its install cache filled first, from the tree's manifests alone, as the round's VM mounts it as it is made.
+        const cache = fill && host.hasInstallCache() ? await filled(host, vm, fill) : null;
+        if (signal.aborted) throw new Error("its work has stopped");
         const gate = (await host.createGateVm({ task: ask.task, of: vm, beside: ask.vm, run, ttlMinutes: TASK_VM_MINUTES }, signal)).id;
         gating = gate;
         // (A task that ended while it was made has it removed now: its end removed the round it knew of.)
@@ -142,6 +162,7 @@ export class TaskVms {
         const taken = await host.pipe({ id: vm, cmd: shell(take) }, { id: gate, cmd: shell(store) }, { timeoutSec, maxBytes: Number.POSITIVE_INFINITY });
         return {
           taken,
+          cache,
           gates: async (command, timeoutSec, signal) => {
             if (signal.aborted || gating !== gate) throw new Error("its work has stopped");
             return host.exec(gate, shell(command), timeoutSec, undefined, "gates");

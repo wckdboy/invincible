@@ -10,7 +10,7 @@ import { CheckRefused, commandsRun, DESKTOP_EVIDENCE, escalatedWhy, runLoop, ste
 import { type Trip } from "./tripwires.ts";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
 import { HELD_GIT, heldGit } from "./held-git.ts";
-import { handedApply, handedCopy, handedDrop, handedGive, handedNonce, handedReceive, handedRoundStore, handedRoundTake, handedSend, handedSweep, handedTake, handedTree } from "./handed-repo.ts";
+import { handedApply, handedCopy, handedDrop, handedGive, handedManifests, handedNonce, handedReceive, handedRoundStore, handedRoundTake, handedSend, handedSweep, handedTake, handedTree } from "./handed-repo.ts";
 import { runEvidence, runTrail } from "./skills-run.ts";
 
 /** What one run of an agent is given by the team service (node/team.ts) that starts it. */
@@ -73,9 +73,10 @@ export interface HandedVm {
    * A round of its gates (the eleventh fabric review's ruling, 28 November 2026): a VM of its own, made now from its
    * image, with no network and no lease, where nothing of the task's runs, given its tree as `take` prints it in this VM
    * to `store` there (as that VM's own user). Its gates and the node's checks of its work run there, as their own user,
-   * each on a copy of that tree of its own. The round before goes as this one is made, and the last with the task.
+   * each on a copy of that tree of its own. The round before goes as this one is made, and the last with the task. `fill`:
+   * what prints the manifests the node's install cache is filled from first, in this VM (handedManifests), or "".
    */
-  round(take: string, store: string, timeoutSec: number, signal: AbortSignal): Promise<HandedRound>;
+  round(take: string, store: string, fill: string, timeoutSec: number, signal: AbortSignal): Promise<HandedRound>;
   follow?(offset: number, signal: AbortSignal): Promise<FollowedRun>;
   /**
    * What `fromAgent` prints in its agent's VM, given to `intoTask` in this one as its input, and the other way round
@@ -92,6 +93,8 @@ export interface HandedVm {
 export interface HandedRound {
   /** Its tree's way there: the task's VM's side, and the round's VM's, which prints the tree it holds. */
   taken: HandedPipe;
+  /** The node's install cache, filled for it from the tree's manifests before its VM was made: whether, why not, and how long it took; null, none was asked (no bun.lock, or no cache). */
+  cache: { filled: boolean; said: string; ms: number } | null;
   /** A command as its gates' own user, in their own folder (core's VM_GATES), in the round's VM. */
   gates(command: string, timeoutSec: number, signal: AbortSignal): Promise<ExecResult>;
   /** Every process of its gates' user in the round's VM ended, from an exec of its own (sandbox gate.ts): exit 0, none is left. */
@@ -1083,7 +1086,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         }
         let made: HandedRound;
         try {
-          made = await own!.vm.round(handedRoundTake(root, tree), handedRoundStore(tree), 900, ctx.signal);
+          made = await own!.vm.round(handedRoundTake(root, tree), handedRoundStore(tree), handedManifests(root, tree), 900, ctx.signal);
         } catch (error) {
           judged = { why: `its gates' VM couldn't be made: ${redact(String((error as Error)?.message ?? error)).slice(0, 200)}` };
           return;
@@ -1115,8 +1118,11 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         });
         // (A check whose command didn't end as it does, reading every file it names, is no answer of what changed.)
         if (what === "check" && ran.exitCode !== 0) throw new CheckRefused(`its check exited ${ran.exitCode}: ${said(ran)}`);
+        // A gate that failed for want of a package says why: its round's VM has no network. Bun, given a package to fetch
+        // with its cache read-only, says only that it can't write there (EROFS accessing temporary directory).
+        const unfilled = what !== "gate" || ran.exitCode === 0 ? "" : there!.cache && !there!.cache.filled ? `\n(Its round's VM has no network, and the install cache it takes its packages from couldn't be filled: ${there!.cache.said})` : /EROFS accessing temporary directory/.test(ran.stdout + ran.stderr) ? "\n(Bun had a package to fetch that its round's install cache doesn't hold: that cache holds what its tree's bun.lock names from the registry, and its round's VM has no network.)" : "";
         // (Its copy's time is its own: what all of its gates may take in all counts it.)
-        return { ...ran, durationMs: ran.durationMs + made.ms };
+        return { ...ran, stderr: ran.stderr + unfilled, durationMs: ran.durationMs + made.ms };
       };
       const keepStep = (step: number) => {
         const command = steps.command;
