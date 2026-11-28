@@ -1088,6 +1088,9 @@ print(json.dumps({"code": code, "out": out, "sent": [m for m in ws.sent if m["me
   /** A page that puts up its alert as it loads, 100 ms after the navigation, with a read of it already asked for. */
   const ALERT_AS_IT_LOADS = `
 import queue, threading
+# What puts the page's alert up: its navigation, 0.1 s on, as a page's script does as it loads; or a read of the page
+# (alert_with[0] = "read"), so that the alert goes up while that read waits for its answer.
+alert_with = ["navigate"]
 class WS:
     def __init__(self): self.q = queue.Queue(); self.sent = []
     def send(self, text):
@@ -1101,9 +1104,12 @@ class WS:
         elif m["method"] == "Page.navigate":
             self.q.put({"method": "Target.targetInfoChanged", "params": {"targetInfo": {"targetId": "T1", "type": "page", "title": "alert", "url": m["params"]["url"]}}})
             self.q.put({"id": m["id"], "sessionId": "S1", "result": {"frameId": "T1", "loaderId": "L1"}})
-            threading.Timer(0.1, lambda: self.q.put({"method": "Page.javascriptDialogOpening", "sessionId": "S1", "params": {"url": m["params"]["url"], "message": "Hello from the page", "type": "alert", "hasBrowserHandler": False}})).start()
+            if alert_with[0] == "navigate":
+                threading.Timer(0.1, lambda: self.q.put({"method": "Page.javascriptDialogOpening", "sessionId": "S1", "params": {"url": m["params"]["url"], "message": "Hello from the page", "type": "alert", "hasBrowserHandler": False}})).start()
         elif m["method"] == "Runtime.evaluate":
-            pass  # (the page is busy loading, then its alert holds it)
+            # (The page is busy loading, then its alert holds it: no read is ever answered.)
+            if alert_with[0] == "read":
+                self.q.put({"method": "Page.javascriptDialogOpening", "sessionId": "S1", "params": {"url": "http://127.0.0.1:8000/alert.html", "message": "Hello from the page", "type": "alert", "hasBrowserHandler": False}})
         elif "id" in m:
             self.q.put({"id": m["id"], "result": {}})
     def recv(self): return json.dumps(self.q.get())
@@ -1153,12 +1159,24 @@ print(json.dumps({"code": code, "out": out, "err": err, "reads": reads, "paced":
   });
 
   test("a read already waiting when the alert goes up is answered then, with the alert: not at its 2 s bound", () => {
+    // Already waiting: the alert goes up as the read comes, never a guessed time after the navigation, which a busy
+    // machine's read could come after. Answered by the alert, never at its bound: its reply says which. (Timed, "under a
+    // second" got 1,018 ms at 5 % of a core, 28 November 2026.)
     const got = py(`${ALERT_AS_IT_LOADS}
+alert_with[0] = "read"
+asked = []
+_send = b._send
+def send(message, reply=None):
+    if reply is not None:
+        asked.append((message["method"], reply))
+    return _send(message, reply)
+b._send = send
 b.connect()
-t0 = time.monotonic(); b.call("Page.navigate", {"url": "http://127.0.0.1:8000/alert.html"}, "S1")
+b.call("Page.navigate", {"url": "http://127.0.0.1:8000/alert.html"}, "S1")
 code, out, err = d.cli(desk, ["text"])
-print(json.dumps({"code": code, "err": err, "ms": (time.monotonic() - t0) * 1000}))`) as { code: number; err: string; ms: number };
-    expect(got.ms).toBeLessThan(1000);
+reads = ["by the alert" if "dialog" in r else "answered" if "result" in r or "error" in r else "at its bound" for m, r in asked if m == "Runtime.evaluate"]
+print(json.dumps({"code": code, "err": err, "reads": reads}))`) as { code: number; err: string; reads: string[] };
+    expect(got.reads).toEqual(["by the alert"]);
     expect(got.code).toBe(1);
     expect(got.err).toContain('a JavaScript alert is open on the page: "Hello from the page" [OK]');
   });
