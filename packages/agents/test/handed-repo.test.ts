@@ -588,6 +588,43 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     expect([existsSync(join(s.root, "moved.txt")), existsSync(join(s.root, "pre.txt"))]).toEqual([false, true]);
   });
 
+  test("R8-1: a copy or a rename spelled otherwise is refused too: git's older rename old/new, two names in a diff --git, a --- or +++ that names another file", () => {
+    // (The eighth fabric review's R8-1: each took the content of a file of the base and carried none of it; 64 of them in
+    // 6 KB wrote 5.6 MB at a 1 MiB limit.)
+    const LIMIT = 64 << 10;
+    const x = "x".repeat(31);
+    const s = setUp(committed("pre.txt", Buffer.from(`${x}\n`.repeat(1024))));
+    const forms: Record<string, string> = {
+      "rename old/new": Array.from({ length: 64 }, (_, i) => `diff --git a/pre.txt b/r${i}.txt\nsimilarity index 100%\nrename old pre.txt\nrename new r${i}.txt\n`).join(""),
+      // (git renames by these headers, under a diff --git that names one file, too.)
+      "rename old/new, one name in its diff --git": Array.from({ length: 64 }, (_, i) => `diff --git a/pre.txt b/pre.txt\nsimilarity index 100%\nrename old pre.txt\nrename new h${i}.txt\n`).join(""),
+      "two names in a diff --git, its --- and +++ too": Array.from({ length: 64 }, (_, i) => `diff --git a/pre.txt b/m${i}.txt\n--- a/pre.txt\n+++ b/m${i}.txt\n@@ -1,2 +1,2 @@\n-${x}\n+copy ${i}\n ${x}\n`).join(""),
+      "a +++ that names another file": `diff --git a/pre.txt b/pre.txt\n--- a/pre.txt\n+++ b/f.txt\n@@ -1,2 +1,2 @@\n-${x}\n+moved\n ${x}\n`,
+      "a --- that names another file": `diff --git a/pre.txt b/pre.txt\n--- a/other.txt\n+++ b/pre.txt\n@@ -1,2 +1,2 @@\n-${x}\n+moved\n ${x}\n`,
+      "two names in a diff --git alone": `diff --git a/pre.txt b/e.txt\n`,
+    };
+    for (const [what, patch] of Object.entries(forms)) {
+      // (Each a few KiB at most: 64 copies of a 32 KiB file of the base would write 2 MiB from it.)
+      expect([what, patch.length < 12 << 10]).toEqual([what, true]);
+      const applied = s.apply(patch, LIMIT);
+      expect([what, applied.status, applied.stderr.trim()]).toEqual([what, 1, COPIED]);
+    }
+    // Nothing of any of them reached the worktree: no file it named, and the base's own as it was.
+    expect(readdirSync(s.root).filter((name) => name !== ".git").sort()).toEqual(["README.md", "app.txt", "pre.txt"]);
+    expect(readFileSync(join(s.root, "pre.txt"), "utf8")).toBe(`${x}\n`.repeat(1024));
+    // What the clone's send makes still comes back, quoted names and names with spaces among it: one name twice, always.
+    expect(s.give().status).toBe(0);
+    writeFileSync(join(s.theirs, "with space.txt"), "a name with a space\n");
+    writeFileSync(join(s.theirs, "caf\u00e9.txt"), "a name git quotes\n");
+    rmSync(join(s.theirs, "app.txt"));
+    chmodSync(join(s.theirs, "README.md"), 0o755);
+    const sent = s.send();
+    expect(sent.stdout).toContain('diff --git "a/caf\\303\\251.txt" "b/caf\\303\\251.txt"');
+    const back = s.bring(LIMIT);
+    expect([back.status, back.stderr.trim()]).toEqual([0, ""]);
+    expect([readFileSync(join(s.root, "with space.txt"), "utf8"), readFileSync(join(s.root, "caf\u00e9.txt"), "utf8"), existsSync(join(s.root, "app.txt"))]).toEqual(["a name with a space\n", "a name git quotes\n", false]);
+  });
+
   test("what git diff writes still comes back: a new binary file, as a literal part", () => {
     const s = setUp();
     expect(s.give().status).toBe(0);

@@ -148,9 +148,13 @@ print(size)`;
  *   git inflates as it reads them (each hunk's size, both ways) and what a delta makes, with the file this check reads
  *   to make it, is held to `limit` before any of it is inflated, read or built: the check's own memory with it. The
  *   patch, which may be as large as the limit, is read a line at a time.
- * - A copy or a rename (`copy from`, `rename from`) takes its content from a file of `base` and carries none of it, so a
- *   few KiB of them write that file as many times as they name it, past any limit (R7-2's kind: 64 copies wrote 2 MiB
- *   at a 64 KiB limit). The clone's send never makes one (`--no-renames`), so a patch with one is refused.
+ * - A copy or a rename takes its content from a file of `base` and carries none of it, so a few KiB of them write that
+ *   file as many times as they name it, past any limit (R7-2's kind: 64 copies wrote 2 MiB at a 64 KiB limit). The
+ *   clone's send never makes one (`--no-renames`), so a patch with one is refused, however it is spelled (the eighth
+ *   review's R8-1: 64 of git's older `rename old`/`new`, or of a `diff --git` naming two files, wrote 5.6 MB at a
+ *   1 MiB limit): a `copy` or `rename` header line of any kind, a `diff --git` line whose two names aren't one path, or
+ *   a `---` or `+++` in a section's header naming another than its path (or /dev/null). A traditional patch, with no
+ *   `diff --git` line, is no copy: git patches the file its `+++` names, which must be there, with what it carries.
  */
 const BINARY_CHECK = `import base64,hashlib,zlib
 def binary_refused(root, base, path, limit):
@@ -164,6 +168,16 @@ def binary_refused(root, base, path, limit):
     held = {}
     def text(line):
         return line[:-1] if line.endswith(b'\\n') else line
+    def names(rest):
+        # (A diff --git line's two names, as git writes them for one file, quoted or not: its a/ and b/ names, else None.)
+        q = (len(rest) - (9 if rest.startswith(b'"') else 5)) // 2
+        if q <= 0:
+            return None
+        if rest.startswith(b'"'):
+            p = rest[3:3+q]
+            return (b'"a/'+p+b'"', b'"b/'+p+b'"') if rest == b'"a/'+p+b'" "b/'+p+b'"' else None
+        p = rest[2:2+q]
+        return (b'a/'+p, b'b/'+p) if rest == b'a/'+p+b' b/'+p else None
     def blobs():
         # (The blobs of where the work began, by id with their sizes, read once: what the task's own bundle carried.)
         if 'blobs' not in held:
@@ -260,14 +274,28 @@ def binary_refused(root, base, path, limit):
                 yield line
         lines = read()
         total, index = 0, None
+        # (The names of the section being read, from its diff --git line, and whether its header is: to its first hunk.)
+        section, header = None, False
         line = next(lines, None)
         while line is not None:
+            if line.startswith(b'diff --git '):
+                section, header = names(text(line)[11:]), True
+                if section is None:
+                    return copied
+            elif header and (line.startswith(b'@@ ') or text(line) == b'GIT binary patch'):
+                header = False
+            # (Each name to its first tab, as git reads it: git ends one with a space in it so, and quotes any with a tab.)
+            elif header and line.startswith(b'--- ') and text(line)[4:].split(b'\\t', 1)[0] not in (section[0], b'/dev/null'):
+                return copied
+            elif header and line.startswith(b'+++ ') and text(line)[4:].split(b'\\t', 1)[0] not in (section[1], b'/dev/null'):
+                return copied
             if method(line):
                 return spelled
             if line.startswith((b'Binary files ', b'Files ')):
                 return carried
-            # (A header line: no line of a hunk starts so, its first character being its kind.)
-            if line.startswith((b'copy from ', b'copy to ', b'rename from ', b'rename to ')):
+            # (A header line: no line of a hunk starts so, its first character being its kind. Any spelling of a copy or a
+            # rename: git's older rename old/new among them.)
+            if line.startswith((b'copy ', b'rename ')):
                 return copied
             if line.startswith(b'index '):
                 index = text(line)

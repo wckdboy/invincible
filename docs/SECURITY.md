@@ -490,10 +490,10 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   - before git reads the patch, each binary part is parsed as git parses it, its size counted as git inflates it (a
     delta's at what it makes), and its content must be the object it names (a delta's base a blob of where the work
     began), so nothing comes from the agent's store, and whether the store holds an object is no answer (R7-1, R7-2);
-    a copy or a rename by its `copy` or `rename from`/`to` headers, which carries none of its content and which the
-    clone's send never makes, is refused whole; one spelled otherwise (git's older `rename old`/`new`, or a `---` and a
-    `+++` that name two files) isn't yet, and writes a copy of a file of the base that nothing counts (the eighth
-    re-review's R8-1, open);
+    a copy or a rename, which carries none of its content and which the clone's send never makes, is refused whole,
+    however it is spelled: a `copy` or `rename` header line of any kind (git's older `rename old`/`new` among them), a
+    `diff --git` whose two names aren't one path, or a `---` or `+++` naming another than its section's (the eighth
+    re-review's R8-1);
   - every step of the agent's side on that worktree (a bring-back, a checkpoint, a review's evidence, the changes'
     read) runs one at a time (R7-3).
   A patch that didn't all come (its sender ended, the pipe cut, fewer bytes kept than were carried), or that is past
