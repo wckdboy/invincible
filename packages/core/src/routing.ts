@@ -1,3 +1,4 @@
+import { type InterventionKind, interventionCount } from "./interventions.ts";
 import { costOf, type Prices, type UsageLine } from "./spend.ts";
 
 /*
@@ -134,9 +135,11 @@ export function roundNotice(input: { agent: string; task: string; id: string; re
  * work began and why: the engineer's models (as ever, or as a try after the planner's) or the planner's (by the memory,
  * by its plan). For each: how many, how many verified, how many moved up and why, how many went round on both tiers,
  * and what they came to at your prices and in minutes, every task's (verified or not) per verified task. And the tries'
- * own word: how many held, verified on the engineer's without moving up. A task with no kind kept (held to models, a
- * coding tool's, from before kinds were kept) is counted apart. The same tasks, the same report: its order is fixed.
- * Its JSON (`--json`) is this, `v` 1: a contract.
+ * own word: how many held, verified on the engineer's without moving up. With each, the mandate's north star: each time
+ * you stepped in on those tasks, as it counts them (interventions.ts), on how many, and per verified task. A task with no
+ * kind kept (held to models, a coding tool's, from before kinds were kept) is counted apart. Since a moment (`--since`),
+ * only the tasks that finished then or after. The same tasks, the same report: its order is fixed. Its JSON (`--json`)
+ * is this, `v` 1: a contract, held by fixtures; what came after its first form only adds fields.
  */
 
 /** A task as the report reads it: a TeamTask has all of this. One with no record isn't finished, and isn't read. */
@@ -145,6 +148,8 @@ export interface RoutingReportTask {
   status: string;
   verified: boolean;
   record?: { startedAt: number; endedAt: number; spent: readonly UsageLine[]; routing?: RoutingRead };
+  /** Each time you stepped in on it, by how (absent: never). */
+  interventions?: Partial<Record<InterventionKind, number>>;
 }
 
 /** What a set of tasks came to: how many, verified, money at your prices (all of it priced or not) and minutes. */
@@ -158,6 +163,11 @@ export interface RoutingTally {
   /** Per verified task (every task's, verified or not): none when none was verified, or when money isn't all priced. */
   usdPerVerified: number | null;
   minutesPerVerified: number | null;
+  /** Each time you stepped in on these tasks, as the north star counts it; on how many of them; and per verified task
+   * (none when none was verified). */
+  interventions: number;
+  neededYou: number;
+  interventionsPerVerified: number | null;
 }
 
 /** Tasks of a kind whose work began in one place, for one reason (null: as ever). */
@@ -170,6 +180,8 @@ export interface RoutingReportGroup extends RoutingTally {
 
 export interface RoutingReport {
   v: 1;
+  /** The tasks read are those that finished at this moment or after (ISO 8601, UTC); null: every finished task listed. */
+  since: string | null;
   /** Finished tasks read (each with its record), and of them those with no kind kept: not in any kind. */
   finished: number;
   unrouted: number;
@@ -198,12 +210,14 @@ function tally(tasks: readonly RoutingReportTask[], prices: Prices): RoutingTall
   }
   const verified = tasks.filter((task) => task.verified).length;
   const minutes = ms / 60_000;
-  return { tasks: tasks.length, verified, usd, priced, minutes, usdPerVerified: verified && priced ? usd / verified : null, minutesPerVerified: verified ? minutes / verified : null };
+  const interventions = tasks.reduce((sum, task) => sum + interventionCount(task.interventions), 0);
+  const neededYou = tasks.filter((task) => interventionCount(task.interventions) > 0).length;
+  return { tasks: tasks.length, verified, usd, priced, minutes, usdPerVerified: verified && priced ? usd / verified : null, minutesPerVerified: verified ? minutes / verified : null, interventions, neededYou, interventionsPerVerified: verified ? interventions / verified : null };
 }
 
-/** How a node's finished tasks were routed (above). */
-export function routingReport(tasks: readonly RoutingReportTask[], prices: Prices): RoutingReport {
-  const finished = tasks.filter((task) => task.record);
+/** How a node's finished tasks were routed (above): those that finished at `since` or after, where one is given (ms). */
+export function routingReport(tasks: readonly RoutingReportTask[], prices: Prices, since?: number): RoutingReport {
+  const finished = tasks.filter((task) => task.record && (since === undefined || task.record.endedAt >= since));
   const routed = finished.filter((task) => task.record!.routing?.kind && task.record!.routing.kind in KIND_WORDS);
   const kinds = TASK_KINDS.flatMap((kind) => {
     const mine = routed.filter((task) => task.record!.routing!.kind === kind);
@@ -226,6 +240,7 @@ export function routingReport(tasks: readonly RoutingReportTask[], prices: Price
   const tries = routed.filter((task) => task.record!.routing!.began === "engineer" && task.record!.routing!.because === "probe");
   return {
     v: 1,
+    since: since === undefined ? null : new Date(since).toISOString(),
     finished: finished.length,
     unrouted: finished.length - routed.length,
     kinds,

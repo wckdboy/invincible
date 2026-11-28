@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { beginFor, Bodies, PROBE_AFTER, ROUND_SOURCE, roundKey, roundNotice, roundTask, type RoutedTaskRead, type RoutingRead, routingReport, type RoutingReportTask, TASK_KINDS, type TaskKind, taskKindOf, TeamTaskRecord, TeamTaskRouting } from "../src/index.ts";
+import { beginFor, Bodies, type InterventionKind, northStar, PROBE_AFTER, ROUND_SOURCE, roundKey, roundNotice, roundTask, type RoutedTaskRead, type RoutingRead, routingReport, type RoutingReportTask, TASK_KINDS, type TaskKind, taskKindOf, TeamTaskRecord, TeamTaskRouting } from "../src/index.ts";
 
 /*
  * Smart routing's memory, by kind of task (routing.ts): an agent's tasks of a kind begin on the tier that last verified
@@ -184,6 +184,7 @@ describe("the routing report: how a node's own finished tasks were routed, by ki
     ];
     expect(routingReport(tasks, prices)).toEqual({
       v: 1,
+      since: null,
       finished: 5,
       unrouted: 0,
       kinds: [
@@ -196,7 +197,10 @@ describe("the routing report: how a node's own finished tasks were routed, by ki
           minutes: 4,
           usdPerVerified: 1,
           minutesPerVerified: 4,
-          groups: [{ began: "engineer", because: null, tasks: 1, verified: 1, movedUp: { gate: 0, review: 0, stall: 0, rereads: 0 }, wentRound: 0, usd: 1, priced: true, minutes: 4, usdPerVerified: 1, minutesPerVerified: 4 }],
+          interventions: 0,
+          neededYou: 0,
+          interventionsPerVerified: 0,
+          groups: [{ began: "engineer", because: null, tasks: 1, verified: 1, movedUp: { gate: 0, review: 0, stall: 0, rereads: 0 }, wentRound: 0, usd: 1, priced: true, minutes: 4, usdPerVerified: 1, minutesPerVerified: 4, interventions: 0, neededYou: 0, interventionsPerVerified: 0 }],
         },
         {
           kind: "code",
@@ -207,10 +211,13 @@ describe("the routing report: how a node's own finished tasks were routed, by ki
           minutes: 64,
           usdPerVerified: 31 / 3,
           minutesPerVerified: 64 / 3,
+          interventions: 0,
+          neededYou: 0,
+          interventionsPerVerified: 0,
           groups: [
             // Its money and minutes are every task's of the group, verified or not, per verified task.
-            { began: "engineer", because: null, tasks: 3, verified: 2, movedUp: { gate: 1, review: 0, stall: 0, rereads: 1 }, wentRound: 1, usd: 21, priced: true, minutes: 56, usdPerVerified: 10.5, minutesPerVerified: 28 },
-            { began: "planner", because: "memory", tasks: 1, verified: 1, movedUp: { gate: 0, review: 0, stall: 0, rereads: 0 }, wentRound: 0, usd: 10, priced: true, minutes: 8, usdPerVerified: 10, minutesPerVerified: 8 },
+            { began: "engineer", because: null, tasks: 3, verified: 2, movedUp: { gate: 1, review: 0, stall: 0, rereads: 1 }, wentRound: 1, usd: 21, priced: true, minutes: 56, usdPerVerified: 10.5, minutesPerVerified: 28, interventions: 0, neededYou: 0, interventionsPerVerified: 0 },
+            { began: "planner", because: "memory", tasks: 1, verified: 1, movedUp: { gate: 0, review: 0, stall: 0, rereads: 0 }, wentRound: 0, usd: 10, priced: true, minutes: 8, usdPerVerified: 10, minutesPerVerified: 8, interventions: 0, neededYou: 0, interventionsPerVerified: 0 },
           ],
         },
       ],
@@ -262,5 +269,44 @@ describe("the routing report: how a node's own finished tasks were routed, by ki
     const once = routingReport(tasks, prices);
     expect(once.kinds[0]!.groups.map((g) => `${g.began}${g.because ? `:${g.because}` : ""}`)).toEqual(["engineer", "engineer:probe", "planner:memory", "planner:plan", "planner"]);
     expect(routingReport([...tasks].reverse(), prices)).toEqual(once);
+  });
+
+  /** The task, with how you stepped in on it. */
+  const stepped = (task: RoutingReportTask, interventions: Partial<Record<InterventionKind, number>>): RoutingReportTask => ({ ...task, interventions });
+
+  test("each time you stepped in, as the north star counts it: by kind and where work began, on how many tasks, and per verified task", () => {
+    const tasks = [
+      done(1, { began: "engineer", kind: "code" }),
+      stepped(done(2, { began: "engineer", moved: "gate", kind: "code" }), { steer: 1 }),
+      stepped(done(3, { began: "engineer", moved: "rereads", round: true, kind: "code" }, { verified: false }), { message: 2, stop: 1 }),
+      done(4, { began: "planner", because: "memory", kind: "code" }),
+      // A kind the north star doesn't count isn't counted here either.
+      stepped(done(5, { began: "engineer", kind: "fix" }), { again: 1, poke: 3 } as Partial<Record<InterventionKind, number>>),
+      // Not routed, and not finished: neither is read.
+      stepped(done(6, undefined), { approval: 1 }),
+      { id: "task-running00007", status: "running", verified: false, interventions: { steer: 2 } },
+    ];
+    const [fix, code] = routingReport(tasks, prices).kinds;
+    expect([fix!.interventions, fix!.neededYou, fix!.interventionsPerVerified]).toEqual([1, 1, 1]);
+    expect([code!.interventions, code!.neededYou, code!.interventionsPerVerified]).toEqual([4, 2, 4 / 3]);
+    expect(code!.groups.map((g) => [g.began, g.because, g.interventions, g.neededYou, g.interventionsPerVerified])).toEqual([
+      ["engineer", null, 4, 2, 2],
+      ["planner", "memory", 0, 0, 0],
+    ]);
+    // None verified: nothing per verified task.
+    const unverified = routingReport([stepped(done(1, { began: "engineer", kind: "task" }, { verified: false }), { stop: 1 })], prices).kinds[0]!;
+    expect([unverified.interventions, unverified.neededYou, unverified.interventionsPerVerified]).toEqual([1, 1, null]);
+    // The north star's own count, task by task.
+    for (const task of tasks.filter((t) => t.record?.routing?.kind)) expect([task.id, routingReport([task], prices).kinds[0]!.interventions]).toEqual([task.id, northStar([{ ...task, updatedAt: 0 }], 0).interventions]);
+  });
+
+  test("since a moment: only the tasks that finished then or after are read, and the report says from when", () => {
+    const at = (task: RoutingReportTask, endedAt: number): RoutingReportTask => ({ ...task, record: { ...task.record!, startedAt: endedAt - 60_000, endedAt } });
+    const since = Date.UTC(2026, 10, 28, 16, 47);
+    const tasks = [at(done(1, { began: "engineer", kind: "code" }), since - 1), at(done(2, { began: "engineer", kind: "code" }), since), at(done(3, undefined), since + 1)];
+    const report = routingReport(tasks, prices, since);
+    expect([report.since, report.finished, report.unrouted, report.kinds.map((k) => [k.kind, k.tasks])]).toEqual(["2026-11-28T16:47:00.000Z", 2, 1, [["code", 1]]]);
+    // Without one: every finished task the node lists, and no moment.
+    expect([routingReport(tasks, prices).since, routingReport(tasks, prices).finished]).toEqual([null, 3]);
   });
 });

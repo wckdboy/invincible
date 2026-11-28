@@ -83,9 +83,12 @@ of its own; "agents" and "team" are the same command)
   agents import <file.md> [--id <new id>] [-y]
                                     an agent file in as a new agent here, shown first; the keys it had, yours to give
   agents steps <task-id>          the steps of an agent's task in a repository, each kept as it ended
-  agents routing [--json]         how this node's finished tasks were routed, by kind and where each began: how many
+  agents routing [--since <day or time>] [--json]
+                                    how this node's finished tasks were routed, by kind and where each began: how many
                                     were verified, moved up and why, went round on both tiers, $ and minutes a verified
-                                    task, and the tries of the engineer's that held (read-only; --json: the report)
+                                    task, how often you stepped in (the north star), and the tries of the engineer's that
+                                    held (read-only; --since 2026-11-28 or 2026-11-28T16:47Z: those finished since;
+                                    --json: the report)
   agents routing <id>             where its next task of each kind begins (a fix, desktop work, code, a task): the
                                     planner's models where the last of that kind was verified there, else the engineer's
   agents again <task-id> [--from <step>] ["<goal>"]

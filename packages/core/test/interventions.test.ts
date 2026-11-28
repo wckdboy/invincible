@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { interventionWords, northStar } from "../src/interventions.ts";
+import { interventionCount, interventionWords, northStar } from "../src/interventions.ts";
 
 describe("the north star (#28)", () => {
   const task = (status: string, interventions: Record<string, number> | undefined, opts: { verified?: boolean; updatedAt?: number } = {}) =>
@@ -17,6 +17,14 @@ describe("the north star (#28)", () => {
       task("done", { message: 9 }, { updatedAt: 10 }),
     ], 50);
     expect(star).toEqual({ since: 50, completed: 2, ended: 5, interventions: 6, perCompleted: 3, byKind: { approval: 1, message: 2, stop: 2, again: 1 } });
+  });
+
+  test("one task's count, as the north star counts it: each of its kinds, no other (the routing report counts with it)", () => {
+    expect(interventionCount({ approval: 1, message: 2, steer: 1, again: 1 })).toBe(5);
+    expect(interventionCount({ again: 1, poke: 3 } as Record<string, number>)).toBe(1);
+    expect(interventionCount(undefined)).toBe(0);
+    const counts = { approval: 1, stop: 2, rewritten: 1 };
+    expect(interventionCount(counts)).toBe(northStar([task("failed", counts)], 0).interventions);
   });
 
   test("with nothing completed there is no ratio, only the count", () => {

@@ -239,8 +239,12 @@ The run loop is carried and renamed (§10), the most proven part of it:
     - how many went round on both tiers (its record keeps `round`, as its notice goes when it ends);
     - money at your prices (a coding plan's calls are paid for already) and minutes, every task's per verified
       task, never guessed where a call has no price;
+    - the north star: each time you stepped in on them (as `northStar` counts it), on how many, and per verified
+      task;
     - the tries of the engineer's that held.
-    `--json` is the report itself (`v` 1), a contract held by fixtures. The agents' page shows a quiet line per kind
+    `--json` is the report itself (`v` 1), a contract held by fixtures. Its fields only grow: interventions and `--since`
+    were added to v 1, and the first form's fixture is held whole in the new. `--since <day or time>` reads only the
+    tasks that finished then or after (a time needs its zone). The agents' page shows a quiet line per kind
     at a desk's width, never on a phone. It reads the latest finished tasks the node lists, up to 512 less those in
     hand.
 - **Harnesses:**

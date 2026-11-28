@@ -1,0 +1,84 @@
+{
+  "v": 1,
+  "since": "2026-11-28T16:47:00.000Z",
+  "finished": 2,
+  "unrouted": 0,
+  "kinds": [
+    {
+      "kind": "fix",
+      "tasks": 1,
+      "verified": 1,
+      "usd": 0,
+      "priced": true,
+      "minutes": 4,
+      "usdPerVerified": 0,
+      "minutesPerVerified": 4,
+      "interventions": 1,
+      "neededYou": 1,
+      "interventionsPerVerified": 1,
+      "groups": [
+        {
+          "began": "engineer",
+          "because": null,
+          "tasks": 1,
+          "verified": 1,
+          "usd": 0,
+          "priced": true,
+          "minutes": 4,
+          "usdPerVerified": 0,
+          "minutesPerVerified": 4,
+          "interventions": 1,
+          "neededYou": 1,
+          "interventionsPerVerified": 1,
+          "movedUp": {
+            "gate": 0,
+            "review": 0,
+            "stall": 0,
+            "rereads": 0
+          },
+          "wentRound": 0
+        }
+      ]
+    },
+    {
+      "kind": "code",
+      "tasks": 1,
+      "verified": 1,
+      "usd": 1,
+      "priced": true,
+      "minutes": 8,
+      "usdPerVerified": 1,
+      "minutesPerVerified": 8,
+      "interventions": 0,
+      "neededYou": 0,
+      "interventionsPerVerified": 0,
+      "groups": [
+        {
+          "began": "engineer",
+          "because": "probe",
+          "tasks": 1,
+          "verified": 1,
+          "usd": 1,
+          "priced": true,
+          "minutes": 8,
+          "usdPerVerified": 1,
+          "minutesPerVerified": 8,
+          "interventions": 0,
+          "neededYou": 0,
+          "interventionsPerVerified": 0,
+          "movedUp": {
+            "gate": 0,
+            "review": 0,
+            "stall": 0,
+            "rereads": 0
+          },
+          "wentRound": 0
+        }
+      ]
+    }
+  ],
+  "probes": {
+    "tried": 1,
+    "held": 1
+  }
+}

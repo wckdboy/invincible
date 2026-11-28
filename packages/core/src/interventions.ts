@@ -34,6 +34,11 @@ interface Counted {
   interventions?: Partial<Record<InterventionKind, number>>;
 }
 
+/** How many times you stepped in on one task, as the north star counts it: each of INTERVENTIONS' kinds, no other. */
+export function interventionCount(counts: Partial<Record<InterventionKind, number>> | undefined): number {
+  return INTERVENTIONS.reduce((sum, kind) => sum + (counts?.[kind] ?? 0), 0);
+}
+
 /** The north star over tasks: those that ended since `since`, every intervention on them, per one done and verified. */
 export function northStar(tasks: readonly Counted[], since: number): NorthStar {
   const ended = tasks.filter((t) => t.updatedAt >= since && (t.status === "done" || t.status === "failed" || t.status === "stopped"));

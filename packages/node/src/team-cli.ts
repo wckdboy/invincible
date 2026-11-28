@@ -59,7 +59,7 @@ export const taskChangesLine = (task: Pick<TeamTask, "changes">): string => (tas
  */
 const yourMoney = (api: Api): Promise<Prices> => api.call<{ prices: Prices; plans?: string[] }>("prices").then((answer) => moneyPrices(answer.prices, answer.plans ?? []), (): Prices => ({}));
 
-const usage = "invincible agents [add <id> | avatar <id> | models <id> [provider/model…] | sensitive <id> [on|off] [provider/model…] | dm <id> [message] | room <name> <member…> | chat <room> [message] | task <room> <assignee> <goal> [--sensitive] [--models provider/model,…] | steps <task-id> | again <task-id> [--from <step>] [goal] | keys <id> [add <secret> [--write] | rm <secret>] | export <id> [--out file.md] | import <file.md> [--id <new id>] [-y] | give <goal> | trail <task-id> [--follow] | routing [<id>] [--json] | provision <id> | memory <id> [text] | engram [on|off] | ci [on|off] | daily [<usd>] | merge <owner/repo> [on|off] | pause|resume|stop <room|agent|task> <id> | approve|decline <task-id> | remove <id> [--destroy-workspace] [--yes]]";
+const usage = "invincible agents [add <id> | avatar <id> | models <id> [provider/model…] | sensitive <id> [on|off] [provider/model…] | dm <id> [message] | room <name> <member…> | chat <room> [message] | task <room> <assignee> <goal> [--sensitive] [--models provider/model,…] | steps <task-id> | again <task-id> [--from <step>] [goal] | keys <id> [add <secret> [--write] | rm <secret>] | export <id> [--out file.md] | import <file.md> [--id <new id>] [-y] | give <goal> | trail <task-id> [--follow] | routing [<id>] [--since <day or time>] [--json] | provision <id> | memory <id> [text] | engram [on|off] | ci [on|off] | daily [<usd>] | merge <owner/repo> [on|off] | pause|resume|stop <room|agent|task> <id> | approve|decline <task-id> | remove <id> [--destroy-workspace] [--yes]]";
 
 /** Where a group of tasks' work began, in words (core's routingReport keys); one this CLI doesn't know, as it is. */
 const BEGAN_WORDS: Readonly<Record<string, string>> = {
@@ -79,19 +79,40 @@ function tallyWords(t: RoutingTally): string {
   return t.usdPerVerified === null ? `${counted}, ${minutes} (money not all priced)` : `${counted}, $${t.usdPerVerified.toFixed(2)} and ${minutes}`;
 }
 
+/** How often you stepped in on a tally's tasks, on how many, and per verified task: the north star (empty: never). */
+function steppedInWords(t: RoutingTally): string {
+  if (!t.interventions) return "";
+  const perVerified = t.interventionsPerVerified === null ? "" : `, ${t.interventionsPerVerified.toFixed(1)} a verified task`;
+  return `you stepped in ${t.interventions} time${t.interventions === 1 ? "" : "s"} on ${t.neededYou} task${t.neededYou === 1 ? "" : "s"}${perVerified}`;
+}
+
+/** A moment `--since` names, in words: "2026-11-28 16:47 UTC". */
+const sinceWords = (iso: string): string => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+
+/**
+ * The moment `--since` names: a day (its start, in UTC) or a time with its zone. A time without one is refused, as is
+ * anything else: whose clock would it be?
+ */
+function sinceOf(value: unknown): number {
+  const text = typeof value === "string" ? value.trim() : "";
+  const at = /^\d{4}-\d{2}-\d{2}$/.test(text) || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(text) ? Date.parse(text) : Number.NaN;
+  if (!Number.isFinite(at)) throw new Error("--since takes a day or a time with its zone, as 2026-11-28 or 2026-11-28T16:47Z");
+  return at;
+}
+
 /**
  * `invincible agents routing` with no agent, said: core's routingReport, a line each kind and each place its work began,
  * then the tries of the engineer's. Its words are a contract, held by the team CLI's tests; `--json` is the report itself.
  */
 export function routingReportLines(report: RoutingReport): string[] {
-  if (!report.finished) return ["No task has finished on this node yet: nothing to say of its routing."];
+  if (!report.finished) return [`No task has finished on this node ${report.since ? `since ${sinceWords(report.since)}` : "yet"}: nothing to say of its routing.`];
   const lines = [
-    `Routing, from the last ${report.finished} task${report.finished === 1 ? "" : "s"} this node finished${report.unrouted ? ` (${report.unrouted} not routed: held to models, a coding tool's, or from before kinds were kept)` : ""}:`,
+    `Routing, from the ${report.since ? "" : "last "}${report.finished} task${report.finished === 1 ? "" : "s"} this node finished${report.since ? ` since ${sinceWords(report.since)}` : ""}${report.unrouted ? ` (${report.unrouted} not routed: held to models, a coding tool's, or from before kinds were kept)` : ""}:`,
   ];
   if (!report.kinds.length) return [...lines, "  None of them was routed."];
   for (const kind of report.kinds) {
     const many = KIND_WORDS[kind.kind].many;
-    lines.push(`  ${many[0]!.toUpperCase()}${many.slice(1)}: ${tallyWords(kind)}`);
+    lines.push(`  ${many[0]!.toUpperCase()}${many.slice(1)}: ${tallyWords(kind)}${steppedInWords(kind) ? ` · ${steppedInWords(kind)}` : ""}`);
     for (const group of kind.groups) {
       const key = group.because ? `${group.began}:${group.because}` : group.began;
       const moved = Object.entries(group.movedUp).filter(([, n]) => n > 0);
@@ -99,6 +120,7 @@ export function routingReportLines(report: RoutingReport): string[] {
       const extras = [
         movedCount ? `${movedCount} moved up (${moved.map(([why, n]) => `${n} ${MOVED_SHORT[why] ?? why}`).join(", ")})` : "",
         group.wentRound ? `${group.wentRound} went round on both tiers` : "",
+        steppedInWords(group),
       ].filter(Boolean);
       lines.push(`    began ${BEGAN_WORDS[key] ?? `on the ${group.began}'s${group.because ? `, ${group.because}` : ""}`}: ${tallyWords(group)}${extras.map((extra) => ` · ${extra}`).join("")}`);
     }
@@ -363,11 +385,14 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
   if (sub === "routing") {
     // No agent: the team's routing, from the node's own finished tasks (core's routingReport), read-only: the team and
     // your prices, nothing else. Money as the node's own is (moneyPrices): a coding plan's calls are paid for already.
-    // `--json`: the report itself, a contract.
+    // `--since`: only the tasks that finished then or after (read before anything is asked). `--json`: the report itself,
+    // a contract.
+    if (flags.since !== undefined && args[0]) throw new Error("--since is the report's: invincible agents routing --since <day or time>");
+    const since = flags.since === undefined ? undefined : sinceOf(flags.since);
     if (!args[0]) {
       const state = await api.call<TeamSnapshot>("team");
       const prices: Prices = state.tasks.some((t) => t.record) ? await yourMoney(api) : {};
-      const report = routingReport(state.tasks, prices);
+      const report = routingReport(state.tasks, prices, since);
       if (flags.json) print(JSON.stringify(report, null, 2));
       else for (const line of routingReportLines(report)) print(line);
       return;

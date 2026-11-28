@@ -852,7 +852,7 @@ test("`invincible agents routing`, no agent: the team's routing from the node's 
   await teamCommand(api, "routing", [], { json: true }, (line) => json.push(line));
   const report = JSON.parse(json.join("\n"));
   expect([report.v, report.finished, report.unrouted, report.kinds.map((k: { kind: string }) => k.kind), report.probes]).toEqual([1, 7, 1, ["fix", "code"], { tried: 1, held: 1 }]);
-  expect(report.kinds[1].groups[0]).toEqual({ began: "engineer", because: null, tasks: 3, verified: 2, usd: 21, priced: true, minutes: 56, usdPerVerified: 10.5, minutesPerVerified: 28, movedUp: { gate: 1, review: 0, stall: 0, rereads: 1 }, wentRound: 1 });
+  expect(report.kinds[1].groups[0]).toEqual({ began: "engineer", because: null, tasks: 3, verified: 2, usd: 21, priced: true, minutes: 56, usdPerVerified: 10.5, minutesPerVerified: 28, movedUp: { gate: 1, review: 0, stall: 0, rereads: 1 }, wentRound: 1, interventions: 0, neededYou: 0, interventionsPerVerified: 0 });
   // A coding plan's calls are paid for already (core's moneyPrices, as the node's own money is): no money, and priced.
   const planned: string[] = [];
   await teamCommand({ async call<T>(name: string): Promise<T> { return (name === "prices" ? { prices: {}, plans: ["plan"] } : state) as T; } }, "routing", [], {}, (line) => planned.push(line));
@@ -890,6 +890,66 @@ async function reportJson(flags: Record<string, unknown> = {}): Promise<unknown>
   return JSON.parse(json.join("\n"));
 }
 
-test("the routing report's JSON as deployed (v 1, main f64776ba) is pinned: fixtures/routing-report/v1.json", async () => {
-  expect(await reportJson()).toEqual(fixture("v1.json"));
+/** Every field the old form has is in the new one, the same: what the new form adds is all that changed. */
+function holds(whole: unknown, part: unknown): boolean {
+  if (Array.isArray(part)) return Array.isArray(whole) && whole.length === part.length && part.every((p, i) => holds(whole[i], p));
+  if (part !== null && typeof part === "object") return whole !== null && typeof whole === "object" && !Array.isArray(whole) && Object.entries(part).every(([key, value]) => key in whole && holds((whole as Record<string, unknown>)[key], value));
+  return Object.is(whole, part);
+}
+
+test("the routing report's JSON as deployed (v 1, main f64776ba, fixtures/routing-report/v1.json) is all still there, as it was: the new fields only add", async () => {
+  const now = await reportJson();
+  expect(holds(now, fixture("v1.json"))).toBe(true);
+  // (And the check can tell: a field changed, or one gone, isn't held.)
+  expect(holds({ ...(now as object), finished: 6 }, fixture("v1.json"))).toBe(false);
+  const { probes: _gone, ...without } = now as Record<string, unknown>;
+  expect(holds(without, fixture("v1.json"))).toBe(false);
+});
+
+test("interventions and --since in the JSON, v 1 still: pinned by fixtures (v1-interventions.json, v1-since.json)", async () => {
+  expect(await reportJson()).toEqual(fixture("v1-interventions.json"));
+  expect(await reportJson({ since: "2026-11-28T16:47Z" })).toEqual(fixture("v1-since.json"));
+});
+
+test("`invincible agents routing` says how often you stepped in, and --since reads a window: refused where it can't say when", async () => {
+  const tasks = fixture("tasks.json");
+  const prices = fixture("prices.json");
+  const asked: string[] = [];
+  const api = { async call<T>(name: string): Promise<T> { asked.push(name); return (name === "prices" ? prices : { agents: [], rooms: [], deliveries: [], tasks }) as T; } };
+  const said = async (flags: Record<string, unknown>, args: string[] = []) => {
+    const lines: string[] = [];
+    await teamCommand(api, "routing", args, flags, (line) => lines.push(line));
+    return lines;
+  };
+  expect(await said({})).toEqual([
+    "Routing, from the last 7 tasks this node finished (1 not routed: held to models, a coding tool's, or from before kinds were kept):",
+    "  Fixes: 1 task, 1 verified, $0.00 and 4.0 min a verified task · you stepped in 1 time on 1 task, 1.0 a verified task",
+    "    began on the engineer's models: 1 task, 1 verified, $0.00 and 4.0 min a verified task · you stepped in 1 time on 1 task, 1.0 a verified task",
+    "  Code tasks: 5 tasks, 4 verified, $8.00 and 18.0 min a verified task · you stepped in 4 times on 2 tasks, 1.0 a verified task",
+    "    began on the engineer's models: 3 tasks, 2 verified, $10.50 and 28.0 min a verified task · 2 moved up (1 gate, 1 reading again) · 1 went round on both tiers · you stepped in 4 times on 2 tasks, 2.0 a verified task",
+    "    began on the engineer's, as a try: 1 task, 1 verified, $1.00 and 8.0 min a verified task",
+    "    began on the planner's, by the memory: 1 task, 1 verified, $10.00 and 8.0 min a verified task",
+    "  Tries of the engineer's after the planner's: 1, of which 1 held (verified there, never moved up).",
+  ]);
+  expect(await said({ since: "2026-11-28T16:47Z" })).toEqual([
+    "Routing, from the 2 tasks this node finished since 2026-11-28 16:47 UTC:",
+    "  Fixes: 1 task, 1 verified, $0.00 and 4.0 min a verified task · you stepped in 1 time on 1 task, 1.0 a verified task",
+    "    began on the engineer's models: 1 task, 1 verified, $0.00 and 4.0 min a verified task · you stepped in 1 time on 1 task, 1.0 a verified task",
+    "  Code tasks: 1 task, 1 verified, $1.00 and 8.0 min a verified task",
+    "    began on the engineer's, as a try: 1 task, 1 verified, $1.00 and 8.0 min a verified task",
+    "  Tries of the engineer's after the planner's: 1, of which 1 held (verified there, never moved up).",
+  ]);
+  // A day alone is that day's start in UTC; a moment with nothing finished since is said so.
+  expect(await said({ since: "2026-11-29" })).toEqual(["No task has finished on this node since 2026-11-29 00:00 UTC: nothing to say of its routing."]);
+  // Stepped in on a task none of which was verified: how often, and nothing per verified task.
+  const failed = (tasks as { id: string }[]).filter((t) => t.id === "task-000000000003");
+  const lines: string[] = [];
+  await teamCommand({ async call<T>(name: string): Promise<T> { return (name === "prices" ? prices : { agents: [], rooms: [], deliveries: [], tasks: failed }) as T; } }, "routing", [], {}, (line) => lines.push(line));
+  expect(lines[1]).toBe("  Code tasks: 1 task, 0 verified · you stepped in 3 times on 1 task");
+  // A moment it can't read, or a time without its zone (whose clock?), is refused before anything is asked; and --since
+  // is the report's, not an agent's.
+  asked.length = 0;
+  for (const since of ["yesterday", "2026-11-28T16:47", "28/11/2026", "2026-13-40"]) await expect(said({ since })).rejects.toThrow("--since takes a day or a time with its zone, as 2026-11-28 or 2026-11-28T16:47Z");
+  await expect(said({ since: "2026-11-28" }, ["ada"])).rejects.toThrow("--since is the report's: invincible agents routing --since <day or time>");
+  expect(asked).toEqual([]);
 });
