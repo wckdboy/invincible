@@ -6,14 +6,15 @@ import { costOf, moneyPrices, newNodeIdentity, type ExecResult, type Prices, typ
 import { taskStep, type AvatarExpression } from "@invincible/core/avatar";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { acpDriver, AGENTS, OWN_SIGN_IN, planTaken, type RunEvent } from "@invincible/agents";
-import { HANDED_GATE_SECONDS, HANDED_MARGIN_SECONDS, harnessReadiness, keysLine, progress, TEAM_COMMAND_SECONDS, teamRuntime, type TeamRuntimeDeps, withGateway } from "@invincible/agents";
+import { HANDED_GATE_SECONDS, HANDED_MARGIN_SECONDS, harnessReadiness, keysLine, progress, TEAM_COMMAND_SECONDS, teamRuntime, type TeamRuntimeDeps, VM_PROBE, vmProbed, withGateway } from "@invincible/agents";
 import type { SeatAnswer, SeatRun, TeamRunContext } from "@invincible/agents";
 import type { TaskAccount } from "@invincible/core";
 import { memoryTokenStore, SandboxHost } from "@invincible/sandbox";
 import { fakeDocker } from "./fake-docker.ts";
 
 /** What a task asks its VM as it starts: whether it has a desktop, and on it the hardware tools (KiCad's command). */
-const PROBE = "command -v desktop kicad-cli";
+/** What a task asks of its VM as it starts: its HOME and its desktop's tools, in one command. */
+const PROBE = VM_PROBE;
 const stores: LedgerStore[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.close(); });
 const member: Agent = { id: "ada", name: "Ada", instructions: "Keep changes small.", role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspaceNode: "host", workspace: { node: "host", id: "0123456789" }, memory: "private working note", createdAt: 1, updatedAt: 1 };
@@ -2326,6 +2327,24 @@ test("an agent whose VM has a desktop is told so, and how to operate it; one wit
   const tools = hardware.indexOf("This desktop has the hardware tools");
   expect(hardware.slice(tools, hardware.indexOf("TechDraw.", tools) + 9)).not.toMatch(/[<>]/);
   expect(desk).not.toContain("hardware tools");
+});
+
+test("a task asks its VM its HOME and what it has of a desktop in one command, before its first model call (each command a round trip)", async () => {
+  const commands: string[] = [];
+  const f = fixture([say("1. Make the change."), say("DONE\nBuilt."), say("PASS\nFine.")], {
+    exec: async (_m, command) => { commands.push(command); return command === PROBE ? result({ stdout: "HOME=/home/agent\n/usr/local/bin/desktop\n/usr/bin/kicad-cli\n" }) : result(); },
+  });
+  await f.runtime.executeTask(member, task, f.context);
+  expect(commands.filter((c) => c === PROBE)).toHaveLength(1);
+  expect(commands.some((c) => c.includes('printf %s "$HOME"') || (c.includes("command -v desktop kicad-cli") && c !== PROBE))).toBe(false);
+  // (What it said is what it has: a desktop and the hardware tools, so it is told both.)
+  const told = String(f.bodies[1].messages.find((m: any) => m.role === "user").content);
+  expect(told).toContain("This VM has a desktop");
+  expect(told).toContain("hardware tools");
+  // Its words read as they are printed: a HOME on its line, then the paths it has; none said, none taken.
+  expect(vmProbed("HOME=/home/agent\n/usr/local/bin/desktop\n")).toEqual({ home: "/home/agent", paths: ["/usr/local/bin/desktop"] });
+  expect(vmProbed("/usr/local/bin/desktop\n")).toEqual({ home: "", paths: ["/usr/local/bin/desktop"] });
+  expect(vmProbed("")).toEqual({ home: "", paths: [] });
 });
 
 test("an agent with a desktop and a model that can see is given its eyes: each command knows which model looks, and the agent is told how to ask it", async () => {

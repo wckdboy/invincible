@@ -293,6 +293,20 @@ const after = (history: TeamMessage[], through: string | undefined): TeamMessage
 };
 
 /**
+ * What a task asks of its VM as it starts, in one command (each command a round trip to the VM): its HOME, as `HOME=…`
+ * on a line of its own, then where its `desktop` and `kicad-cli` are, a line each that it has (`vmProbed` reads it).
+ * They were two commands, one after the other, before the first model call (28 November 2026).
+ */
+export const VM_PROBE = 'printf "HOME=%s\\n" "$HOME"; command -v desktop kicad-cli';
+
+/** What VM_PROBE printed: the VM's HOME as it said it (none: ""), and the paths it found. */
+export function vmProbed(printed: string): { home: string; paths: string[] } {
+  const lines = printed.split("\n").map((line) => line.trim());
+  const said = lines.find((line) => line.startsWith("HOME="));
+  return { home: said ? said.slice("HOME=".length) : "", paths: lines.filter((line) => line && !line.startsWith("HOME=")) };
+}
+
+/**
  * The leased environment is JSON, never executable shell configuration. A VM whose lease is gone still runs the
  * command, without model access, and says so: on 22 November 2026 an agent deleted its own, and every command of its
  * task failed from then on, the polls of its coding tool's run among them, so the task never ended.
@@ -967,7 +981,9 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // starts: one that doesn't does the task without the store, and the task says which it was, never nothing.
       // The VM's own HOME, as the VM says it (its own tree in layout 2; /work in layout 1, and when it says nothing
       // plain): where its tools' config and its notes are written, and its lease is.
-      const told = (await inVm('printf %s "$HOME"', 30, ctx.signal).catch(() => null))?.stdout.trim() ?? "";
+      // (Asked with what the VM has of a desktop below, in one command: VM_PROBE.)
+      const probed = vmProbed((await inVm(VM_PROBE, 30, ctx.signal).catch(() => null))?.stdout ?? "");
+      const told = probed.home;
       const home = /^\/[A-Za-z0-9._/-]{1,200}$/.test(told) ? told : VM_WORK;
       let engram: string | undefined;
       let notes = "";
@@ -982,8 +998,8 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // (With the store, every command is told where it is and which project: the engineer's own loop has only a shell.)
       // A desktop in this VM (the desktop image: a display, a window manager, a browser), and on it the hardware tools
       // (KiCad and FreeCAD: the hardware image, C1 step 11)? Asked of the VM as the task starts, in one question, so the
-      // agent is told what it has and how to operate it, and one without is told nothing of either.
-      const found = ((await inVm("command -v desktop kicad-cli", 30, ctx.signal).catch(() => null))?.stdout ?? "").split("\n").map((line) => line.trim());
+      // agent is told what it has and how to operate it, and one without is told nothing of either. (Asked with its HOME.)
+      const found = probed.paths;
       const desktop = found.some((path) => path.endsWith("/desktop"));
       const hardware = desktop && found.some((path) => path.endsWith("/kicad-cli"));
       // Its eyes: the model `desktop look` asks, named to every command of the task (the VM's own gateway token does the
