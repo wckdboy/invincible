@@ -232,8 +232,24 @@ describe("the inputs", () => {
       const said = answer(code);
       expect(said.success ? "" : said.error.issues[0]!.message).toBe("That page's address holds no code: paste the code it shows");
     }
-    // Another page's address is no code: checked as anything else pasted is, and the code in it refuses it.
-    expect(answer(`https://antigravity.google.example.test/oauth-callback?code=${encodeURIComponent(GOOGLE_CODE)}`).success).toBe(false);
+    // Another address, or that page's written otherwise than a browser shows it, is no code: refused, saying it is an
+    // address (not "a token"), as the re-check of 28 November 2026 found the words were (R10).
+    const elsewhere = "That's an address, not a code: paste the code its page shows, or, for a Gemini plan, the address of the page Google sends you back to as your browser shows it";
+    const enc = encodeURIComponent(GOOGLE_CODE);
+    for (const code of [
+      `https://antigravity.google.example.test/oauth-callback?code=${enc}`,
+      `HTTPS://ANTIGRAVITY.GOOGLE/oauth-callback?code=${enc}`,
+      `https://antigravity.google/oauth-callback/?code=${enc}`,
+      `https://antigravity.google:443/oauth-callback?code=${enc}`,
+      `https://x@antigravity.google/oauth-callback?code=${enc}`,
+      `https://antigravity.google/oauth-callback#code=${enc}`,
+    ]) {
+      const said = answer(code);
+      expect([code.slice(0, 40), said.success ? "" : said.error.issues[0]!.message]).toEqual([code.slice(0, 40), elsewhere]);
+    }
+    // The code alone as an address bar shows it, percent-encoded: taken as the code it is.
+    const pasted = answer(enc);
+    expect(pasted.success ? pasted.data.code : pasted.error.issues).toBe(GOOGLE_CODE);
   });
 });
 

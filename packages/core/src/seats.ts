@@ -195,6 +195,14 @@ const VENDOR_CODES: readonly RegExp[] = [CLAUDE_CODE, GOOGLE_CODE];
 const GOOGLE_CALLBACK = "https://antigravity.google/oauth-callback";
 /** The code in what you pasted: the code itself, or the one in the address of Google's callback page; null for that address with none in it. */
 export function seatCode(pasted: string): string | null {
+  // Google's code as an address bar shows it, percent-encoded (4%2F0A...): the code it is.
+  if (/^4%2F/i.test(pasted)) {
+    let decoded = "";
+    try {
+      decoded = decodeURIComponent(pasted);
+    } catch {}
+    if (GOOGLE_CODE.test(decoded)) return decoded;
+  }
   if (!pasted.startsWith(`${GOOGLE_CALLBACK}?`)) return pasted;
   let url: URL;
   try {
@@ -271,6 +279,12 @@ export const SeatSignInAnswerInput = z.strictObject({
     .transform((pasted, ctx) => {
       const code = seatCode(pasted);
       if (code === null) ctx.addIssue({ code: "custom", message: "That page's address holds no code: paste the code it shows" });
+      // Any other address, or that page's written otherwise than a browser shows it, is no code, and said so as an address
+      // (the re-check of 28 November 2026, R10: the words were "a token or a key").
+      else if (code === pasted && /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(pasted)) {
+        ctx.addIssue({ code: "custom", message: "That's an address, not a code: paste the code its page shows, or, for a Gemini plan, the address of the page Google sends you back to as your browser shows it" });
+        return "";
+      }
       return code ?? "";
     })
     .refine((code) => codeTokenShaped(code) === null, NO_TOKEN),
