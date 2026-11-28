@@ -72,8 +72,10 @@ import sh.invincible.bot.core.Primary
  */
 
 /** One decision that waits on you: what leads it, who asks, what ([code]: its first part a name in mono, as a key's
- * is), its one answer in place (null: none you can give here), the rest, and what a tap on it opens. */
-private class Decision(val key: String, val lead: Lead, val who: String, val what: String, val code: String? = null, val answer: Answer?, val rest: List<Answer>, val open: () -> Unit)
+ * is), its one answer in place (null: none you can give here), the rest, and what a tap on it opens. [chat]: the chat it
+ * waits in (an agent's id, or your agent's handle), as the counts have it (Roster.homeRows, primaryNeeds); null where
+ * its agent's chat says it as the task it is. */
+private class Decision(val key: String, val lead: Lead, val who: String, val what: String, val code: String? = null, val answer: Answer?, val rest: List<Answer>, val open: () -> Unit, val chat: String? = Primary.HANDLE)
 
 /**
  * What needs you, decisions only, as the one count counts them (AppModel.needsYou): each approval once (an agent's under
@@ -83,7 +85,7 @@ private class Decision(val key: String, val lead: Lead, val who: String, val wha
  * and opens at once the approval its notification's Approve… asked to see (as the iPhone's Needs you does).
  */
 @Composable
-fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (String) -> Unit, openAll: () -> Unit, watch: (String) -> Unit, openConnectors: () -> Unit = {}, page: Boolean = false) {
+fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (String) -> Unit, openAll: () -> Unit, watch: (String) -> Unit, openConnectors: () -> Unit = {}, page: Boolean = false, chat: String? = null) {
     val inbox by app.inbox.collectAsState()
     val table by app.table.collectAsState()
     val count by app.needsYou.collectAsState()
@@ -114,6 +116,9 @@ fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (Stri
     }
     val asker = askerIn(table)
     val now = System.currentTimeMillis()
+    // (An approval waits in the chat of the agent of yours that asked for it; one no agent of yours asked for, in your agent's.)
+    val agents = table.snapshot?.agents?.map { it.id } ?: emptyList()
+    fun chatOf(a: Json): String = Roster.chatOf(a["by"].string ?: "", agents)
     fun card(a: Json) {
         sheet = "${a["connector"].string}.${a["tool"].string}" to @Composable { Approval(a, asker(a["by"].string ?: "")) { approve -> act("a:${a["id"].string}") { app.decide(a["id"].string!!, approve) }; sheet = null } }
     }
@@ -130,6 +135,7 @@ fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (Stri
             answer = Answer(if (kind == "delete") "Review…" else "Allow once") { if (kind == "delete") card(a) else confirming = a },
             rest = listOf(Answer("Deny", danger = true) { act(key) { app.decide(a["id"].string!!, false) } }, Answer("More") { card(a) }),
             open = { card(a) },
+            chat = chatOf(a),
         )
     }
     val waiting = inbox.actions
@@ -145,11 +151,12 @@ fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (Stri
         }
         val key = "t:${row.id}"
         val open = { openTask(row.id) }
+        // (Its agent's chat says each of these as the task it is, its answer in place there.)
         decisions += when (row.word) {
-            "Approve?" -> Decision(key, Lead.Agent(row), "${row.agentName} proposes", row.title, answer = Answer("Approve") { control(key, Json.obj("task" to row.id, "action" to "approve")) }, rest = listOf(Answer("Decline", danger = true) { control(key, Json.obj("task" to row.id, "action" to "stop")) }), open = open)
-            "Interrupted" -> Decision(key, Lead.Agent(row), "${row.agentName} · interrupted", row.title, answer = Answer("Resume") { control(key, Json.obj("task" to row.id, "action" to "resume")) }, rest = emptyList(), open = open)
-            "Agent paused" -> Decision(key, Lead.Agent(row), "${row.agentName} is paused", row.title, answer = Answer("Resume") { control(key, Json.obj("agent" to row.agent, "action" to "resume")) }, rest = emptyList(), open = open)
-            else -> Decision(key, Lead.Agent(row), row.agentName, row.title, answer = null, rest = emptyList(), open = open)
+            "Approve?" -> Decision(key, Lead.Agent(row), "${row.agentName} proposes", row.title, answer = Answer("Approve") { control(key, Json.obj("task" to row.id, "action" to "approve")) }, rest = listOf(Answer("Decline", danger = true) { control(key, Json.obj("task" to row.id, "action" to "stop")) }), open = open, chat = null)
+            "Interrupted" -> Decision(key, Lead.Agent(row), "${row.agentName} · interrupted", row.title, answer = Answer("Resume") { control(key, Json.obj("task" to row.id, "action" to "resume")) }, rest = emptyList(), open = open, chat = null)
+            "Agent paused" -> Decision(key, Lead.Agent(row), "${row.agentName} is paused", row.title, answer = Answer("Resume") { control(key, Json.obj("agent" to row.agent, "action" to "resume")) }, rest = emptyList(), open = open, chat = null)
+            else -> Decision(key, Lead.Agent(row), row.agentName, row.title, answer = null, rest = emptyList(), open = open, chat = null)
         }
     }
     for (a in waiting.filter { (it["id"].string ?: "") !in shown }) decisions += approval(a, null)
@@ -232,8 +239,37 @@ fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (Stri
     }
     // (Before the list may end: the loop just added has left it by the time its secret is said.)
     hook?.let { (name, secret) -> HookSecret(name, secret) { hook = null } }
-    if (!page && decisions.isEmpty()) return
-    Column(Modifier.fillMaxWidth()) {
+    // In a chat ([chat]), above its message box (the owner's structure, 28 November 2026, I10's for the iPhone): what waits
+    // there, its first answered in place, and how many more (the Inbox has them all); in your agent's, where nothing waits,
+    // what was noticed for you, a tap from reading it.
+    val here = if (chat != null) decisions.filter { it.chat == chat } else decisions
+    val noticed = if (chat == Primary.HANDLE) inbox.notices.size + inbox.facts.size else 0
+    if (chat != null && here.isEmpty() && noticed == 0) return
+    if (!page && chat == null && decisions.isEmpty()) return
+    if (chat != null) Column(Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s1).clip(MaterialTheme.shapes.large).background(brand.raised)) {
+        said?.let { Text(it, style = Type.meta, color = brand.danger, modifier = Modifier.padding(horizontal = Space.margin, vertical = Space.s1)) }
+        here.firstOrNull()?.let { d -> key(d.key) { DecisionRow(d, d.key in busy) } }
+        val more = when {
+            here.size > 1 -> "${here.size - 1} more need you"
+            here.isEmpty() -> "Noticed · $noticed"
+            else -> null
+        }
+        more?.let { words ->
+            if (here.isNotEmpty()) Hairline(inset = Space.margin)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = openAll)
+                    .semantics(mergeDescendants = true) { role = androidx.compose.ui.semantics.Role.Button }
+                    .heightIn(min = Space.touch)
+                    .padding(horizontal = Space.margin, vertical = Space.s2),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(words, style = Type.rowTitle.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), modifier = Modifier.weight(1f))
+                Icon(ChevronIcon, null, Modifier.size(16.dp), tint = brand.quiet)
+            }
+        }
+    } else Column(Modifier.fillMaxWidth()) {
         if (page) {
             said?.let { Text(it, style = Type.meta, color = brand.danger, modifier = Modifier.padding(horizontal = Space.margin)) }
             if (decisions.isEmpty() && news.isEmpty()) Text("Nothing needs you.", style = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(Space.margin))

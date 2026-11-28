@@ -70,7 +70,7 @@ private data class Entry(val at: Long, val key: String, val speaker: String?, va
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) -> Unit = {}) {
+fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) -> Unit = {}, go: (String) -> Unit = {}) {
     val table by app.table.collectAsState()
     val row = table.rows.firstOrNull { it.kind == "agent" && it.id == id }
     val person = table.snapshot?.agents?.firstOrNull { it.id == id }
@@ -109,6 +109,8 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
             }
         },
         barAlways = true,
+        // What it asks of you, answered in its own chat: its approvals, the first in place, and how many more.
+        needs = { rememberWork(app)?.let { work -> NeedsYou(app, work, openTask = openTask, openAll = { go("inbox") }, watch = { go("mac:$it") }, openConnectors = { go("connectors") }, chat = id) } },
         // Its VM, in its menu, as the iPhone offers it: one without a desktop says so (the node's refusal) and how to get one.
         actions = {
             if (sandbox != null) {
@@ -204,6 +206,7 @@ private fun Timeline(
     actions: @Composable RowScope.() -> Unit = {},
     barTitle: (@Composable () -> Unit)? = null,
     barAlways: Boolean = false,
+    needs: (@Composable () -> Unit)? = null,
     header: @Composable () -> Unit,
 ) {
     val table by app.table.collectAsState()
@@ -264,6 +267,7 @@ private fun Timeline(
                 if (e.task != null) TaskCard(app, e.task, openTask) else Said(e, face = { SpeakerFace(e.speakerId, agents) }, named = assignee == null)
             }
         }
+        needs?.invoke()
         Composer(
             placeholder = placeholder,
             asTask = if (assignee != null) "Give it as a task" else null,

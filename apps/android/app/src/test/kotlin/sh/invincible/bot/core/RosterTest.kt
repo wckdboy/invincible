@@ -29,6 +29,19 @@ class RosterTest {
         }
     }
 
+    @Test fun anApprovalWaitsInTheChatOfTheAgentOfYoursThatAskedTheRestInYourAgents() {
+        val asked = asks(v["agents"]["asks"])
+        // (What your agent's chat holds is what its row counts, the PWA's primaryNeeds: the Inbox less what agents' chats hold.)
+        for (c in v["agents"]["needs"].list) {
+            val agents = c["agents"].list.map { it.string!! }
+            assertEquals(c["needs"].int, maxOf(0, c["inbox"].int!! - asked.count { Roster.chatOf(it.by, agents) != Primary.HANDLE }))
+        }
+        assertEquals("max", Roster.chatOf("arm:team.0123456789.max", listOf("max")))
+        // (One asked by an agent you removed, or by no agent: your agent's.)
+        assertEquals(Primary.HANDLE, Roster.chatOf("arm:team.0123456789.max", listOf("ada")))
+        assertEquals(Primary.HANDLE, Roster.chatOf("loop:morning", listOf("max")))
+    }
+
     @Test fun yourAgentsOwnComputerIsReadAsItsSandbox() {
         // (Its own computer, made as an agent's VM is: its screen under its reserved handle, its terminal in its sandbox.)
         val team = Json.parse("""{"agents":[],"rooms":[],"tasks":[],"deliveries":[],"computer":{"node":"homelab","id":"sb-0123456789"}}""")

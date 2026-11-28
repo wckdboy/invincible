@@ -65,7 +65,7 @@ import androidx.compose.ui.text.withStyle
  * A fresh chat opens with what happened while you were away, from the node's own record (no model writes it).
  */
 @Composable
-fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, root: Boolean = false, openTask: (String) -> Unit = {}, give: (() -> Unit)? = null) {
+fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, root: Boolean = false, openTask: (String) -> Unit = {}, give: (() -> Unit)? = null, go: (String) -> Unit = {}) {
     val chat = app.chat
     val bubbles by chat.bubbles.collectAsState()
     val live by chat.live.collectAsState()
@@ -185,6 +185,9 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
             }
             problem?.let { p -> item { Problem(p) } }
         }
+        // What waits on you that is no agent's (a device asking to join, a key, a service's question, a loop it drafted, a
+        // connector asked for, an approval no agent of yours asked for): its first answered here, and how many more.
+        rememberWork(app)?.let { work -> NeedsYou(app, work, openTask = openTask, openAll = { go("inbox") }, watch = { go("mac:$it") }, openConnectors = { go("connectors") }, chat = Primary.HANDLE) }
         // What is under way in this chat: its agents' tasks given here (Stop on each), its looks that wait (Cancel).
         UnderwayBar(app, live, openTask)
         ChatComposer(app, live, offered = offered)

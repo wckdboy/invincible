@@ -151,6 +151,12 @@ object Roster {
     fun agentOfCaller(by: String): String? = caller.find(by)?.groupValues?.get(1)
 
     /** What waits for you that is no agent's: the Inbox's count, less the approvals that show on an agent's own row. */
+    /**
+     * The chat an approval waits in (the owner's structure, 28 November 2026): the chat of the agent of yours that asked for
+     * it ([agents]), else your agent's (its handle): as its row counts it (primaryNeeds) and the agent's row counts its own.
+     */
+    fun chatOf(by: String, agents: List<String>): String = agentOfCaller(by)?.takeIf { it in agents } ?: Primary.HANDLE
+
     fun primaryNeeds(inbox: Int, asks: List<Ask>, agents: List<String>): Int = maxOf(0, inbox - asks.count { agents.contains(agentOfCaller(it.by) ?: "") })
 
     private fun firstLine(text: String?): String = (text ?: "").trim().split("\n").firstOrNull()?.trim() ?: ""

@@ -78,7 +78,6 @@ import java.time.ZoneId
 @Composable
 fun HomeList(app: AppModel, open: (String) -> Unit, settings: () -> Unit, current: String? = null, modifier: Modifier = Modifier) {
     val table by app.table.collectAsState()
-    val needsYou by app.needsYou.collectAsState()
     // (Your agent's row says the latest words of your chat with it: that chat is read once the node has answered, as it
     // was when the chat was home, so the row can say them and a tap opens it at once.)
     val answered = table.snapshot != null && table.asOf == null
@@ -106,20 +105,7 @@ fun HomeList(app: AppModel, open: (String) -> Unit, settings: () -> Unit, curren
         )
         LazyColumn(state = list, modifier = Modifier.fillMaxSize()) {
             item(key = "search") { SearchPill { open("search") } }
-            // (Until what needs you is answered in each agent's own chat: the Inbox, while anything waits there.)
-            if (needsYou > 0) {
-                item(key = "needs") {
-                    HomeRowView(
-                        name = "Needs you",
-                        line = Roster.needsYou(needsYou),
-                        time = null,
-                        count = needsYou,
-                        needs = true,
-                        selected = marked == "inbox",
-                        face = { Icon(TrayIcon, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurface) },
-                    ) { open("inbox") }
-                }
-            }
+            // (What needs you is in each chat now, its count on its row: an agent's asks in its own, the rest in your agent's.)
             item(key = "primary") {
                 // (Pinned first, it says no time. What its chat holds is read here alone: an answer as it streams redraws
                 // this row, never the list.)

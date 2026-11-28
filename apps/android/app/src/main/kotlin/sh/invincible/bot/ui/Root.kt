@@ -182,12 +182,12 @@ private fun Page(app: AppModel, nav: Nav, address: String, wide: Boolean, roomy:
     val (kind, rest) = address.substringBefore(':') to address.substringAfter(':', "")
     when (kind) {
         // The list (a phone's home); on a tablet, where the list is the sidebar, your agent's chat at the root.
-        "list" -> if (wide) ChatScreen(app, back = back, roster = null, root = true, openTask = { nav.go(Nav.task(it)) }, give = give)
+        "list" -> if (wide) ChatScreen(app, back = back, roster = null, root = true, openTask = { nav.go(Nav.task(it)) }, give = give, go = { nav.go(it) })
         else HomeList(app, open = { nav.go(it) }, settings = { nav.go("settings") })
-        "chat" -> ChatScreen(app, back = back, roster = null, root = false, openTask = { nav.go(Nav.task(it)) }, give = give)
+        "chat" -> ChatScreen(app, back = back, roster = null, root = false, openTask = { nav.go(Nav.task(it)) }, give = give, go = { nav.go(it) })
         "chats" -> Chats(app, close = back, opened = { if (nav.under == "chat" || (wide && nav.under == Nav.ROOT)) nav.back() else nav.replace("chat") })
         "task" -> TaskScreen(app, rest, nav, wide, roomy)
-        "agent" -> AgentScreen(app, rest, back = back, openTask = { nav.go(Nav.task(it)) })
+        "agent" -> AgentScreen(app, rest, back = back, openTask = { nav.go(Nav.task(it)) }, go = { nav.go(it) })
         "room" -> RoomScreen(app, rest, back = back, openTask = { nav.go(Nav.task(it)) })
         "agents" -> AgentsScreen(app, back = back, openChat = { app.chat.fresh(); nav.go("chat") }, openAgent = { nav.go(Nav.agent(it)) }, openRoom = { nav.go(Nav.room(it)) })
         "inbox" -> InboxScreen(app, watch = { nav.go("mac:$it") }, back = back, openTask = { nav.go(Nav.task(it)) }, openConnectors = { nav.go("connectors") })
