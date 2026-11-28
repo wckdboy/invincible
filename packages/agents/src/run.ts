@@ -1775,10 +1775,12 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     const toldAs = (steers: readonly RunSteer[], audits: readonly string[]): string => [...(steers.length ? [steersSaid(steers, o.unreviewed)] : []), ...audits].join("\n\n");
     /**
      * At each look at the agent between its tool calls (runAgent waits out a call it is in): steers waiting, yours or its
-     * audits', end this run, so its own session can be told them. With no session to tell yet they wait where they are.
+     * audits', end this run, so its own session can be told them. With no session to tell yet they wait where they are,
+     * but for a tool whose every run is a new one (`anew`: Antigravity's), which is ended so too, and its next run told
+     * its briefing with them (the third re-check of 28 November 2026, I3: your agent steers the Gemini plan as it works).
      */
     const steerNow = async (): Promise<boolean> => {
-      if (!(live ?? session)) return false;
+      if (!(live ?? session) && agent.driver.capabilities.steer !== "anew") return false;
       const got = await takeSteers(steps);
       heard = [...heard, ...got];
       return got.length > 0 || auditSays.length > 0;
@@ -1922,10 +1924,13 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       // session, as Antigravity's now), a new run is told its briefing with them, and the work so far is where it was,
       // in the workspace (the second re-check of 28 November 2026, N2).
       const told = (words: string): string => (session ? words : `${briefing}\n\n${words}`);
-      // Ended by a steer between its tool calls (yours, your agent's or its audit's): taken up in its own session. (Only a
-      // run with a session is ended so: steerNow. One with none is told what waited once it ends of itself, below.)
+      // Ended by a steer between its tool calls (yours, your agent's or its audit's): taken up in its own session, or, for a
+      // tool whose every run is a new one, in a new run told its briefing, that the last was ended there, and the steer;
+      // its work is where it was, in the workspace. (No other run with no session is ended so: steerNow. One is told what
+      // waited once it ends of itself, below.)
       if (run.status === "steered") {
-        prompt = carried = withUnheard(steerPrompt(heard, auditSays.splice(0)));
+        carried = withUnheard(steerPrompt(heard, auditSays.splice(0)));
+        prompt = session ? carried : told(`Your last run was ended between its steps so this could reach you: what it did is in the workspace as it left it. Continue from there.\n\n${carried}`);
         heard = [];
         continue;
       }

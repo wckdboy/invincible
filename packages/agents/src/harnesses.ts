@@ -67,11 +67,13 @@ export type AgentEvent =
 /**
  * What a driver's tool can do as it runs, declared and never faked (T3 Code: "Declare only what the provider actually
  * supports"). `steer`: your words reach it as it works (`live`), end its run between its tool calls to be said in its own
- * session (`restart`), or wait for its run to end (`none`). `streams`: it says what it does as it does it. `resumes`: a run
- * of it continues its session. `readsWindows`: it says its plan's windows as it runs (used, and when they reset).
+ * session (`restart`), end it there to be said to a new run, told its briefing with them, since each of its runs is a new
+ * one (`anew`: Antigravity's), or wait for its run to end (`none`). `streams`: it says what it does as it does it.
+ * `resumes`: a run of it continues its session. `readsWindows`: it says its plan's windows as it runs (used, and when they
+ * reset).
  */
 export interface DriverCapabilities {
-  steer: "live" | "restart" | "none";
+  steer: "live" | "restart" | "anew" | "none";
   streams: boolean;
   resumes: boolean;
   readsWindows: boolean;

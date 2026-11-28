@@ -209,8 +209,8 @@ describe("what is said of a steer", () => {
  * `during(i)` runs as that look is made (a steer said then). Its last look finds it ended of itself. Each look moves the
  * run's clock `minutes`.
  */
-function harness(looks: object[][], reviewer: string[], during: (look: number, held: ReturnType<typeof inbox>) => void = () => {}, minutes = 1, options: { audit?: boolean; repeat?: boolean; cut?: number } = {}) {
-  const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false }, check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
+function harness(looks: object[][], reviewer: string[], during: (look: number, held: ReturnType<typeof inbox>) => void = () => {}, minutes = 1, options: { audit?: boolean; repeat?: boolean; cut?: number; capabilities?: Partial<AgentDriver["capabilities"]>; judged?: (held: ReturnType<typeof inbox>) => void } = {}) {
+  const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false, ...options.capabilities }, check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
   const queues: Record<RunRole, string[]> = { planner: ["1. Write the parser.\nDone when: its test passes."], engineer: [], reviewer: [...reviewer] };
   const events: RunEvent[] = [];
   const prompts: string[] = [];
@@ -224,6 +224,8 @@ function harness(looks: object[][], reviewer: string[], during: (look: number, h
     {
       ask: async (role, messages) => {
         if (role === "reviewer") asked.push(messages.at(-1)!.content);
+        // (judged: what is said while the reviewer judges the work.)
+        if (role === "reviewer") options.judged?.(held);
         const text = queues[role].shift();
         if (text === undefined) throw new Error(`the ${role} ran out of script`);
         return { text, model: `test/${role}` };
@@ -373,6 +375,41 @@ describe("steers that must still reach the work (the independent review, 27 Nove
     expect(q.prompts).toHaveLength(2);
     expect(q.prompts[1]).toStartWith(q.prompts[0]!);
     expect(q.prompts[1]).toContain("Your last run was cut off before it ended");
+  });
+
+  // The third re-check of 28 November 2026, I3, and the owner's word ("my primary agent needs to be able to direct/steer
+  // and use the gemini ultra plan"): a steer to a tool that keeps no session waited for its whole run to end. One that
+  // starts each run anew (Antigravity) is ended at the next safe point between its calls instead, and a new run, told its
+  // briefing, where the work stands and the steer, carries on; the worktree keeps what the last one changed.
+  const ANEW = { steer: "anew", resumes: false } as const;
+  test("one that starts each run anew, steered during a long run: ended between its calls, and the next run is told its briefing, where the work stands and the steer", async () => {
+    const looks = [[tool(1)], [tool(2)], [tool(3)], [tool(4)], [tool(5)], [tool(6), { type: "text", text: "Written." }]];
+    const q = harness(looks, ["PASS\nIt reads the new schema."], (look, held) => (look === 1 ? held.say({ by: "owner", text: "Use the new schema." }) : undefined), 1, { repeat: true, capabilities: ANEW });
+    const outcome = await q.run;
+    expect(outcome.status).toBe("done");
+    // Said at its second look, taken at that look's end, between its calls: not when its run ended of itself, four looks on.
+    expect(q.steeredEvents()).toEqual([{ type: "steered", step: 2, by: "owner", text: "Use the new schema." }]);
+    expect(q.stopped()).toBe(1);
+    expect(q.looked()).toBe(looks.length);
+    expect(q.prompts).toHaveLength(2);
+    expect(q.prompts[1]).toStartWith(q.prompts[0]!);
+    expect(q.prompts[1]!.split(q.prompts[0]!)).toHaveLength(2);
+    expect(q.prompts[1]).toContain("what it did is in the workspace as it left it");
+    expect(q.prompts[1]).toContain("The owner says, while you work: Use the new schema.");
+    expect(q.asked[0]).toContain("1. The owner, at step 2: Use the new schema.");
+  });
+
+  test("one that starts each run anew, steered as it is judged, is told the steer in its next run with the reviewer's words, as N2 made it", async () => {
+    let said = false;
+    const judged = (held: ReturnType<typeof inbox>) => void (said || ((said = true), held.say({ by: "owner", text: "Use the new schema." })));
+    const q = harness([[tool(1), { type: "text", text: "Written." }]], ["REVISE\nThe parser has no test.", "PASS\nNow it has one."], () => {}, 1, { repeat: true, capabilities: ANEW, judged });
+    const outcome = await q.run;
+    expect(outcome.status).toBe("done");
+    expect(q.stopped()).toBe(0);
+    expect(q.prompts).toHaveLength(2);
+    expect(q.prompts[1]).toStartWith(q.prompts[0]!);
+    expect(q.prompts[1]).toContain("The parser has no test.");
+    expect(q.prompts[1]).toContain("Use the new schema.");
   });
 
   test("sent back with its budget spent, the words that came while it was judged are left untaken, for the task to say it ended before they reached it", async () => {

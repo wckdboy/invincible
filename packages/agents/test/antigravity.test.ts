@@ -313,6 +313,8 @@ describe("a run on it, as T3 Code drives agy", () => {
 
   test("registered as the harness a Google seat runs, on its own sign-in, its family the Gemini models", () => {
     expect(AGENTS.antigravity).toBe(ANTIGRAVITY);
+    // Each run a new session: none goes on, and a steer ends its run between its calls for a new one (steer.test.ts).
+    expect(ANTIGRAVITY.capabilities).toEqual({ steer: "anew", streams: true, resumes: false, readsWindows: false });
     // An agent of yours may be given it, as it may Claude Code or Codex.
     expect(TeamHarness.safeParse("antigravity").success).toBe(true);
     expect(ANTIGRAVITY.family).toEqual(["gemini"]);
