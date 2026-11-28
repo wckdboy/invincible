@@ -28,6 +28,7 @@ import {
   servedBy,
   SeatSignInAnswerInput,
   codeTokenShaped,
+  seatCode,
   SeatSignInCancelInput,
   seatState,
   seatVendor,
@@ -210,6 +211,24 @@ describe("the inputs", () => {
     const refused = [`4/sk-ant-oat01-${fakeRun(5, 40)}`, `4/ghp_${fakeRun(6, 36).replace(/[-_]/g, "F")}`, signed, fakeRun(7, 48)];
     for (const code of refused) expect([code.slice(0, 14), answer(code).success]).toEqual([code.slice(0, 14), false]);
     expect(refused.map(codeTokenShaped)).toEqual(["an Anthropic key or token", "GitHub token", "a signed token", "high-entropy token"]);
+  });
+
+  test("the address of the page Google's sign-in lands on may be pasted whole: its code is taken out of it, and only that page's (the review's L1)", () => {
+    const answer = (code: string) => SeatSignInAnswerInput.safeParse({ id: ID, attempt: ATTEMPT, code });
+    const scopes = ["openid", "https://www.googleapis.com/auth/cloud-platform", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile", "https://www.googleapis.com/auth/cclog", "https://www.googleapis.com/auth/experimentsandconfigs", "https://www.googleapis.com/auth/aicode"];
+    const landed = `https://antigravity.google/oauth-callback?state=${fakeRun(9, 22)}&code=${encodeURIComponent(GOOGLE_CODE)}&scope=${encodeURIComponent(scopes.join(" "))}&authuser=0&prompt=consent`;
+    // As long as that page's address is, with its state and scopes: it fits, and the sign-in is given its code alone.
+    expect(landed.length).toBeLessThanOrEqual(SEAT_LIMITS.code);
+    expect([seatCode(landed), seatCode(GOOGLE_CODE)]).toEqual([GOOGLE_CODE, GOOGLE_CODE]);
+    const parsed = answer(landed);
+    expect(parsed.success ? parsed.data.code : parsed.error.issues).toBe(GOOGLE_CODE);
+    // That page's address with no code of Google's in it: not taken, and said so.
+    for (const code of ["https://antigravity.google/oauth-callback?state=FAKE-state", "https://antigravity.google/oauth-callback?code=not-a-code"]) {
+      const said = answer(code);
+      expect(said.success ? "" : said.error.issues[0]!.message).toBe("That page's address holds no code: paste the code it shows");
+    }
+    // Another page's address is no code: checked as anything else pasted is, and the code in it refuses it.
+    expect(answer(`https://antigravity.google.example.test/oauth-callback?code=${encodeURIComponent(GOOGLE_CODE)}`).success).toBe(false);
   });
 });
 

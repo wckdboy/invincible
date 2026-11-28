@@ -156,6 +156,13 @@ describe("seats", () => {
     for (const code of [FAKE_SETUP_TOKEN, FAKE_SIGNED, "two words"]) expect((await admin("answerSeatSignIn", { id: seat.id, attempt, code })).status).toBe(400);
     // A code of the shape Claude Code's page shows is taken (the re-check's R5): none is waited for here, so 404.
     expect((await admin("answerSeatSignIn", { id: seat.id, attempt, code: `FAKEcode0000#${CLAUDE_STATE}` })).status).toBe(404);
+    // The address of the page Google's sign-in lands on, pasted whole, with a code of Google's real shape in it (made
+    // here, fake): taken by the route, as the code it holds; this attempt isn't open, so 404, not 400 (the review's H2, L1).
+    const google = `4/0A${Array.from({ length: 69 }, (_, i) => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[(i * 37 + 11) % 64]).join("")}`;
+    for (const code of [google, `https://antigravity.google/oauth-callback?state=FAKE-state&code=${encodeURIComponent(google)}&scope=openid`]) {
+      expect((await admin("answerSeatSignIn", { id: seat.id, attempt, code })).status).toBe(404);
+    }
+    expect((await admin("answerSeatSignIn", { id: seat.id, attempt, code: "https://antigravity.google/oauth-callback?state=FAKE-state" })).status).toBe(400);
     expect((await admin("cancelSeatSignIn", { id: seat.id, attempt })).status).toBe(404);
     expect((await admin("removeSeat", { id: seat.id })).status).toBe(200);
   });

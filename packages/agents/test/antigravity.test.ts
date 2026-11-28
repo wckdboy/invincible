@@ -203,8 +203,25 @@ describe("its sign-in, ours to start and Google's to finish", () => {
       env: { SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0", AGY_CLI_DISABLE_AUTO_UPDATE: "true", DISPLAY: null, GEMINI_API_KEY: null, HOME: box.env.HOME },
     });
     expect(box.trace().filter((item) => "code" in item)).toEqual([{ code: CODE }]);
-    expect(s.said.map((line) => line.type)).toEqual(["card", "asks", "done"]);
+    // It says agy took the code, and refuses the second as one already given: never the code itself.
+    expect(s.said.map((line) => line.type)).toEqual(["card", "asks", "took", "refused", "done"]);
+    expect(s.said.find((line) => line.type === "refused")).toEqual({ type: "refused", why: "answered" });
     expect(JSON.stringify(s.said)).not.toContain(CODE);
+  });
+
+  test("what agy can't take is refused out loud, never dropped: the address of the page you land on reaches the node, which takes its code out (the review's L1)", async () => {
+    const box = vm();
+    const s = signIn(box);
+    s.tell({});
+    await s.until("asks");
+    // (The node gives the bridge the code alone: core's seatCode takes it out of that address. Sent here as it is, it
+    // isn't a code agy takes, and the bridge says so.)
+    s.tell({ code: `https://antigravity.google/oauth-callback?state=FAKE-state&code=${encodeURIComponent(CODE)}&scope=openid` });
+    expect(await s.until("refused")).toEqual({ type: "refused", why: "shape" });
+    s.tell({ code: CODE });
+    expect(await s.until("took")).toEqual({ type: "took" });
+    expect(await s.done()).toEqual({ type: "done", ok: true });
+    expect(box.trace().filter((item) => "code" in item)).toEqual([{ code: CODE }]);
   });
 
   test("a code its page didn't give, or none (cancelled): not signed in, and said why", async () => {

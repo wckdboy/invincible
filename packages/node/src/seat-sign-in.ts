@@ -23,7 +23,10 @@ interface Attempt {
   run: string;
   stream: SandboxStream;
   card: SeatSignInCard;
+  /** Answered: its tool has its code (its bridge said so). */
   answered: boolean;
+  /** A code on its way to its tool: settled when its bridge says it took it, or why not. */
+  answering: { took: () => void; refused: (why: string) => void } | null;
   /** Why it is being ended, once something ends it (cancelled, expired): the outcome the log is told. */
   ending: "cancelled" | "expired" | null;
   timer: ReturnType<typeof setTimeout> | null;
@@ -42,7 +45,18 @@ export interface SeatSignInDeps {
   cardWaitMs?: number;
   /** How long a sign-in waits for you before it lapses (ms; SEAT_LIMITS.attemptMinutes unless a test says otherwise). */
   attemptMs?: number;
+  /** How long a code you gave waits for its bridge to say its tool took it (ms). */
+  answerWaitMs?: number;
 }
+
+/** What the node says when a sign-in's bridge didn't give its tool the code, by the bridge's word, and the status it is said with. */
+const NOT_TAKEN: Record<string, [string, number]> = {
+  answered: ["Its code was given already: a code reaches its sign-in once", 409],
+  shape: ["Its sign-in didn't take that: paste the code its page shows, as it shows it", 400],
+  early: ["Its sign-in isn't asking for a code yet: wait for its page, then paste the code it shows", 400],
+  ended: ["That sign-in has ended: start it again", 404],
+  silent: ["Its sign-in didn't say it took the code: give it again", 504],
+};
 
 /**
  * How the tool's own sign-out is asked, for a seat signed in to an account that isn't its own. (Antigravity's says no
@@ -125,7 +139,7 @@ export class SeatSignIns {
     };
     this.deps.store.emit(this.deps.node, "seat.signin", { id: seat.id, attempt: id, phase: "started" });
     let settle!: () => void;
-    const attempt: Attempt = { id, seat, vm, run, stream, card, answered: false, ending: null, timer: null, ended: new Promise<void>((resolve) => (settle = resolve)) };
+    const attempt: Attempt = { id, seat, vm, run, stream, card, answered: false, answering: null, ending: null, timer: null, ended: new Promise<void>((resolve) => (settle = resolve)) };
     attempt.timer = setTimeout(() => void this.end(attempt, "expired"), this.attemptMs);
     this.open.set(seat.id, attempt);
     void this.follow(attempt, lines, host).finally(() => {
@@ -136,14 +150,35 @@ export class SeatSignIns {
     return card;
   }
 
-  /** The code its vendor's page showed you, to that sign-in's own process: once, and only a sign-in that asks for one. */
-  answer(seatId: string, attemptId: string, code: string): void {
+  /**
+   * The code its vendor's page showed you, to that sign-in's own process: once, and only a sign-in that asks for one.
+   * Answered once its bridge says its tool took it; a code it didn't take leaves the sign-in asking, and you are told
+   * why (the review of 28 November 2026, L1).
+   */
+  async answer(seatId: string, attemptId: string, code: string): Promise<void> {
     const attempt = this.open.get(seatId);
     if (!attempt || attempt.id !== attemptId || attempt.ending) throw new SeatError("That sign-in has ended, or another began: start it again", 404);
     if (attempt.card.kind !== "paste-code") throw new SeatError("This sign-in takes no code here: its page finishes it", 400);
-    if (attempt.answered) throw new SeatError("Its code was given already: a code reaches its sign-in once", 409);
-    attempt.answered = true;
-    attempt.stream.write(`${JSON.stringify({ code })}\n`);
+    if (attempt.answered) throw new SeatError(NOT_TAKEN.answered![0], 409);
+    if (attempt.answering) throw new SeatError("A code is on its way to its sign-in already: wait for it", 409);
+    const taken = new Promise<void>((resolve, reject) => {
+      attempt.answering = {
+        took: resolve,
+        refused: (why) => {
+          const [words, status] = NOT_TAKEN[why] ?? NOT_TAKEN.shape!;
+          reject(new SeatError(words, status));
+        },
+      };
+    });
+    const wait = setTimeout(() => attempt.answering?.refused("silent"), this.deps.answerWaitMs ?? 15_000);
+    try {
+      attempt.stream.write(`${JSON.stringify({ code })}\n`);
+      await taken;
+      attempt.answered = true;
+    } finally {
+      clearTimeout(wait);
+      attempt.answering = null;
+    }
   }
 
   /** End a seat's sign-in under way: its tool is told to cancel, and its VM goes. */
@@ -193,6 +228,9 @@ export class SeatSignIns {
         const next = await lines.next();
         if (next.done) break;
         const said = parse(next.value);
+        // (Whether its tool took the code you gave: only the bridge's own words, never what it printed of the code.)
+        if (said?.type === "took") attempt.answering?.took();
+        else if (said?.type === "refused") attempt.answering?.refused(typeof said.why === "string" ? said.why : "shape");
         if (said?.type === "done") {
           ok = said.ok === true;
           break;
@@ -220,6 +258,7 @@ export class SeatSignIns {
         // (The seat was removed meanwhile: there is nothing to say of it.)
       }
     } finally {
+      attempt.answering?.refused("ended");
       attempt.stream.kill();
       await host.destroy(attempt.vm, { run: attempt.run }).catch(() => undefined);
     }

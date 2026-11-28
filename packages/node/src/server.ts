@@ -4865,7 +4865,7 @@ export function createApp(ctx: AppContext) {
     },
     answerSeatSignIn: (input, p) => {
       if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can sign a seat in");
-      return seatErrors(() => (seatSignIns.answer(input.id, input.attempt, input.code), { answered: true }));
+      return seatErrorsAsync(async () => (await seatSignIns.answer(input.id, input.attempt, input.code), { answered: true }));
     },
     cancelSeatSignIn: (input, p) => {
       if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can sign a seat in");

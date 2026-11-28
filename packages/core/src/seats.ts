@@ -104,8 +104,11 @@ export const SUBSCRIPTION_KINDS: readonly SeatKind[] = ["claude-subscription", "
 export const SEAT_LIMITS = {
   label: 60,
   email: 254,
-  /** What a vendor's page shows to paste back (Claude's code): longer is not one. */
-  code: 512,
+  /**
+   * What a vendor's page shows to paste back, or the address of the page that shows it (Google's callback page, whose
+   * address holds its state and scopes beside the code: the review's L1): longer is not one.
+   */
+  code: 2048,
   /** Runs at once on one seat, as you may set it (D4: "Up to 3"). */
   runs: 3,
   /** How long a sign-in waits for you before it lapses. */
@@ -181,7 +184,28 @@ const untokened = <T extends z.ZodType<string>>(schema: T) => schema.refine((tex
  * scanner knows by name is still refused in one, and so are an Anthropic key and a signed token. (Codex's sign-in takes
  * no paste: you enter its code on its page.)
  */
-const VENDOR_CODES: readonly RegExp[] = [/^[A-Za-z0-9_-]{8,512}#[A-Za-z0-9_-]{43}$/, /^4\/[0-9A-Za-z_-]{20,200}$/];
+const CLAUDE_CODE = /^[A-Za-z0-9_-]{8,512}#[A-Za-z0-9_-]{43}$/;
+const GOOGLE_CODE = /^4\/[0-9A-Za-z_-]{20,200}$/;
+const VENDOR_CODES: readonly RegExp[] = [CLAUDE_CODE, GOOGLE_CODE];
+/**
+ * The page Google sends agy's sign-in back to (its redirect_uri), which shows the code. agy's own prompt asks for "the
+ * authorization code, or the full URL of the page you land on", so its address may be pasted whole: its code is taken
+ * out of it here, and the sign-in is given that alone (the review of 28 November 2026, L1).
+ */
+const GOOGLE_CALLBACK = "https://antigravity.google/oauth-callback";
+/** The code in what you pasted: the code itself, or the one in the address of Google's callback page; null for that address with none in it. */
+export function seatCode(pasted: string): string | null {
+  if (!pasted.startsWith(`${GOOGLE_CALLBACK}?`)) return pasted;
+  let url: URL;
+  try {
+    url = new URL(pasted);
+  } catch {
+    return null;
+  }
+  if (`${url.origin}${url.pathname}` !== GOOGLE_CALLBACK || url.username || url.password) return null;
+  const code = url.searchParams.get("code");
+  return code !== null && GOOGLE_CODE.test(code) ? code : null;
+}
 /** Why a code you paste for a seat's sign-in is refused, or null: as tokenShaped, but a vendor's code of its own shape isn't a token. */
 export function codeTokenShaped(code: string): string | null {
   if (!VENDOR_CODES.some((shape) => shape.test(code))) return tokenShaped(code);
@@ -237,6 +261,11 @@ export const SeatSignInAnswerInput = z.strictObject({
     .min(1)
     .max(SEAT_LIMITS.code)
     .regex(/^[!-~]+$/, "a code is one word of letters, digits and signs")
+    .transform((pasted, ctx) => {
+      const code = seatCode(pasted);
+      if (code === null) ctx.addIssue({ code: "custom", message: "That page's address holds no code: paste the code it shows" });
+      return code ?? "";
+    })
     .refine((code) => codeTokenShaped(code) === null, NO_TOKEN),
 });
 export const SeatSignInCancelInput = z.strictObject({ id: SeatId, attempt: SeatAttemptId });

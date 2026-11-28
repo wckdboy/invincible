@@ -105,10 +105,17 @@ def main():
                     if told.get("cancel"):
                         why = "cancelled"
                     code = told.get("code")
-                    # Once, as it was given: to its terminal alone.
-                    if isinstance(code, str) and not answered and re.fullmatch(r"[!-~]{1,512}", code):
-                        os.write(fd, (code + "\r").encode())
-                        answered = True
+                    # Once, as it was given: to its terminal alone. It says it took it, or why not, so the node marks it
+                    # answered only once its tool has it (the review of 28 November 2026, L1).
+                    if isinstance(code, str):
+                        if answered:
+                            emit("refused", why="answered")
+                        elif not re.fullmatch(r"[!-~]{1,512}", code):
+                            emit("refused", why="shape")
+                        else:
+                            os.write(fd, (code + "\r").encode())
+                            answered = True
+                            emit("took")
                 if why == "cancelled" or stdin.ended:
                     why = why or "cancelled"
                     break
@@ -257,14 +264,21 @@ def main():
                     if told.get("cancel"):
                         why = "cancelled"
                     code = told.get("code")
-                    # Once, as it was given: to agy alone.
-                    if isinstance(code, str) and carded and not answered and CODE.fullmatch(code):
-                        try:
-                            child.stdin.write((code + "\n").encode())
-                            child.stdin.flush()
-                        except OSError:
-                            pass
-                        answered = True
+                    # Once, as it was given: to agy alone. It says it took it, or why not, so the node marks it answered
+                    # only once agy has it (the review of 28 November 2026, L1).
+                    if isinstance(code, str):
+                        if answered:
+                            emit("refused", why="answered")
+                        elif not carded or not CODE.fullmatch(code):
+                            emit("refused", why="shape" if carded else "early")
+                        else:
+                            try:
+                                child.stdin.write((code + "\n").encode())
+                                child.stdin.flush()
+                                answered = True
+                                emit("took")
+                            except OSError:
+                                emit("refused", why="ended")
                 if why == "cancelled" or stdin.ended:
                     why = why or "cancelled"
                     break

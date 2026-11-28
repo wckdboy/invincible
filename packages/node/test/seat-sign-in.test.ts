@@ -19,9 +19,13 @@ const CODE = "FAKEcode0000#FAKE-state-0000";
 const ONE = "F".repeat(22);
 const TWO = "G".repeat(22);
 
-/** A stand-in for the bridge in a seat's VM: what it was told, and what it says when the test says so. */
+/**
+ * A stand-in for the bridge in a seat's VM: what it was told, and what it says when the test says so. Given a code, it
+ * says its tool took it, as the bridge does, unless the test said it refuses codes (`refuse`: why, or "quiet" for silence).
+ */
 function bridge() {
   const told: Record<string, unknown>[] = [];
+  const answers = { refuse: null as string | null };
   const queue: string[] = [];
   let wake: (() => void) | null = null;
   let ended = false;
@@ -45,8 +49,9 @@ function bridge() {
       for (const line of text.split("\n").filter(Boolean)) {
         const said = JSON.parse(line) as Record<string, unknown>;
         told.push(said);
-        // As the bridge does: cancelled, it says so and ends.
+        // As the bridge does: cancelled, it says so and ends; given a code, it says whether its tool took it.
         if (said.cancel) say({ type: "done", ok: false, why: "cancelled" }, true);
+        else if (typeof said.code === "string" && answers.refuse !== "quiet") say(answers.refuse ? { type: "refused", why: answers.refuse } : { type: "took" });
       }
     },
     close: () => end(),
@@ -59,10 +64,10 @@ function bridge() {
     if (last) ended = true;
     wake?.();
   };
-  return { stream, told, say };
+  return { stream, told, say, answers };
 }
 
-function node(options: { status?: Record<string, unknown>; attemptMs?: number } = {}) {
+function node(options: { status?: Record<string, unknown>; attemptMs?: number; answerWaitMs?: number } = {}) {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
   foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
@@ -76,7 +81,7 @@ function node(options: { status?: Record<string, unknown>; attemptMs?: number } 
     exec: async (id: string, cmd: string[]) => (asked.push(["exec", id, cmd]), { exitCode: 0, stdout: JSON.stringify(status), stderr: "", durationMs: 1, truncated: false }),
     destroy: async (id: string, opts: unknown) => (asked.push(["destroy", id, opts]), { verdict: "allow" as const, reason: "its own run" }),
   };
-  const signIns = new SeatSignIns({ store, vault, node: identity, host: () => host, cardWaitMs: 2_000, ...(options.attemptMs ? { attemptMs: options.attemptMs } : {}) });
+  const signIns = new SeatSignIns({ store, vault, node: identity, host: () => host, cardWaitMs: 2_000, ...(options.attemptMs ? { attemptMs: options.attemptMs } : {}), ...(options.answerWaitMs ? { answerWaitMs: options.answerWaitMs } : {}) });
   const add = (id: string, kind: "claude-subscription" | "chatgpt-codex" | "mistral-vibe" | "chatgpt-siwc" | "google-antigravity" = "claude-subscription", on = identity.id) =>
     (store.emit(identity, "seat.added", { id, kind, label: "Work", node: on, runs: 1 }, yourWord(null)), id);
   const seat = (id: string) => store.seats().find((s) => s.id === id)!;
@@ -107,8 +112,8 @@ describe("a Claude seat's sign-in", () => {
     // Asked again while it's open: the same card, and no second VM.
     expect(await n.signIns.start(A)).toEqual(card);
     expect(n.asked.filter((a) => a[0] === "vm")).toHaveLength(1);
-    n.signIns.answer(A, card.attempt, CODE);
-    expect(() => n.signIns.answer(A, card.attempt, CODE)).toThrow("a code reaches its sign-in once");
+    await n.signIns.answer(A, card.attempt, CODE);
+    await expect(n.signIns.answer(A, card.attempt, CODE)).rejects.toThrow("a code reaches its sign-in once");
     expect(n.bridge().told.filter((t) => "code" in t)).toEqual([{ code: CODE }]);
     n.bridge().say({ type: "done", ok: true }, true);
     await n.settled(() => n.asked.some((a) => a[0] === "destroy"));
@@ -131,7 +136,29 @@ describe("a Claude seat's sign-in", () => {
     expect(n.bridge().told.at(-1)).toEqual({ cancel: true });
     expect(seatState(n.seat(A), Date.now())).toEqual({ is: "signed-out", why: "cancelled" });
     expect(n.asked.at(-1)).toEqual(["destroy", "vm00000001", { run: `seat.${A}` }]);
-    expect(() => n.signIns.answer(A, card.attempt, CODE)).toThrow("That sign-in has ended");
+    await expect(n.signIns.answer(A, card.attempt, CODE)).rejects.toThrow("That sign-in has ended");
+  });
+
+  test("a code its tool didn't take leaves the sign-in asking, and you are told why; marked given only once its tool has it (the review's L1)", async () => {
+    const n = node({ answerWaitMs: 300 });
+    n.add(A);
+    const started = n.signIns.start(A);
+    await n.settled(() => n.bridge().told.length > 0);
+    n.bridge().say({ type: "card", url: PAGE });
+    const card = await started;
+    // Refused by its bridge: said in the node's own words, and the next code is taken all the same.
+    n.bridge().answers.refuse = "shape";
+    const refused = n.signIns.answer(A, card.attempt, "FAKEnot-a-code");
+    await expect(refused).rejects.toThrow("Its sign-in didn't take that: paste the code its page shows, as it shows it");
+    await expect(refused.catch((error: { status: number }) => error.status)).resolves.toBe(400);
+    // Nothing said back: given up on, never marked given.
+    n.bridge().answers.refuse = "quiet";
+    await expect(n.signIns.answer(A, card.attempt, CODE)).rejects.toThrow("Its sign-in didn't say it took the code: give it again");
+    n.bridge().answers.refuse = null;
+    await n.signIns.answer(A, card.attempt, CODE);
+    expect(n.bridge().told.filter((t) => "code" in t).map((t) => t.code)).toEqual(["FAKEnot-a-code", CODE, CODE]);
+    await expect(n.signIns.answer(A, card.attempt, CODE)).rejects.toThrow("a code reaches its sign-in once");
+    await n.signIns.cancel(A, card.attempt);
   });
 
   test("it lapses if nobody finishes it, said as expired", async () => {
@@ -154,7 +181,7 @@ describe("a Claude seat's sign-in", () => {
     await n.settled(() => n.bridge().told.length > 0);
     n.bridge().say({ type: "card", url: PAGE });
     const card = await started;
-    n.signIns.answer(A, card.attempt, CODE);
+    await n.signIns.answer(A, card.attempt, CODE);
     n.bridge().say({ type: "done", ok: true }, true);
     await n.settled(() => n.asked.some((a) => a[0] === "destroy"));
     expect(seatState(n.seat(A), Date.now())).toEqual({ is: "signed-out", why: "wrong-account" });
@@ -185,7 +212,7 @@ describe("a ChatGPT seat's sign-in, by Codex's device code", () => {
     n.bridge().say({ type: "card", url: DEVICE, code: "FAKE-1234" });
     const card = await started;
     expect(card).toMatchObject({ kind: "device-code", url: DEVICE, code: "FAKE-1234", firstTime: true });
-    expect(() => n.signIns.answer(A, card.attempt, CODE)).toThrow("its page finishes it");
+    await expect(n.signIns.answer(A, card.attempt, CODE)).rejects.toThrow("its page finishes it");
     n.bridge().say({ type: "done", ok: true }, true);
     await n.settled(() => n.asked.some((a) => a[0] === "destroy"));
     expect(seatState(n.seat(A), Date.now())).toMatchObject({ is: "ready" });
@@ -230,7 +257,7 @@ describe("an Antigravity seat's sign-in, Google's to finish", () => {
     n.bridge().say({ type: "card", url: GOOGLE });
     const card = await started;
     expect(card).toMatchObject({ seat: A, kind: "paste-code", url: GOOGLE });
-    n.signIns.answer(A, card.attempt, GOOGLE_CODE);
+    await n.signIns.answer(A, card.attempt, GOOGLE_CODE);
     expect(n.bridge().told.filter((t) => "code" in t)).toEqual([{ code: GOOGLE_CODE }]);
     n.bridge().say({ type: "done", ok: true }, true);
     await n.settled(() => n.asked.some((a) => a[0] === "destroy"));
@@ -260,7 +287,7 @@ describe("an Antigravity seat's sign-in, Google's to finish", () => {
     await n.settled(() => n.bridge().told.length > 0);
     n.bridge().say({ type: "card", url: GOOGLE });
     const card = await started;
-    n.signIns.answer(A, card.attempt, GOOGLE_CODE);
+    await n.signIns.answer(A, card.attempt, GOOGLE_CODE);
     n.bridge().say({ type: "done", ok: true }, true);
     await n.settled(() => n.asked.some((a) => a[0] === "destroy"));
     expect(seatState(n.seat(A), Date.now())).toEqual({ is: "signed-out", why: "signed-out" });

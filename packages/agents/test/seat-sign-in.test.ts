@@ -145,8 +145,9 @@ describe("Claude Code's sign-in", () => {
     // The vendor's own sign-in, on a terminal of its own wide enough for its address, for the seat's account.
     expect(started).toEqual({ argv: ["auth", "login", "--claudeai", "--email", "owner@example.test"], tty: true, columns: 4000 });
     expect(answered).toEqual({ code: CODE });
-    // What it prints is the card and how it ended: never the code, and the page only on its card.
-    expect(vm.said.map((line) => line.type)).toEqual(["card", "asks", "done"]);
+    // What it prints is the card, that its tool took the code, and how it ended: never the code, and the page only on
+    // its card.
+    expect(vm.said.map((line) => line.type)).toEqual(["card", "asks", "took", "done"]);
     expect(JSON.stringify(vm.said)).not.toContain(CODE);
   });
 
@@ -159,6 +160,8 @@ describe("Claude Code's sign-in", () => {
     vm.tell({ code: "FAKEother000#FAKE-state-0000" });
     expect(await vm.done()).toEqual({ type: "done", ok: true });
     expect(vm.trace().filter((item) => "code" in item)).toEqual([{ code: CODE }]);
+    // Each one after the first is said to be refused, as one already given: the node tells you so.
+    expect(vm.said.filter((line) => line.type === "took" || line.type === "refused")).toEqual([{ type: "took" }, { type: "refused", why: "answered" }, { type: "refused", why: "answered" }]);
     // With no email it starts on no account: the page asks.
     expect(vm.trace()[0]!.argv).toEqual(["auth", "login", "--claudeai"]);
   });
