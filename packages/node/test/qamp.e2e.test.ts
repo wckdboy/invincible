@@ -26,9 +26,12 @@ const repo = resolve(import.meta.dir, "../../..");
 const cli = join(repo, "packages/node/src/cli.ts");
 const bin = process.env.INVINCIBLE_QAMP_BIN;
 const pinName = `${process.platform}-${process.arch}` === "linux-x64" ? "QAMP_SHA256_LINUX_X86_64" : `${process.platform}-${process.arch}` === "darwin-arm64" ? "QAMP_SHA256_DARWIN_ARM64" : null;
-const pin = pinName ? new RegExp(`^${pinName}=([0-9a-f]{64})$`, "m").exec(readFileSync(join(repo, "scripts/qamp-pin.sh"), "utf8"))?.[1] ?? null : null;
+const pinned = readFileSync(join(repo, "scripts/qamp-pin.sh"), "utf8");
+const pin = pinName ? new RegExp(`^${pinName}=([0-9a-f]{64})$`, "m").exec(pinned)?.[1] ?? null : null;
+/** The release the pin names (QAMP_VERSION): what the binary says it is. */
+const pinnedVersion = /^QAMP_VERSION=(\S+)$/m.exec(pinned)?.[1] ?? "?";
 const missing = !bin ? "INVINCIBLE_QAMP_BIN names no Q-AMP binary" : !existsSync(bin) ? `INVINCIBLE_QAMP_BIN names ${bin}, which isn't there` : !pin ? `Q-AMP has no pinned binary for ${process.platform}-${process.arch}` : null;
-if (missing) console.warn(`qamp.e2e.test.ts SKIPPED, unverified: ${missing}. Run it with INVINCIBLE_QAMP_BIN=<qamp ${"0.1.0"} for this machine, checked against scripts/qamp-pin.sh>.`);
+if (missing) console.warn(`qamp.e2e.test.ts SKIPPED, unverified: ${missing}. Run it with INVINCIBLE_QAMP_BIN=<qamp ${pinnedVersion} for this machine, checked against scripts/qamp-pin.sh>.`);
 
 const caps: Capabilities = {
   os: "linux",
@@ -103,7 +106,7 @@ describe.skipIf(missing !== null)("an agent on another machine, over Q-AMP's rea
 
   test("the binary is the pinned one, and its did:key names the public key its key file holds", async () => {
     expect(createHash("sha256").update(readFileSync(bin!)).digest("hex")).toBe(pin!);
-    expect((await qamp(["--version"])).out.trim()).toBe("qamp 0.1.0");
+    expect((await qamp(["--version"])).out.trim()).toBe(`qamp ${pinnedVersion}`);
     // Q-AMP's encoding against the primary's reading of it: the key file is qamp-sk1.<the seed, base64url>.
     const seed = fromB64u(readFileSync(agentKey, "utf8").trim().slice("qamp-sk1.".length));
     expect(ed25519OfDidKey(agent)).toEqual(signingPublicKey(seed));
