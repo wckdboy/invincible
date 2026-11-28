@@ -2,7 +2,7 @@ import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AGY_SIGN_IN, TeamHarness } from "@invincible/core";
+import { AGY_SIGN_IN, redact, TeamHarness } from "@invincible/core";
 import { AGENTS, ANTIGRAVITY, ANTIGRAVITY_ACP_BRIDGE, ANTIGRAVITY_SIGN_IN, chooseAgentModels, harnessReadiness, OWN_SIGN_IN, seatSignInBridge } from "../src/index.ts";
 import { ENGRAM_BIN, engramArgv } from "../src/engram.ts";
 
@@ -388,6 +388,43 @@ describe("Antigravity's sign-in, printed", () => {
   test("what the node reads of agy's events is scrubbed of each: an access token, a refresh token, an ID token, in a tool's output, its words and its errors", () => {
     const line = (type: string, words: string) => JSON.stringify(type === "tool" ? { type, id: "call-1", tool: "run_command", input: "print it", output: words, ok: true } : type === "text" ? { type, text: words } : { type, message: words });
     for (const type of ["tool", "text", "error"]) for (const token of tokens) expect([type, token.slice(0, 5), leaks(ANTIGRAVITY.read(line(type, `here: ${token}\n`)))]).toEqual([type, token.slice(0, 5), []]);
+  });
+
+  // The re-check of 28 November 2026, R6: what a tool prints of the sign-in in a form the scrub couldn't see. (Against a
+  // command that means to send it out, no scrub is the guard: the seat's VM is, H1.)
+  describe("printed in a form a scrub can't read as it is", () => {
+    const FILE = JSON.stringify({ token: { access_token: ACCESS, token_type: "Bearer", refresh_token: REFRESH, expiry: "2099-01-01T00:00:00Z" } });
+    const kept = (output: string): string => (ANTIGRAVITY.read(JSON.stringify({ type: "tool", id: "call-1", tool: "run_command", input: "a command", output, ok: true })) as { output: string }[])[0]!.output;
+    const pieces = (secret: string) => Array.from({ length: Math.floor(secret.length / 20) }, (_, i) => secret.slice(i * 20, i * 20 + 20));
+    const secrets = { access: ACCESS.slice(5), refresh: REFRESH.slice(4), signature: ID_TOKEN.split(".")[2]! };
+    /** Which have a 20-character piece in what was kept. */
+    const leaked = (out: string) => Object.entries(secrets).filter(([, secret]) => pieces(secret).some((piece) => out.includes(piece))).map(([name]) => name);
+    const wrap = (text: string, width: number) => text.match(new RegExp(`.{1,${width}}`, "g"))!.join("\n");
+    test("percent-encoded: the token file in a query, and a header", () => {
+      expect(leaked(kept(`POST /log?payload=${encodeURIComponent(FILE)}`))).toEqual([]);
+      expect(leaked(kept(`redirect?Authorization=Bearer%20${ACCESS}`))).toEqual([]);
+    });
+    test("encoded: the token file as base64 on one line (base64 -w0), and as hex (xxd -p, 60 to a line); kept, it decodes to none of it", () => {
+      const base64 = kept(Buffer.from(FILE).toString("base64"));
+      expect(leaked(Buffer.from(base64.replace(/[^A-Za-z0-9+/=]/g, ""), "base64").toString("latin1"))).toEqual([]);
+      const hex = kept(wrap(Buffer.from(FILE).toString("hex"), 60));
+      expect(leaked(Buffer.from(hex.replace(/[^0-9a-f]/g, ""), "hex").toString("latin1"))).toEqual([]);
+      // (Wrapped as base64 wraps it, at 76.)
+      const wrapped = kept(wrap(Buffer.from(FILE).toString("base64"), 76));
+      expect(leaked(Buffer.from(wrapped.replace(/[^A-Za-z0-9+/=]/g, ""), "base64").toString("latin1"))).toEqual([]);
+    });
+    test("wrapped: an ID token at 76 columns, and at 64", () => {
+      for (const width of [76, 64]) expect([width, leaked(kept(wrap(ID_TOKEN, width)))]).toEqual([width, []]);
+    });
+    test("what holds none of it comes through as the usual redaction leaves it: a query, commits' ids, a list, a file's base64", () => {
+      const harmless = [
+        "GET /search?q=a%20b%2Fc&page=2 HTTP/1.1",
+        Array.from({ length: 4 }, (_, i) => seeded(10 + i, 40).replace(/[^a-f0-9]/gi, "0").toLowerCase()).join("\n"),
+        "Build\nTest1\nDeploy2Prod\nRelease3Notes\nRollback4Plan\nMonitor5Alerts",
+        Buffer.from("# The importer\n\nIt reads SI units and writes them back as they came, kilo and mega first.\n".repeat(3)).toString("base64"),
+      ];
+      for (const text of harmless) expect([text.slice(0, 20), kept(text)]).toEqual([text.slice(0, 20), redact(text)]);
+    });
   });
 
   test("a run whose command prints the seat's sign-in carries none of it, in any event the node reads", async () => {

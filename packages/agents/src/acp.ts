@@ -371,8 +371,80 @@ export function readBridge(line: string): AgentEvent[] {
  */
 const SIGNED_TOKEN = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g;
 const scrubSigned = (text: string) => text.replace(SIGNED_TOKEN, "[redacted token]");
+
+/*
+ * And a sign-in printed in a form neither can read as it is (the re-check of 28 November 2026, R6): percent-encoded (a
+ * token file in a query, Bearer%20ya29...), base64 or hex of it (base64 -w0, xxd -p), or wrapped across lines (an ID
+ * token at 76 columns). Before the rest, each is looked at as it was before it was encoded or wrapped: percent-encoded
+ * words are read decoded when that shows a secret; a run that decodes to one goes whole; and so does a block of lines
+ * wrapped to one width whose lines, joined, show one or decode to one. What shows none comes through as it was. This is
+ * for what a tool prints by the way: against a command that means to take the sign-in, no scrub is the guard (H1).
+ */
+const ENCODED_RUN = /[A-Za-z0-9+/=_-]{40,}/g;
+const ENCODED_LINE = /^[A-Za-z0-9+/=_.-]+$/;
+const HIDDEN = "[redacted encoded token]";
+const shows = (text: string): boolean => redact(text) !== text || scrubSigned(text) !== text;
+const decodedAs = (run: string): string[] => [
+  ...(/^(?:[0-9a-fA-F]{2})+$/.test(run) ? [Buffer.from(run, "hex").toString("latin1")] : []),
+  ...(/^[A-Za-z0-9+/]+={0,2}$/.test(run) ? [Buffer.from(run, "base64").toString("latin1")] : []),
+  ...(/^[A-Za-z0-9_-]+={0,2}$/.test(run) ? [Buffer.from(run, "base64url").toString("latin1")] : []),
+];
+const percentDecoded = (text: string): string =>
+  text.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run.replace(/%([0-9A-Fa-f]{2})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+    }
+  });
+function unhidden(text: string): string {
+  if (/%[0-9A-Fa-f]{2}/.test(text)) {
+    const plain = percentDecoded(text);
+    if (shows(plain)) text = plain;
+  }
+  // Wrapped: lines of encoded characters, each but the last the same width (at least 40), the last no wider.
+  const lines = text.split("\n");
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; ) {
+    const bare = (k: number) => lines[k]!.replace(/\r$/, "");
+    let j = i;
+    while (j < lines.length && ENCODED_LINE.test(bare(j))) j++;
+    const width = bare(i).length;
+    const wrapped = j - i > 1 && width >= 40 && Array.from({ length: j - i - 1 }, (_, k) => bare(i + k).length === width).every(Boolean) && bare(j - 1).length <= width;
+    if (wrapped) {
+      const joined = Array.from({ length: j - i }, (_, k) => bare(i + k)).join("");
+      out.push(...(shows(joined) || decodedAs(joined).some(shows) ? [HIDDEN] : lines.slice(i, j)));
+      i = j;
+    } else {
+      out.push(lines[i]!);
+      i++;
+    }
+  }
+  return out.join("\n").replace(ENCODED_RUN, (run) => (decodedAs(run).some(shows) ? HIDDEN : run));
+}
+/** A bridge's line with what it says looked at as it was before it was encoded or wrapped (unhidden). */
+function unhiddenLine(line: string): string {
+  let e: Record<string, unknown>;
+  try {
+    e = JSON.parse(line);
+  } catch {
+    return line;
+  }
+  if (!e || typeof e !== "object") return line;
+  let changed = false;
+  for (const key of ["text", "message", "error", "tool", "input", "output"]) {
+    const said = e[key];
+    if (typeof said !== "string") continue;
+    const plain = unhidden(said);
+    if (plain !== said) {
+      e[key] = plain;
+      changed = true;
+    }
+  }
+  return changed ? JSON.stringify(e) : line;
+}
 export function readSignedIn(line: string): AgentEvent[] {
-  return readBridge(line).map((event): AgentEvent => {
+  return readBridge(unhiddenLine(line)).map((event): AgentEvent => {
     if (event.type === "text") return { ...event, text: scrubSigned(event.text) };
     if (event.type === "error") return { ...event, message: scrubSigned(event.message) };
     if (event.type === "tool") return { ...event, tool: scrubSigned(event.tool), input: scrubSigned(event.input), output: scrubSigned(event.output) };
