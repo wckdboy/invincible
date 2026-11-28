@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { BRAND_PNGS, ZOOM } from "../../../scripts/brand.ts";
+import { BRAND_PNGS, FAVICON_SVG, ZOOM } from "../../../scripts/brand.ts";
 import { downscale, greyscale, png, roundTile } from "../../../scripts/field-icon.ts";
-import { MARK_FORMS, MARK_RECTS, markCoverage, markReach, renderMark } from "../../../scripts/mark.ts";
+import { MARK_FORMS, MARK_POLYGON, MARK_RECTS, markCoverage, markReach, renderMark } from "../../../scripts/mark.ts";
 
 const ROOT = resolve(import.meta.dir, "../../..");
 /** A PNG's width, height and colour type (2: RGB, 6: RGBA), from its header. */
@@ -114,6 +114,20 @@ describe("the app icon: the I-beam, one solid form in one ink", () => {
       expect(existsSync(join(ROOT, "apps/web/src", icon.src))).toBe(true);
     }
     expect(manifest.icons.some((i) => i.src === "/icon-maskable-512.png")).toBe(true);
-    expect(readFileSync(join(ROOT, "apps/web/src/index.html"), "utf8")).toContain('<link rel="icon" href="/icon-64.png" type="image/png" sizes="64x64" />');
+    const page = readFileSync(join(ROOT, "apps/web/src/index.html"), "utf8");
+    // The tab's icon follows the mode (the owner's word, 28 November 2026): the bare I-beam as SVG, its ink the page's,
+    // after the PNG a browser that takes no SVG falls back to (the black tile, as it was: it can't follow the mode).
+    const png64 = '<link rel="icon" href="/icon-64.png" type="image/png" sizes="64x64" />';
+    const svg = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any" />';
+    expect(page).toContain(png64);
+    expect(page.indexOf(svg)).toBeGreaterThan(page.indexOf(png64));
+  });
+
+  test("the favicon is the bare I-beam, near black in a light tab and white in a dark one, on nothing", () => {
+    expect(readFileSync(join(ROOT, "apps/web/src/favicon.svg"), "utf8")).toBe(FAVICON_SVG);
+    expect(FAVICON_SVG).toContain(`<polygon points="${MARK_POLYGON}"/>`);
+    expect(FAVICON_SVG).toContain(`polygon{fill:${MARK_FORMS.light.mark}}`);
+    expect(FAVICON_SVG).toContain(`@media (prefers-color-scheme:dark){polygon{fill:${MARK_FORMS.dark.mark}}}`);
+    expect(FAVICON_SVG).not.toMatch(/<rect|<circle|background/);
   });
 });

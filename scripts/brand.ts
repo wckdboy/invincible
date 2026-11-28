@@ -3,7 +3,8 @@
  * Regenerates the app icon: the I-beam (scripts/mark.ts), white on near black, the owner's choice of 26 November 2026
  * ("simpler, still sleek and cool, logo, minimal bold monochrome"; it replaced Field · Aurum). Every PNG a platform takes
  * is drawn at its own size, each pixel's share of the mark worked out exactly: the web app's (its manifest's tiles, its
- * maskable and touch icons, its favicon, its notification badge), the README's, and the Android app's adaptive layers.
+ * maskable and touch icons, its favicon for a browser that takes no SVG, its notification badge), the README's, and the
+ * Android app's adaptive layers. A browser tab's own icon is the SVG one, which follows the mode (FAVICON_SVG).
  * The Apple app's come from the same mark (apps/apple/scripts/brand.ts).
  *
  *   bun scripts/brand.ts --png    the icons (deterministic: pure TypeScript, no browser; a second or two)
@@ -11,7 +12,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { png, roundTile } from "./field-icon.ts";
-import { renderMark } from "./mark.ts";
+import { MARK_FORMS, MARK_POLYGON, renderMark } from "./mark.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
 const at = (p: string): string => join(ROOT, p);
@@ -20,6 +21,13 @@ const at = (p: string): string => join(ROOT, p);
  * (a maskable icon's 80 %, an adaptive icon's 66 dp of 108); and large on a notification's badge (scripts/mark.ts
  * markReach says how far each reaches). */
 export const ZOOM = { tile: 1, maskable: 1, adaptive: 0.9, badge: 1.3 } as const;
+
+/**
+ * A browser tab's icon, which follows the mode (the owner's word, 28 November 2026: "light/dark mode, preferred bare
+ * I-beam logo/no background"): the bare I-beam on nothing, near black in a light tab and white in a dark one (MARK_FORMS'
+ * inks, by prefers-color-scheme), its height the tab's square (the box cut to the mark's 72 units).
+ */
+export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="14 14 72 72"><style>polygon{fill:${MARK_FORMS.light.mark}}@media (prefers-color-scheme:dark){polygon{fill:${MARK_FORMS.dark.mark}}}</style><polygon points="${MARK_POLYGON}"/></svg>\n`;
 
 /** The Android app's densities: an adaptive icon's 108 dp in each. */
 export const ANDROID_DENSITIES = { mdpi: 108, hdpi: 162, xhdpi: 216, xxhdpi: 324, xxxhdpi: 432 } as const;
@@ -55,6 +63,8 @@ async function renderPngs(): Promise<void> {
   write("apps/web/src/icon-maskable-512.png", renderMark(512, { zoom: ZOOM.maskable }), 512);
   write("apps/web/src/apple-touch-icon.png", renderMark(180, { zoom: ZOOM.tile }), 180);
   write("apps/web/src/icon-mono-96.png", renderMark(96, { tile: null, zoom: ZOOM.badge }), 96);
+  writeFileSync(at("apps/web/src/favicon.svg"), FAVICON_SVG);
+  console.log("wrote apps/web/src/favicon.svg");
 
   // The Android app's adaptive icon: the near black behind, the mark in front (inside the safe zone, so the launcher
   // may mask and move the layers as it likes), and its themed form: the mark in white, for the system to colour.

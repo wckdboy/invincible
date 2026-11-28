@@ -110,8 +110,9 @@ export async function buildAssets(webDir = join(REPO_ROOT, "apps/web")): Promise
       body: readFileSync(join(src, "manifest.webmanifest")),
       type: "application/manifest+json",
     });
-    // The icons: the primary's field in gold, rendered as light by `bun scripts/brand.ts --png` (pictures, not drawings: the
-    // favicon is icon-64.png).
+    // The icons, the I-beam, by `bun scripts/brand.ts --png`: pictures, and a tab's own icon, favicon.svg, whose ink
+    // follows the mode (icon-64.png for a browser that takes no SVG).
+    files.set("/favicon.svg", { body: readFileSync(join(src, "favicon.svg"), "utf8"), type: "image/svg+xml" });
     for (const name of ["apple-touch-icon.png", "icon-64.png", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "icon-mono-96.png"]) {
       files.set(`/${name}`, { body: new Uint8Array(readFileSync(join(src, name))), type: "image/png" });
     }

@@ -86,6 +86,11 @@ describe("the PWA bundle", () => {
       const view = new DataView(bytes.buffer);
       expect(view.getUint32(16)).toBe(view.getUint32(20));
     }
+    // A tab's icon: the bare I-beam as SVG, its ink following the mode (the owner's word, 28 November 2026).
+    expect(html).toContain('rel="icon" href="/favicon.svg" type="image/svg+xml"');
+    const favicon = assets.serve("/favicon.svg");
+    expect(favicon.headers.get("content-type")).toBe("image/svg+xml");
+    expect(await favicon.text()).toContain("prefers-color-scheme:dark");
     // The notification badge is a silhouette: colour and alpha (type 6), so Android can draw it from the alpha alone.
     expect(new Uint8Array(await assets.serve("/icon-mono-96.png").arrayBuffer())[25]).toBe(6);
   });
