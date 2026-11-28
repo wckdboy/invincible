@@ -146,7 +146,7 @@ describe("the live stream, as the background moves", () => {
         after.push(last!.at - ended);
       }
       // (Told by its poke, a few milliseconds after its end, give or take the answer's own last bytes. A look's wait is
-      // uniform up to LOOK_MS: five in five under 100 ms by looks alone is one chance in a hundred.)
+      // uniform up to LOOK_MS: five in five under 100 ms by looks alone is less than one chance in a million.)
       for (const ms of after) expect(ms).toBeLessThan(100);
     } finally {
       stop.abort();
@@ -173,8 +173,8 @@ describe("the live stream, as the background moves", () => {
           after.push([topic, heard()!.at - wrote]);
         }
       }
-      // (Told by the store's own word, within SOON_MS and a little. By the look alone, under 100 ms is two chances in
-      // five each: six in six, one in 244.)
+      // (Told by the store's own word, within SOON_MS and a little. By the look alone, under 100 ms is one chance in
+      // twenty each: six in six, one in 64 million.)
       for (const [topic, ms] of after) expect([topic, ms < 100]).toEqual([topic, true]);
     } finally {
       stop.abort();

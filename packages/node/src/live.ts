@@ -23,7 +23,7 @@ import { LIVE_TOPICS, type LiveTopic } from "@invincible/core";
  * While anyone listens, the stamps are read this often whatever pokes them: the net for what nothing tells. What moves
  * on this node pokes, and a deadline wakes it, so this is not how soon anything is told.
  */
-export const LOOK_MS = 250;
+export const LOOK_MS = 2_000;
 /** A poke is read this soon after it, so a burst of writes (a decision and its ledger line) is told once. */
 export const SOON_MS = 15;
 /** The longest a timer waits (setTimeout's own bound); a deadline further off is looked at again then. */
