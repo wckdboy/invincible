@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { beginFor, Bodies, PROBE_AFTER, ROUND_SOURCE, roundKey, roundNotice, roundTask, type RoutedTaskRead, TASK_KINDS, type TaskKind, taskKindOf, TeamTaskRecord, TeamTaskRouting } from "../src/index.ts";
+import { beginFor, Bodies, PROBE_AFTER, ROUND_SOURCE, roundKey, roundNotice, roundTask, type RoutedTaskRead, type RoutingRead, routingReport, type RoutingReportTask, TASK_KINDS, type TaskKind, taskKindOf, TeamTaskRecord, TeamTaskRouting } from "../src/index.ts";
 
 /*
  * Smart routing's memory, by kind of task (routing.ts): an agent's tasks of a kind begin on the tier that last verified
@@ -156,5 +156,111 @@ describe("work going round on both tiers: a notice, so you are told at once", ()
     expect(TeamTaskRecord.safeParse({ ...base, routing: { began: "engineer", moved: "rereads", round: true, kind: "code" } }).success).toBe(true);
     expect(TeamTaskRecord.safeParse({ ...base, routing: { began: "engineer", kind: "code" } }).success).toBe(true);
     expect(TeamTaskRecord.safeParse({ ...base, routing: { began: "engineer", round: "yes" } }).success).toBe(false);
+  });
+});
+
+describe("the routing report: how a node's own finished tasks were routed, by kind and where each began", () => {
+  const prices = { "plan/cheap": { input: 1, output: 4 }, "plan/strong": { input: 10, output: 40 } };
+  /** One finished task: its kind and routing, verified or not, its minutes, and its tokens on a model (a million: $1 cheap). */
+  const done = (n: number, routing: RoutingRead | undefined, opts: { verified?: boolean; minutes?: number; model?: string; status?: string } = {}): RoutingReportTask => ({
+    id: `task-${String(n).padStart(12, "0")}`,
+    status: opts.status ?? (opts.verified === false ? "failed" : "done"),
+    verified: opts.verified !== false,
+    record: {
+      startedAt: 0,
+      endedAt: (opts.minutes ?? 10) * 60_000,
+      spent: [{ role: "engineer", model: opts.model ?? "plan/cheap", calls: 1, unknown: 0, input: 1_000_000, output: 0, cached: 0, reasoning: 0 }],
+      ...(routing ? { routing } : {}),
+    },
+  });
+
+  test("by kind, then where each began: its tasks, verified, moved up and why, gone round on both tiers, money and minutes", () => {
+    const tasks = [
+      done(1, { began: "engineer", kind: "code" }, { minutes: 6 }),
+      done(2, { began: "engineer", moved: "gate", kind: "code" }, { minutes: 20, model: "plan/strong" }),
+      done(3, { began: "engineer", moved: "rereads", round: true, kind: "code" }, { verified: false, minutes: 30, model: "plan/strong" }),
+      done(4, { began: "planner", because: "memory", kind: "code" }, { minutes: 8, model: "plan/strong" }),
+      done(5, { began: "engineer", kind: "fix" }, { minutes: 4 }),
+    ];
+    expect(routingReport(tasks, prices)).toEqual({
+      v: 1,
+      finished: 5,
+      unrouted: 0,
+      kinds: [
+        {
+          kind: "fix",
+          tasks: 1,
+          verified: 1,
+          usd: 1,
+          priced: true,
+          minutes: 4,
+          usdPerVerified: 1,
+          minutesPerVerified: 4,
+          groups: [{ began: "engineer", because: null, tasks: 1, verified: 1, movedUp: { gate: 0, review: 0, stall: 0, rereads: 0 }, wentRound: 0, usd: 1, priced: true, minutes: 4, usdPerVerified: 1, minutesPerVerified: 4 }],
+        },
+        {
+          kind: "code",
+          tasks: 4,
+          verified: 3,
+          usd: 31,
+          priced: true,
+          minutes: 64,
+          usdPerVerified: 31 / 3,
+          minutesPerVerified: 64 / 3,
+          groups: [
+            // Its money and minutes are every task's of the group, verified or not, per verified task.
+            { began: "engineer", because: null, tasks: 3, verified: 2, movedUp: { gate: 1, review: 0, stall: 0, rereads: 1 }, wentRound: 1, usd: 21, priced: true, minutes: 56, usdPerVerified: 10.5, minutesPerVerified: 28 },
+            { began: "planner", because: "memory", tasks: 1, verified: 1, movedUp: { gate: 0, review: 0, stall: 0, rereads: 0 }, wentRound: 0, usd: 10, priced: true, minutes: 8, usdPerVerified: 10, minutesPerVerified: 8 },
+          ],
+        },
+      ],
+      probes: { tried: 0, held: 0 },
+    });
+  });
+
+  test("tries of the engineer's after the planner's: how many, and how many held, verified there without moving up", () => {
+    const tasks = [
+      done(1, { began: "engineer", because: "probe", kind: "task" }),
+      done(2, { began: "engineer", because: "probe", moved: "gate", kind: "task" }),
+      done(3, { began: "engineer", because: "probe", kind: "task" }, { verified: false }),
+    ];
+    const report = routingReport(tasks, prices);
+    expect(report.probes).toEqual({ tried: 3, held: 1 });
+    expect(report.kinds[0]!.groups.map((g) => [g.began, g.because, g.tasks])).toEqual([["engineer", "probe", 3]]);
+    // A try is one begun on the engineer's: the schema takes a planner's "probe", the runtime never makes one.
+    expect(routingReport([done(4, { began: "planner", because: "probe", kind: "task" })], prices).probes).toEqual({ tried: 0, held: 0 });
+  });
+
+  test("a task not routed (no kind kept: held to models, a coding tool's, from before kinds) is counted apart; one not finished isn't read", () => {
+    const tasks = [
+      done(1, undefined),
+      done(2, { began: "planner", because: "memory" }),
+      { id: "task-running00001", status: "running", verified: false },
+      done(4, { began: "engineer", kind: "desktop" }),
+    ];
+    const report = routingReport(tasks, prices);
+    expect([report.finished, report.unrouted, report.kinds.map((k) => k.kind)]).toEqual([3, 2, ["desktop"]]);
+  });
+
+  test("money a call has no price for is never guessed: the group says it isn't all priced, and has no money a verified task", () => {
+    const report = routingReport([done(1, { began: "engineer", kind: "code" }, { model: "elsewhere/x" }), done(2, { began: "engineer", kind: "code" })], prices);
+    const code = report.kinds[0]!;
+    expect([code.usd, code.priced, code.usdPerVerified, code.groups[0]!.priced, code.groups[0]!.usdPerVerified]).toEqual([1, false, null, false, null]);
+    // None verified: nothing a verified task, of money or minutes.
+    const none = routingReport([done(1, { began: "engineer", kind: "fix" }, { verified: false })], prices).kinds[0]!;
+    expect([none.usdPerVerified, none.minutesPerVerified]).toEqual([null, null]);
+  });
+
+  test("the groups come in one order, whatever order the tasks came in: the same tasks, the same report", () => {
+    const tasks = [
+      done(1, { began: "planner", because: "plan", kind: "code" }),
+      done(2, { began: "planner", because: "memory", kind: "code" }),
+      done(3, { began: "engineer", because: "probe", kind: "code" }),
+      done(4, { began: "engineer", kind: "code" }),
+      done(5, { began: "planner", kind: "code" }),
+    ];
+    const once = routingReport(tasks, prices);
+    expect(once.kinds[0]!.groups.map((g) => `${g.began}${g.because ? `:${g.because}` : ""}`)).toEqual(["engineer", "engineer:probe", "planner:memory", "planner:plan", "planner"]);
+    expect(routingReport([...tasks].reverse(), prices)).toEqual(once);
   });
 });

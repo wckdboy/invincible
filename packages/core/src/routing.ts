@@ -1,3 +1,5 @@
+import { costOf, type Prices, type UsageLine } from "./spend.ts";
+
 /*
  * Smart routing's memory, by kind of task: where an agent's next task of a kind begins, on the engineer's models (the
  * cheap ones) or the planner's (the strongest), from how its tasks of that kind went. One rule for every surface: the
@@ -123,5 +125,110 @@ export function roundNotice(input: { agent: string; task: string; id: string; re
   return {
     title: cut(`${input.agent}'s task went round on both tiers`, 200),
     body: `“${cut(input.task, 300)}” went round on the engineer's models, moved up, and has now read the same files again ${input.rereads} times on the planner's models with nothing changed${files.length ? ` (${files.join(", ")}${more})` : ""}. It goes on until you stop it or its budget ends it. To stop it: its card's Stop, or invincible agents stop task ${input.id}`,
+  };
+}
+
+/*
+ * The routing report (`invincible agents routing` with no agent, the agents' page at a desk's width): how a node's own
+ * finished tasks were routed, from their records alone, read-only. By kind (TASK_KINDS' order), then where each task's
+ * work began and why: the engineer's models (as ever, or as a try after the planner's) or the planner's (by the memory,
+ * by its plan). For each: how many, how many verified, how many moved up and why, how many went round on both tiers,
+ * and what they came to at your prices and in minutes, every task's (verified or not) per verified task. And the tries'
+ * own word: how many held, verified on the engineer's without moving up. A task with no kind kept (held to models, a
+ * coding tool's, from before kinds were kept) is counted apart. The same tasks, the same report: its order is fixed.
+ * Its JSON (`--json`) is this, `v` 1: a contract.
+ */
+
+/** A task as the report reads it: a TeamTask has all of this. One with no record isn't finished, and isn't read. */
+export interface RoutingReportTask {
+  id: string;
+  status: string;
+  verified: boolean;
+  record?: { startedAt: number; endedAt: number; spent: readonly UsageLine[]; routing?: RoutingRead };
+}
+
+/** What a set of tasks came to: how many, verified, money at your prices (all of it priced or not) and minutes. */
+export interface RoutingTally {
+  tasks: number;
+  verified: number;
+  /** US dollars of what was priced; `priced` false: some call had no price, and this is a lower bound. */
+  usd: number;
+  priced: boolean;
+  minutes: number;
+  /** Per verified task (every task's, verified or not): none when none was verified, or when money isn't all priced. */
+  usdPerVerified: number | null;
+  minutesPerVerified: number | null;
+}
+
+/** Tasks of a kind whose work began in one place, for one reason (null: as ever). */
+export interface RoutingReportGroup extends RoutingTally {
+  began: string;
+  because: string | null;
+  movedUp: { gate: number; review: number; stall: number; rereads: number };
+  wentRound: number;
+}
+
+export interface RoutingReport {
+  v: 1;
+  /** Finished tasks read (each with its record), and of them those with no kind kept: not in any kind. */
+  finished: number;
+  unrouted: number;
+  kinds: (RoutingTally & { kind: TaskKind; groups: RoutingReportGroup[] })[];
+  /** Tries of the engineer's after the planner's (begun there, because "probe"), and those that held: verified there, never moved up. */
+  probes: { tried: number; held: number };
+}
+
+/** Where a group's work began, in the report's order: the engineer's as ever, its tries, the planner's by memory, by plan. */
+const BEGAN_ORDER = ["engineer", "engineer:probe", "planner:memory", "planner:plan", "planner"];
+const beganKey = (began: string, because: string | null) => (because ? `${began}:${because}` : began);
+const beganRank = (key: string) => {
+  const at = BEGAN_ORDER.indexOf(key);
+  return at < 0 ? BEGAN_ORDER.length : at;
+};
+
+function tally(tasks: readonly RoutingReportTask[], prices: Prices): RoutingTally {
+  let usd = 0;
+  let priced = true;
+  let ms = 0;
+  for (const task of tasks) {
+    const cost = costOf(task.record!.spent, prices);
+    usd += cost.usd;
+    priced &&= cost.complete;
+    ms += Math.max(0, task.record!.endedAt - task.record!.startedAt);
+  }
+  const verified = tasks.filter((task) => task.verified).length;
+  const minutes = ms / 60_000;
+  return { tasks: tasks.length, verified, usd, priced, minutes, usdPerVerified: verified && priced ? usd / verified : null, minutesPerVerified: verified ? minutes / verified : null };
+}
+
+/** How a node's finished tasks were routed (above). */
+export function routingReport(tasks: readonly RoutingReportTask[], prices: Prices): RoutingReport {
+  const finished = tasks.filter((task) => task.record);
+  const routed = finished.filter((task) => task.record!.routing?.kind && task.record!.routing.kind in KIND_WORDS);
+  const kinds = TASK_KINDS.flatMap((kind) => {
+    const mine = routed.filter((task) => task.record!.routing!.kind === kind);
+    if (!mine.length) return [];
+    const byBegan = new Map<string, RoutingReportTask[]>();
+    for (const task of mine) {
+      const r = task.record!.routing!;
+      const key = beganKey(r.began, r.because ?? null);
+      byBegan.set(key, [...(byBegan.get(key) ?? []), task]);
+    }
+    const groups = [...byBegan.entries()]
+      .sort(([a], [b]) => beganRank(a) - beganRank(b) || (a < b ? -1 : a > b ? 1 : 0))
+      .map(([, group]): RoutingReportGroup => {
+        const { began, because } = group[0]!.record!.routing!;
+        const moved = (why: string) => group.filter((task) => task.record!.routing!.moved === why).length;
+        return { began, because: because ?? null, ...tally(group, prices), movedUp: { gate: moved("gate"), review: moved("review"), stall: moved("stall"), rereads: moved("rereads") }, wentRound: group.filter((task) => task.record!.routing!.round === true).length };
+      });
+    return [{ kind, ...tally(mine, prices), groups }];
+  });
+  const tries = routed.filter((task) => task.record!.routing!.began === "engineer" && task.record!.routing!.because === "probe");
+  return {
+    v: 1,
+    finished: finished.length,
+    unrouted: finished.length - routed.length,
+    kinds,
+    probes: { tried: tries.length, held: tries.filter((task) => task.verified && task.record!.routing!.moved === undefined).length },
   };
 }
