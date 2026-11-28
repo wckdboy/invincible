@@ -840,12 +840,38 @@ describe("the desk's focus and clicks, as a window manager takes its time", () =
 
   test("a single click at the same place as the last one is never held back; a double click waits out the toolkit's double-click time first (C0's F7)", async () => {
     const r = await deskd();
-    const t0 = performance.now();
-    await session(r, [{ id: 1, name: "left_click", input: { coordinate: [10, 10] } }, { id: 2, name: "left_click", input: { coordinate: [10, 10] } }]);
-    expect(performance.now() - t0).toBeLessThan(400);
-    const t1 = performance.now();
-    await session(r, [{ id: 3, name: "double_click", input: { coordinate: [10, 10] } }]);
-    expect(performance.now() - t1).toBeGreaterThan(300);
+    const singles = await session(r, [{ id: 1, name: "left_click", input: { coordinate: [10, 10] } }, { id: 2, name: "left_click", input: { coordinate: [10, 10] } }]);
+    const [double] = await session(r, [{ id: 3, name: "double_click", input: { coordinate: [10, 10] } }]);
+    expect([...singles, double].map((a) => a.ok)).toEqual([true, true, true]);
+    // The waits counted, on a clock of the test's own: two single clicks at one place take none; a double click there
+    // 0.1 s after them waits the rest of the double-click time (0.6 s), then 30 ms between its two presses. (On the real
+    // clock, "under 400 ms" counted a busy machine's time, and a pause before the double click outlasted its wait.)
+    const got = py(`
+clock = [50.0]
+slept = []
+def sleep(s):
+    slept.append(s)
+    clock[0] += max(s, 1e-6)
+class Display:
+    def active(self): return 1
+    def window(self, w): return {"id": hex(w), "title": "Page", "app": "Chromium", "dialog": False, "box": [0, 0, 1280, 800]}
+    def motion(self, x, y): pass
+    def button(self, b, down): pass
+    def sync(self): pass
+    def client_at(self, x, y): return 1
+class Drawn:
+    def since(self, t): return (True, 0.005)
+    def take(self): return [], []
+desk = d.Desk(pieces=object(), display=Display(), watch=Drawn(), now=lambda: clock[0], sleep=sleep)
+desk.ready = lambda: desk._display
+def waits(name):
+    del slept[:]
+    desk.tool(name, {"coordinate": [10, 10]})
+    return [round(s * 1000) for s in slept]
+single = [waits("left_click"), waits("left_click")]
+clock[0] += 0.1
+print(json.dumps({"single": single, "double": waits("double_click")}))`) as { single: number[][]; double: number[] };
+    expect(got).toEqual({ single: [[], []], double: [500, 30] });
   }, BUSY(11.4));
 
   test("a window named is brought forward with the keyboard's focus, the way between apps a full-screen browser hides", async () => {
