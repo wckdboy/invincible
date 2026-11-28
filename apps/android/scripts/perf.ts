@@ -8,9 +8,9 @@
  *   - screens at rest: an agent's page, a task's at work, failed and ended, and a kept chat, each opened by its link from
  *     a cold start, as a notification opens it, and given a minute with nothing done, every request counted by its path.
  *     A screen reads what it shows only as the live stream says its topic moved, as the web's pages do: its room no
- *     oftener than the app reads the team it is part of, the chat's under way no oftener than it reads the team and the
- *     chats (each one more: a move just before the minute began). A task's trail is said, not held to this, until the
- *     trail is a live topic of its own;
+ *     oftener than the app reads the team it is part of, a task's trail no oftener than that either (the node writes each
+ *     line with its task's entry in the team), the chat's under way no oftener than it reads the team and the chats (each
+ *     one more: a move just before the minute began);
  *   - words shown: yours written in an agent's room on the node, as from another device (/__dev/say), until that agent's
  *     page in front shows them, by its own mark in the log (PerfProbe), three times: an event's time from the node to the
  *     screen, as a room carries it;
@@ -157,6 +157,7 @@ if (doing("screens")) {
     const n = (path: string) => byPath[path] ?? 0;
     const why: string[] = [];
     if (n("/api/team/room") > n("/api/team") + 1) why.push(`its room read ${n("/api/team/room")} times, the team ${n("/api/team")}`);
+    if (n("/api/team/trail") > n("/api/team") + 1) why.push(`its trail read ${n("/api/team/trail")} times, the team ${n("/api/team")}`);
     if (n("/api/conversations/underway") > n("/api/team") + n("/api/turns") + 1) why.push(`what is under way read ${n("/api/conversations/underway")} times, the team and the chats ${n("/api/team") + n("/api/turns")}`);
     if (why.length) unfollowed += 1;
     atRest[name] = { total: asked.length, byPath, follows: why.length === 0, ...(why.length ? { why: why.join("; ") } : {}) };

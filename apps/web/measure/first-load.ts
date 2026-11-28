@@ -29,8 +29,8 @@
  *                   cumulative layout shift), with what moved. --shift-runs n opens each that many times (default 3).
  *     --places a,b  only these places (their names as the report gives them: overview, agent, sheet-add-key…), for
  *                   --shots and --shifts
- *     --rest        only what Chat and the agents cost at rest, and what they ask the node for (below): no page
- *                   loads are measured
+ *     --rest        only what Chat and the agents cost at rest, and what they and a task's thread ask the node for
+ *                   (below): no page loads are measured
  *     --desktop-frames <file>  Rio's desktop live: a recording of a desktop's stream (core's desktop-frames.ts) replayed
  *                   as its VM's encoder while it is watched, beside a stand-in for deskd's sessions (your take-over);
  *                   --shots then also shoots it live, and taken over. Without it, as on a checkout that has no
@@ -60,7 +60,8 @@
  * costs while nothing changes, over ten seconds: the page's main thread's time a second, and the processor time a
  * second of the page's whole renderer (its main thread, compositor, raster and workers) and of every process of the
  * browser (its GPU process drawing the frames among them); and, over a minute, every request each asks the node
- * for meanwhile, by path.
+ * for meanwhile, by path, as a task's thread at work and an ended one do too, each said to be on a timer where it
+ * read what the live stream did not say moved (the rule the phones are held to, apps/android/scripts/perf.ts).
  *
  * Timings move with the machine's load: compare two checkouts measured one after the other, and
  * trust a difference only when the ranges don't overlap. Bytes, requests and nodes don't move.
@@ -1024,6 +1025,23 @@ try {
   };
   const chatAsked = RUNS || REST ? await askedAtRest("#/chat") : null;
   const agentsAsked = RUNS || REST ? await askedAtRest("#/team") : null;
+  // A task's own thread: Ada's at work (held at its first command), and Noa's ended, verified.
+  const taskAsked = RUNS || REST ? await askedAtRest(`#/task/${first.id}`) : null;
+  const endedAsked = RUNS || REST ? await askedAtRest(`#/task/${kept.id}`) : null;
+  /**
+   * Whether a page at rest read only as the live stream said its topics moved, by the rule the phones are held to
+   * (apps/android/scripts/perf.ts): its room, and a task's trail (the node writes each line with its task's entry in the
+   * team), no oftener than the team is read; what is under way in a chat no oftener than the team and the chats are (each
+   * one more: a move just before the minute began). Empty: it did.
+   */
+  const onATimer = (paths: Record<string, number>): string[] => {
+    const n = (path: string) => paths[path] ?? 0;
+    const why: string[] = [];
+    if (n("/api/team/room") > n("/api/team") + 1) why.push(`its room read ${n("/api/team/room")} times, the team ${n("/api/team")}`);
+    if (n("/api/team/trail") > n("/api/team") + 1) why.push(`a trail read ${n("/api/team/trail")} times, the team ${n("/api/team")}`);
+    if (n("/api/conversations/underway") > n("/api/team") + n("/api/turns") + 1) why.push(`what is under way read ${n("/api/conversations/underway")} times, the team and the chats ${n("/api/team") + n("/api/turns")}`);
+    return why;
+  };
 
   // ---------- what moves on screen once it is there ----------
   // Each place, and the primary's, an agent's and a room's timeline, opened as a returning visit opens it (the service worker
@@ -1330,13 +1348,18 @@ try {
       [
         ["Chat", chatAsked!],
         ["The agents", agentsAsked!],
+        ["A task at work", taskAsked!],
+        ["An ended task", endedAsked!],
       ] as const
-    ).map(([name, asked]) => `${name} asks the node ${asked.requests} times a minute at rest${asked.requests ? `: ${Object.entries(asked.paths).map(([path, n]) => `${path} ${n}`).join(", ")}` : ""}.`),
+    ).map(([name, asked]) => {
+      const why = onATimer(asked.paths);
+      return `${name} asks the node ${asked.requests} times a minute at rest${asked.requests ? `: ${Object.entries(asked.paths).map(([path, n]) => `${path} ${n}`).join(", ")}` : ""}${why.length ? ` (on a timer: ${why.join("; ")})` : ""}.`;
+    }),
   ];
   if (REST) {
     console.log(`\nThe PWA at ${revision}${dirty} (${REPO}), in ${(await browser.send("Browser.getVersion")).product}.`);
     console.log(restLines().join("\n"));
-    if (JSON_OUT) writeFileSync(JSON_OUT, `${JSON.stringify({ revision: `${revision}${dirty}`, chatAtRest, agentsAtRest: atRest, chatAsked, agentsAsked }, null, 2)}\n`);
+    if (JSON_OUT) writeFileSync(JSON_OUT, `${JSON.stringify({ revision: `${revision}${dirty}`, chatAtRest, agentsAtRest: atRest, chatAsked, agentsAsked, taskAsked, endedAsked }, null, 2)}\n`);
   } else if (!RUNS) console.log(`${shots.length} screenshots in ${resolve(SHOTS ?? ".")}, nothing measured${MOVES || SHIFTS ? ` but ${[MOVES ? "the moves" : "", SHIFTS ? "the shifts" : ""].filter(Boolean).join(" and ")}` : ""} (--runs 0).`);
   else {
   // (The browser fetches /sw.js itself, outside what the protocol shows of the page and the worker: it is counted here.)
@@ -1355,6 +1378,8 @@ try {
     agentsAtRest: atRest,
     chatAsked,
     agentsAsked,
+    taskAsked,
+    endedAsked,
     ...(MOVES ? { moves } : {}),
     ...(SHIFTS ? { shifts: shifted } : {}),
     shots,
