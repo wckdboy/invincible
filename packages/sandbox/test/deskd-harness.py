@@ -11,7 +11,8 @@ deskd's own, the trace says one thing more: when an agent's request begins to wa
                             body (the page, with nothing in it that takes text), bar (the browser's own bar), xterm,
                             mousepad, none
   DESKD_DIALOG=confirm      the page puts up a JavaScript confirm once it has been clicked
-  DESKD_PASTE_TAKES=…       how long the app with the focus takes to take a paste, in seconds, or never (0.01)
+  DESKD_PASTE_TAKES=…       how long the app with the focus takes to take a paste, in seconds, or never, or
+                            as-waited: as deskd waits for it, once its paste keys have come (0.01)
   DESKD_LANDED=…            what the accessibility tree reads before the caret of the field with the focus, once
                             anything was typed or pasted (unset: the tree says nothing)
 """
@@ -95,6 +96,9 @@ class Screen:
         """The app with the focus got its paste keys: it asks for the text, in its own time (DESKD_PASTE_TAKES)."""
         if not getattr(self, "pending", False) or PASTE_TAKES == "never":
             return
+        if PASTE_TAKES == "as-waited":
+            self.keys_in = True
+            return
         self.pending = False
         def take():
             time.sleep(float(PASTE_TAKES))
@@ -103,6 +107,13 @@ class Screen:
         threading.Thread(target=take, daemon=True).start()
 
     def taken(self, bound):
+        # deskd waits here for the app to take the paste, `bound` s at most, and the trace says that deadline. An app
+        # that takes it as deskd waits (as-waited) takes it now, once its paste keys have come: no time is guessed for it.
+        trace(call="paste-wait", bound=bound)
+        if PASTE_TAKES == "as-waited" and getattr(self, "pending", False) and getattr(self, "keys_in", False):
+            self.pending = self.keys_in = False
+            trace(call="taken")
+            self.given.set()
         return self.given.wait(bound)
 
 

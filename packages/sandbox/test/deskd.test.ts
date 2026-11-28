@@ -1000,15 +1000,19 @@ describe("nothing hangs, nothing is silent (step 5)", () => {
   });
 
   test("a paste is answered once the app has taken the text, so the Return after it can't overtake it; a paste nothing takes is an error", async () => {
-    // (C1's step 4 run: in xterm, the line came after its Return, 20 of 20.)
-    const r = await deskd({ DESKD_FOCUS: "xterm", DESKD_PASTE_TAKES: "0.3" });
+    // (C1's step 4 run: in xterm, the line came after its Return, 20 of 20.) The app takes the text as deskd waits for
+    // it, no time guessed for it, and the deadline deskd took for that wait is checked instead: its 1 s. (A stand-in's
+    // 0.3 s, stretched past deskd's 1 s at 10 % of a core, 28 November 2026, gave "nothing took the pasted text".)
+    const r = await deskd({ DESKD_FOCUS: "xterm", DESKD_PASTE_TAKES: "as-waited" });
     const [typed] = await session(r, [{ id: 1, name: "type", input: { text: "Søren Ærø 🙂" } }, { id: 2, name: "key", input: { text: "Return" } }]);
     expect(typed).toMatchObject({ ok: true, did: "pasted 11 characters" });
     const order = r.trace().filter((t) => t.call === "taken" || (t.call === "key" && t.key === "Return" && t.down)).map((t) => t.call);
     expect(order).toEqual(["taken", "key"]);
+    expect(calls(r.trace(), "paste-wait").map((t) => t.bound)).toEqual([1]);
     const never = await deskd({ DESKD_FOCUS: "xterm", DESKD_PASTE_TAKES: "never" });
     const [lost] = await session(never, [{ id: 1, name: "type", input: { text: "Søren Ærø 🙂" } }]);
     expect(lost).toMatchObject({ ok: false, error: "nothing took the pasted text within 1 s: is a text field focused?" });
+    expect(calls(never.trace(), "paste-wait").map((t) => t.bound)).toEqual([1]);
   });
 
   test("a click's press comes right after its move: nothing is asked of the display between them", async () => {
