@@ -59,6 +59,8 @@ export function standingAfter(s: RunStanding, event: RunEvent): RunStanding {
       return { ...s, doing: line(`${escalatedWhy(event)}: the ${event.to}'s models take the work`, 300) };
     case "routed":
       return { ...s, doing: line(`${event.why[0]!.toUpperCase()}${event.why.slice(1)}: the ${event.to}'s models do it`, 300) };
+    case "round":
+      return { ...s, doing: line(`Going round on the ${event.on}'s models too: it goes on until it's stopped or its budget is spent`, 300) };
     case "contract":
       return { ...s, doing: line(event.kept ? `The planner wrote the test the work must pass: $ ${redact(event.command ?? "")}` : `No contract: ${event.why}`, 300) };
     case "tripped":

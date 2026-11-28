@@ -417,6 +417,13 @@ export type RunEvent =
    */
   | { type: "escalated"; to: RunRole; why: "gate"; gate: string }
   | { type: "escalated"; to: RunRole; why: Exclude<EscalationWhy, "gate"> }
+  /**
+   * Work that moved up going round on the planner's models too: `rereads` reads again of what they had read, nothing
+   * changed since (REREADS, counted afresh from the climb), and the files it read. Said once, and again only once the
+   * work has changed something and goes round anew. Nothing stops for it: the work goes on until you stop it or its
+   * budget ends it (your word, 19 November 2026), and the node tells you at once (team-runtime: a notice).
+   */
+  | { type: "round"; on: RunRole; rereads: number; files: string[] }
   /** The work went to another role's models from its start, and why (escalate: its plan said it is hard). */
   | { type: "routed"; to: RunRole; why: string }
   /**
@@ -2262,30 +2269,46 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     /** The files the work has shown since it last changed anything, and how many of its commands since only showed them again. */
     const shownSince = new Set<string>();
     let rereads = 0;
+    /** Whether the work has moved up (climb), and whether its going round on the planner's models is said (round). */
+    let climbed = false;
+    let roundSaid = false;
     /** The work goes up the ladder, once: the engineer's models to the planner's (escalate). False: it can't, or has. */
     const climb = (event: { why: "gate"; gate: string } | { why: Exclude<EscalationWhy, "gate"> }): boolean => {
       if (!o.escalate || worker !== "engineer") return false;
       worker = "planner";
       emit({ type: "escalated", to: worker, ...event });
+      // (The planner's models count their own going round, from here.)
+      climbed = true;
+      shownSince.clear();
+      rereads = 0;
       return true;
     };
     /**
      * A command that ran, counted for going round (REREADS): it changed something, and the count starts again; it only
      * showed files it had shown since, and it is one more. Past REREADS the work goes up (climb), and what its next turn is
-     * told says why: the words to add to it, or none.
+     * told says why: the words to add to it, or none. Past REREADS again on the planner's models, once it has moved up,
+     * it is said (round), once until it changes something: nothing stops.
      */
     const goingRound = (command: string, result: ExecResult): string => {
       if (changesOf(command) !== "nothing") {
         shownSince.clear();
         rereads = 0;
+        roundSaid = false;
         return "";
       }
       const files = contentsOf(command);
       if (!files?.length || result.exitCode !== 0) return "";
       if (files.every((file) => shownSince.has(file))) rereads += 1;
       for (const file of files) shownSince.add(file);
-      if (rereads < REREADS || !climb({ why: "rereads" })) return "";
-      return `\n\nThe work has read the same files again ${rereads} times since anything changed: what it needs is in view. Decide what to change, and change it, before reading more.`;
+      if (rereads < REREADS) return "";
+      const times = rereads;
+      const read = [...shownSince].sort().slice(0, 5);
+      if (climb({ why: "rereads" })) return `\n\nThe work has read the same files again ${times} times since anything changed: what it needs is in view. Decide what to change, and change it, before reading more.`;
+      if (climbed && !roundSaid) {
+        roundSaid = true;
+        emit({ type: "round", on: worker, rereads: times, files: read });
+      }
+      return "";
     };
     const looped = (command: string, seen: string) =>
       finish({ status: "stopped", summary: `Stopped: the same command failed the same way ${LOOP_STOP} times in a row, so running it again would only spend more.\n$ ${command.split("\n")[0]}\n${clip(seen, 600, 300)}` });

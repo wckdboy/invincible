@@ -764,3 +764,63 @@ describe("work going round: the same files read again, nothing changed since (es
   });
 });
 
+describe("work going round on the planner's models too: you are told at once, and it goes on (round)", () => {
+  const reads = (n: number) => Array.from({ length: n }, (_, i) => sh(`cat src/${i % 2 === 0 ? "a" : "b"}.ts`));
+  /** The engineer goes round (both files, the tests, then REREADS reads again): the work moves up. */
+  const engineer = [...reads(2), sh("bun test"), ...reads(REREADS)];
+  const between = (events: RunEvent[], from: RunEvent["type"], to: RunEvent["type"]) => events.slice(events.findIndex((e) => e.type === from), events.findIndex((e) => e.type === to)).filter((e) => e.type === "command").length;
+
+  test(`the planner's models count their own: ${REREADS} reads again of what they read, nothing changed, and it is said once; the work goes on`, async () => {
+    const h = harness({ engineer, planner: ["1. Do it.\nDone when: it is done.", ...reads(2 + REREADS), ...reads(3), sh("sed -i 's/old/new/' src/a.ts"), "DONE\nChanged."] }, { escalate: true });
+    expect((await h.run).status).toBe("done");
+    expect(h.events.filter((e) => e.type === "round")).toEqual([{ type: "round", on: "planner", rereads: REREADS, files: ["src/a.ts", "src/b.ts"] }]);
+    // Not at the climb, where the engineer's count stood: the planner's models read both files, then REREADS again.
+    expect(between(h.events, "escalated", "round")).toBe(2 + REREADS);
+    // Nothing stops: the planner's models went on reading, changed the file, and were done.
+    expect(h.commands.filter((c) => !c.startsWith("bun test")).slice(-4)).toEqual(["cat src/a.ts", "cat src/b.ts", "cat src/a.ts", "sed -i 's/old/new/' src/a.ts"]);
+  });
+
+  test("said again only once the work has changed something, and goes round again", async () => {
+    // (More commands than a run's thirty: the engineer's eleven, and the planner's twenty-one.)
+    const h = harness({ engineer, planner: ["1. Do it.\nDone when: it is done.", ...reads(2 + REREADS), sh("sed -i 's/old/new/' src/a.ts"), ...reads(2 + REREADS), "DONE\nChanged."] }, { escalate: true, maxSteps: 60 });
+    expect((await h.run).status).toBe("done");
+    expect(h.events.filter((e) => e.type === "round")).toHaveLength(2);
+  });
+
+  test("only once the work has moved up: the engineer going round without the ladder, or the planner's models from the start, say nothing of it", async () => {
+    const off = harness({ engineer: [...engineer, ...reads(REREADS), "DONE\nRead."] }, {});
+    expect((await off.run).status).toBe("done");
+    expect(off.events.some((e) => e.type === "round")).toBe(false);
+    const begun = harness({ engineer: [], planner: ["1. Do it.\nDone when: it is done.\nEngineer: strong", ...reads(2 + 2 * REREADS), "DONE\nRead."] }, { escalate: true });
+    expect((await begun.run).status).toBe("done");
+    expect(begun.events.some((e) => e.type === "routed")).toBe(true);
+    expect(begun.events.some((e) => e.type === "round")).toBe(false);
+  });
+
+  test("with tools, the planner's reads are counted as the engineer's were", async () => {
+    const events: RunEvent[] = [];
+    let ids = 0;
+    const read = (path: string) => ({ text: "", calls: [{ id: `call_${++ids}`, name: "read", input: { path } }] });
+    const both = (n: number) => Array.from({ length: n }, (_, i) => read(i % 2 === 0 ? "src/a.ts" : "src/b.ts"));
+    const scripts: Record<string, { text: string; calls?: { id: string; name: string; input: Record<string, unknown> }[] }[]> = {
+      engineer: both(2 + REREADS),
+      planner: [...both(2 + REREADS), { text: "DONE\nRead and decided." }],
+    };
+    const outcome = await runLoop(
+      { goal: "make it so", environment: "a test sandbox", plan: "", tools: true, escalate: true },
+      {
+        ask: async (role) => {
+          if (role === "reviewer") return { text: "PASS\nLooks right.", model: "test/reviewer" };
+          const next = scripts[role]!.shift();
+          if (!next) throw new Error(`the ${role} ran out of script`);
+          return { text: next.text, model: `test/${role}`, ...(next.calls ? { calls: next.calls, carry: "{}" } : {}) };
+        },
+        exec: async () => ({ exitCode: 0, stdout: "1\texport const a = 1;\n", stderr: "", durationMs: 1, truncated: false }),
+        emit: (event) => events.push(event),
+      },
+    );
+    expect(outcome.status).toBe("done");
+    expect(events.filter((e) => e.type === "round")).toEqual([{ type: "round", on: "planner", rereads: REREADS, files: ["src/a.ts", "src/b.ts"] }]);
+  });
+});
+
