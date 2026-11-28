@@ -107,6 +107,8 @@ if (!existsSync(CHROME)) throw new Error(`No Chrome found. Set CHROME to a Chrom
 process.env.INVINCIBLE_KEYSTORE = "file";
 const tmp = mkdtempSync(join(tmpdir(), "invincible-web-measure-"));
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+/** How long a call to Chrome goes unanswered before that is said (and again each time as long again). */
+const STILL_WAITING_MS = 60_000;
 
 // ---------- the browser, over the DevTools protocol (one connection, a session per target) ----------
 interface CdpEvent {
@@ -190,10 +192,27 @@ class Chrome {
     });
     return new Chrome(ws, proc);
   }
-  send(method: string, params: object = {}, sessionId?: string): Promise<any> {
+  /**
+   * One call to Chrome. Nothing waits on it silently: a call it hasn't answered in a minute is said, every minute until it
+   * is (with its frames stopped, Chrome left an emulation's resize, a navigation and a screenshot unanswered as long as
+   * they stayed stopped, 28 November 2026). One its caller gives up on (`signal`) is forgotten.
+   */
+  send(method: string, params: object = {}, sessionId?: string, signal?: AbortSignal): Promise<any> {
     return new Promise((resolve, reject) => {
       const id = ++this.next;
-      this.waiting.set(id, { resolve, reject });
+      const asked = Date.now();
+      const still = setInterval(() => console.error(`Chrome hasn't answered ${method} in ${Math.round((Date.now() - asked) / 1000)} s; still waiting`), STILL_WAITING_MS);
+      // (Saying so never keeps the run from ending.)
+      still.unref();
+      const end = () => {
+        clearInterval(still);
+        this.waiting.delete(id);
+      };
+      this.waiting.set(id, {
+        resolve: (value) => (end(), resolve(value)),
+        reject: (error) => (end(), reject(error)),
+      });
+      signal?.addEventListener("abort", () => (end(), reject(signal.reason)), { once: true });
       this.ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
   }
@@ -367,7 +386,7 @@ async function shootGallery(browser: Chrome, page: string, dir: string, repo: st
         await sleep(600);
         const { cssContentSize } = await browser.send("Page.getLayoutMetrics", {}, page);
         const name = `gallery-${width}-${theme}`;
-        const data = await screenshot(() => browser.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width, height: Math.ceil(cssContentSize.height), scale: 1 } }, page), name).catch(notTaken(name));
+        const data = await screenshot((signal) => browser.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width, height: Math.ceil(cssContentSize.height), scale: 1 } }, page, signal), name).catch(notTaken(name));
         if (data === null) continue;
         const file = join(dir, `${name}.png`);
         writeFileSync(file, Buffer.from(data, "base64"));
@@ -954,7 +973,7 @@ try {
   await browser.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false }, page);
   await navigate(`data:text/html;charset=utf-8,${encodeURIComponent(DESKTOP_PAGE)}`);
   await sleep(400);
-  desktopShot = await screenshot(() => browser.send("Page.captureScreenshot", { format: "jpeg", quality: 72 }, page), "Rio's desktop's stand-in page");
+  desktopShot = await screenshot((signal) => browser.send("Page.captureScreenshot", { format: "jpeg", quality: 72 }, page, signal), "Rio's desktop's stand-in page");
 
   // The real pairing page: the code it shows is compared with the node's before anything is approved.
   const invite = await admin("createInvite", { kind: "client", origin, scopes: core.CLIENT_DEFAULT_SCOPES });
@@ -1310,7 +1329,7 @@ try {
       // As far down as it goes: the page's whole height, at one pixel a point (it can be long).
       const { cssContentSize } = whole ? await browser.send("Page.getLayoutMetrics", {}, page) : { cssContentSize: null };
       const shot = `${name}-${width}-${theme}${whole ? "-full" : ""}`;
-      const data = await screenshot(() => browser.send("Page.captureScreenshot", cssContentSize ? { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width, height: Math.min(Math.ceil(cssContentSize.height), 12_000), scale: 0.5 } } : { format: "png" }, page), shot).catch(notTaken(shot));
+      const data = await screenshot((signal) => browser.send("Page.captureScreenshot", cssContentSize ? { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width, height: Math.min(Math.ceil(cssContentSize.height), 12_000), scale: 0.5 } } : { format: "png" }, page, signal), shot).catch(notTaken(shot));
       if (data === null) return;
       const file = join(SHOTS, `${shot}.png`);
       writeFileSync(file, Buffer.from(data, "base64"));

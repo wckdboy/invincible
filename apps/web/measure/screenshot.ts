@@ -13,18 +13,23 @@ export const SCREENSHOT_MS = 30_000;
 /** A screenshot that didn't come, asked for twice: its message says which, and that it wasn't taken. */
 export class NoScreenshot extends Error {}
 
-/** The picture (base64) that `capture` (Page.captureScreenshot, asked) answers; `what` names it in what is said. */
+/**
+ * The picture (base64) that `capture` (Page.captureScreenshot, asked) answers; `what` names it in what is said. An ask
+ * that gets no answer is given up: its `signal` aborts, so its asker forgets it.
+ */
 export async function screenshot(
-  capture: () => Promise<{ data: string }>,
+  capture: (signal: AbortSignal) => Promise<{ data: string }>,
   what: string,
   { ms = SCREENSHOT_MS, say = (line: string) => console.error(line) }: { ms?: number; say?: (line: string) => void } = {},
 ): Promise<string> {
   for (let asked = 1; ; asked++) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const silence = new Promise<null>((done) => (timer = setTimeout(() => done(null), ms)));
+    const ask = new AbortController();
     try {
-      const answer = await Promise.race([capture(), silence]);
+      const answer = await Promise.race([capture(ask.signal), silence]);
       if (answer) return answer.data;
+      ask.abort(new Error(`${what}: no screenshot came in ${ms / 1000} s`));
     } finally {
       clearTimeout(timer);
     }
