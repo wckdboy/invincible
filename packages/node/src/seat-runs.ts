@@ -1,8 +1,17 @@
-import { accountSeat, chooseSeat, mayCarryOn, type NodeIdentity, redact, SEAT_HARNESS, SEAT_LIMITS, type SeatFacts, seatOpensAt, seatServes, type SeatView, type TaskAccount } from "@invincible/core";
-import { agentCleanupCommand, FOLLOW_SECONDS, followArgv, type FollowedRun, type SeatAnswer, type SeatRun } from "@invincible/agents";
+import { accountSeat, chooseSeat, mayCarryOn, type NodeIdentity, redact, SEAT_HARNESS, SEAT_LIMITS, type SeatFacts, type SeatKind, seatOpensAt, seatServes, type SeatView, type TaskAccount } from "@invincible/core";
+import { AGENTS, agentCleanupCommand, FOLLOW_SECONDS, followArgv, type FollowedRun, type SeatAnswer, type SeatRun } from "@invincible/agents";
 import type { LedgerStore } from "@invincible/ledger";
 import type { SandboxHost } from "@invincible/sandbox";
 import { seatViews } from "./seats.ts";
+
+/**
+ * Whether a seat's tool calls models through the gateway: its providers speak OpenAI's API and Anthropic's alone (models'
+ * ProviderKind), so agy, on Gemini's, calls none, and its VM's lease carries none of them (the review's L4).
+ */
+const gatewayModels = (kind: SeatKind): boolean => {
+  const speaks = AGENTS[SEAT_HARNESS[kind] ?? ""]?.kind;
+  return speaks === undefined || speaks === "openai" || speaks === "anthropic";
+};
 
 /*
  * Runs on seats on this node (I15 step 9, core's seats.ts): which seat a coding agent's run takes (chooseSeat: Invincible
@@ -165,7 +174,7 @@ export class SeatRuns {
     this.busy.set(seat.id, this.runs(seat.id) + 1);
     let vm: string;
     try {
-      vm = (await host.createSeatVm({ seat: { id: seat.id, kind: seat.kind, runs: seat.runs }, shares: ask.vm, network: "online", cpus: own.cpus, memoryGb: own.memoryGb, ttlMinutes: SEAT_VM_MINUTES, run })).id;
+      vm = (await host.createSeatVm({ seat: { id: seat.id, kind: seat.kind, runs: seat.runs }, shares: ask.vm, ...(gatewayModels(seat.kind) ? {} : { models: false }), network: "online", cpus: own.cpus, memoryGb: own.memoryGb, ttlMinutes: SEAT_VM_MINUTES, run })).id;
     } catch (error) {
       this.free(seat.id);
       throw error;

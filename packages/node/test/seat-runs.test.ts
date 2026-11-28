@@ -137,6 +137,18 @@ describe("the agent a seat serves", () => {
 });
 
 describe("the seat a run takes", () => {
+  test("a run on a Gemini seat asks for a VM whose lease carries none of the agent's models, which agy can't call; a Claude seat's asks as before (the review's L4)", async () => {
+    const m = mind();
+    const G = id("g");
+    m.add(G, "google-antigravity");
+    const h = host();
+    const runs = new SeatRuns({ store: m.store, node: m.node, host: () => h.fake, now: () => NOW });
+    const taken = await runs.take(ask({ harness: "antigravity" }), live());
+    if (!("run" in taken)) throw new Error("no seat");
+    expect(taken.run.seat).toMatchObject({ id: G, kind: "google-antigravity" });
+    expect(h.calls[0]).toContain(`"shares":"${AGENT_VM}","models":false,"network":"online"`);
+  });
+
   test("this node's seat of its harness with the most headroom; its VM shares the agent's /work and is as big; let go, it goes and the seat is free", async () => {
     const m = mind();
     m.add(A);

@@ -401,6 +401,12 @@ export interface SeatVmInput {
   seat: { id: string; kind: SeatKind; runs: number };
   /** For a run on the seat: the agent's own VM, on this host, whose /work this one uses. None: a VM of its own (a sign-in). */
   shares?: string;
+  /**
+   * Whether the seat's tool calls models through the gateway (false: one that speaks neither OpenAI's API nor
+   * Anthropic's, agy on Gemini's): without, its lease carries none of the agent's models (the review of 28 November
+   * 2026, L4).
+   */
+  models?: boolean;
   network: "online" | "gateway";
   cpus: number;
   memoryGb: number;
@@ -1386,24 +1392,31 @@ export class SandboxHost {
    * and revoked as the VM goes (destroy). Written in its own HOME, where its commands read it. An agent's VM this
    * process didn't prepare has no lease to share: none is made, and the ledger says so.
    */
-  private async leaseSeatVm(vm: SandboxView, agent: string, run: string): Promise<void> {
+  private async leaseSeatVm(vm: SandboxView, agent: string, run: string, models = true): Promise<void> {
     const lease = this.leased.get(agent);
     if (!lease) {
       this.opts.ledger({ class: "modify", resource: "sandbox.seat-lease", target: vm.name, verdict: "allow", run, detail: `no lease: ${containerName(agent)} wasn't prepared by this process, so it has none to share` });
       return;
     }
+    // A tool that calls no model of the gateway's is given none: the agent's keys and repository alone, and no lease at
+    // all when it has neither (what it can read in its VM is what it uses).
+    const scopes = models ? [...lease.scopes] : lease.scopes.filter((scope) => !lease.covered.includes(scope));
+    if (!scopes.length) {
+      this.opts.ledger({ class: "modify", resource: "sandbox.seat-lease", target: vm.name, verdict: "allow", run, detail: `no lease: its tool calls no model of the gateway's, and ${containerName(agent)} has no keys or repository to share` });
+      return;
+    }
     // (Under the agent's VM's label: what the gateway counts by it is what a task's spend is read by, so what a run on a seat
     // spends through the gateway is its task's, as it was when it used the agent's lease. Its token is its own.)
-    const minted = this.opts.tokens.mint({ label: `sandbox:${agent}`, providers: [...lease.scopes], ...(lease.models ? { models: [...lease.models] } : {}), ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
+    const minted = this.opts.tokens.mint({ label: `sandbox:${agent}`, providers: scopes, ...(models && lease.models ? { models: [...lease.models] } : {}), ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
     this.tokenStore.put(vm.id, minted.info.hash);
-    const env = gatewayEnv(minted.token, [...lease.covered], lease.keys);
+    const env = gatewayEnv(minted.token, models ? [...lease.covered] : [], lease.keys);
     if (lease.git) env.INVINCIBLE_REPO_URL = repositoryUrl(env.INVINCIBLE_GATEWAY!, lease.git);
     if (!(await this.writeLease(vm.id, env))) {
       // (Removed, which revokes its token: a run on it would find no lease where its commands read one.)
       await this.destroy(vm.id, { run }).catch(() => {});
       throw new SandboxError("could not give the seat's VM its lease, so it was removed", 424);
     }
-    this.opts.ledger({ class: "modify", resource: "sandbox.seat-lease", target: vm.name, verdict: "allow", run, detail: `a lease of its own, as ${containerName(agent)}'s is: model access capped at ${TEAM_LEASE_MINUTES} minutes and 500 requests${lease.models ? `, for ${lease.models.join(", ")} alone` : ""}` });
+    this.opts.ledger({ class: "modify", resource: "sandbox.seat-lease", target: vm.name, verdict: "allow", run, detail: models ? `a lease of its own, as ${containerName(agent)}'s is: model access capped at ${TEAM_LEASE_MINUTES} minutes and 500 requests${lease.models ? `, for ${lease.models.join(", ")} alone` : ""}` : `a lease of its own, of ${containerName(agent)}'s keys and repository alone: its tool calls no model of the gateway's` });
   }
 
   /** A lease written inside a sandbox, in its HOME (core's LEASE_FILE): JSON, never a shell's configuration. Whether it was. */
@@ -2492,7 +2505,7 @@ export class SandboxHost {
       };
       if (input.shares && this.moving.has(input.shares)) throw new SandboxError("that agent's store is being moved to layout 2: nothing shares it until its move is done or put back", 409);
       const vm = input.shares ? await this.sharingWhile(input.shares, seated) : await seated();
-      if (input.shares) await this.leaseSeatVm(vm, input.shares, input.run);
+      if (input.shares) await this.leaseSeatVm(vm, input.shares, input.run, input.models !== false);
       return vm;
     })();
     this.seating.set(input.seat.id, work);

@@ -419,6 +419,26 @@ describe("an agent's VM in layout 2", () => {
     expect([narrow.INVINCIBLE_REPO_URL, narrow.INVINCIBLE_KEYS]).toEqual([undefined, undefined]);
   });
 
+  test("a seat's VM whose tool calls no model of the gateway's (agy, on Gemini's) has none of the agent's models in its lease: its keys and repository alone, and no lease when it has neither (the review's L4)", async () => {
+    const f = fake({ layout: "2" });
+    const git = { connector: "github", owner: "example", repo: "app" };
+    await f.host.prepareTeam(ID, RUN, git, ["anthropic"], ["anthropic/claude-test"], ["key:test-only"]);
+    await f.host.createSeatVm({ ...onSeat, models: false });
+    expect(f.tokens.minted).toHaveLength(2);
+    expect(f.tokens.minted[1]).toEqual({ label: `sandbox:${ID}`, providers: ["git:github:example:app", "key:test-only"], ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
+    const lease = f.leases.get(seatVm(f)[0])!;
+    expect(Object.keys(lease).filter((name) => /ANTHROPIC|OPENAI|SEARCH/.test(name))).toEqual([]);
+    expect([lease.INVINCIBLE_REPO_URL?.includes("example/app"), lease.INVINCIBLE_KEYS !== undefined]).toEqual([true, true]);
+    expect(f.ledger.filter((e) => e.resource === "sandbox.seat-lease").at(-1)?.detail).toBe(`a lease of its own, of ${containerName(ID)}'s keys and repository alone: its tool calls no model of the gateway's`);
+    // An agent with neither keys nor a repository: no lease at all, and no token of its own.
+    const bare = fake({ layout: "2" });
+    await bare.host.prepareTeam(ID, RUN, undefined, ["anthropic"], ["anthropic/claude-test"], []);
+    await bare.host.createSeatVm({ ...onSeat, models: false });
+    expect(bare.tokens.minted).toHaveLength(1);
+    expect(bare.leases.get(seatVm(bare)[0])).toBeUndefined();
+    expect(bare.ledger.find((e) => e.resource === "sandbox.seat-lease")?.detail).toBe(`no lease: its tool calls no model of the gateway's, and ${containerName(ID)} has no keys or repository to share`);
+  });
+
   test("an agent's lease that couldn't be renewed renews none of its seats' VMs'", async () => {
     const f = fake({ layout: "2", extendFails: true });
     await f.host.prepareTeam(ID, RUN, undefined, ["anthropic"]);
