@@ -44,6 +44,11 @@ const REPO = flag("repo");
 const GROW = Number(flag("grow") ?? 0);
 /** Plain runc sandboxes of the node's own made beside the agent's VM, as a busy node has others. */
 const EXTRA = Number(flag("extra") ?? 0);
+/** Commands each task's engineer runs before it says it is done (each a few lines of the task's trail). */
+const STEPS = Math.max(1, Number(flag("steps") ?? 1));
+/** Seconds the node stays up once measured, for what another process asks of it (--hold-info: where it says how to reach it). */
+const HOLD_S = Number(flag("hold") ?? 0);
+const HOLD_INFO = flag("hold-info");
 const PORT = Number(flag("port") ?? 47640);
 const DIR = flag("dir") ?? join(tmpdir(), "speed-probe");
 const OUT = flag("out");
@@ -93,8 +98,10 @@ const models = Bun.serve({
     if (body.model === "reviewer") return sse({ content: "PASS\nThe gate passed after the work." });
     if (body.model === "planner") return sse({ content: "1. Write the file.\nDone when: the gate passes." });
     const worked = turns.some((m) => m.role === "assistant" || m.role === "tool");
-    const command = `printf hi > hello-${tag}.txt`;
-    if (body.tools?.length && !worked) return sse({ tool_calls: [{ index: 0, id: "c1", function: { name: "bash", arguments: JSON.stringify({ command }) } }] });
+    // (With --steps, the edit first, then commands that print a little each, as work does, then DONE.)
+    const ran = turns.filter((m) => m.role === "tool").length;
+    const command = ran === 0 ? `printf hi > hello-${tag}.txt` : `seq 1 ${(ran % 7) + 3} && echo step ${ran} of ${STEPS}`;
+    if (body.tools?.length && ran < STEPS) return sse({ tool_calls: [{ index: 0, id: `c${ran + 1}`, function: { name: "bash", arguments: JSON.stringify({ command }) } }] });
     return sse({ content: worked ? "DONE\nWritten: the gate passes." : "```sh\n" + command + "\n```" });
   },
 });
@@ -492,6 +499,13 @@ try {
   }
   results["node.rss.end(MB)"] = Math.round(process.memoryUsage().rss / 2 ** 20);
   results.loadAtEnd = loadavg();
+  // ---- 7. Held up for another process to ask (a client's polling, timed from outside: bench/speed/poll.ts) ----
+  if (HOLD_S > 0) {
+    const tasks = ((await admin<{ tasks: { id: string; status: string }[] }>("team")).tasks ?? []).map((t) => t.id);
+    if (HOLD_INFO) await Bun.write(HOLD_INFO, JSON.stringify({ pid: process.pid, port: PORT, token: home.adminToken(), tasks }));
+    log(`held for ${HOLD_S} s: pid ${process.pid}, port ${PORT}, ${tasks.length} task(s)`);
+    await Bun.sleep(HOLD_S * 1000);
+  }
 } catch (error) {
   console.error(`probe failed: ${(error as Error).stack ?? error}`);
   results.error = String((error as Error).message ?? error);
