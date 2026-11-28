@@ -2222,19 +2222,29 @@ export class SandboxHost {
     try {
       const source = Bun.spawn([this.bin, ...pipeArgs(from.id, from.cmd, opts.timeoutSec, tag)], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
       const sink = Bun.spawn([this.bin, ...pipeArgs(to.id, to.cmd, opts.timeoutSec, tag)], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
-      // Each side is ended once: its client killed, then, once that client has gone, PIPE_END in its VM. An end that fails
-      // is the best effort it is, and never the pipe's failure.
+      // Each side is ended once: PIPE_END in its VM, while its client still takes its output, and then its client killed,
+      // once that has run or past its bound, whatever it did. Killed first, a client left an exec whose output nothing
+      // read, and in a Kata VM that held the next exec, PIPE_END's, back for its whole bound: 45 s on Ultra (28 November
+      // 2026), and nothing of the side was ended. An end that fails is the best effort it is, and never the pipe's failure.
       const ends: Promise<unknown>[] = [];
-      const ender = (id: string, client: { kill(signal: "SIGKILL"): void; exited: Promise<number> }) => {
+      /** The sending side's end has run: what it still gives, drained since a cut or a broken pipe, is let go. */
+      let fromEnded = false;
+      const ender = (id: string, client: { kill(signal: "SIGKILL"): void }, then?: () => void) => {
         let asked = false;
         return () => {
           if (asked) return;
           asked = true;
-          client.kill("SIGKILL");
-          ends.push(client.exited.then(() => this.docker(execArgs(id, ["sh", "-c", PIPE_END, "end", tag], 30), 45_000)).catch(() => null));
+          ends.push(
+            this.docker(execArgs(id, ["sh", "-c", PIPE_END, "end", tag], 30), 45_000)
+              .catch(() => null)
+              .finally(() => {
+                client.kill("SIGKILL");
+                then?.();
+              }),
+          );
         };
       };
-      const endFrom = ender(from.id, source);
+      const endFrom = ender(from.id, source, () => (fromEnded = true));
       const endTo = ender(to.id, sink);
       const end = () => {
         endFrom();
@@ -2251,14 +2261,20 @@ export class SandboxHost {
       const carried = (async () => {
         try {
           for await (const chunk of source.stdout) {
-            // (Once the receiving side is gone, the rest isn't carried, nor counted: a write to its stdin may then go
-            // nowhere without a word, and the sender's output, which the broken pipe's end stops, would count up to a cut.)
-            if (gone) return;
+            // (Past a cut, or once the receiving side is gone, the rest is drained, never carried nor counted: the
+            // sender's output is still taken while its end runs, and let go once it has. A write to a stdin Bun has closed
+            // with its side's exit goes nowhere without a word, and the sender's output would count up to a cut.)
+            if (cut || gone) {
+              if (fromEnded) break;
+              continue;
+            }
             bytes += chunk.byteLength;
             if (bytes > opts.maxBytes) {
               cut = true;
               end();
-              break;
+              // (What came before the cut is all the receiving side gets: its input ends there.)
+              void Promise.resolve(sink.stdin.end()).catch(() => {});
+              continue;
             }
             // (Waited for, as its flush is: a write to a receiving side that is gone rejects with EPIPE, which is the
             // pipe's to catch, never a failure nothing waited for.)
