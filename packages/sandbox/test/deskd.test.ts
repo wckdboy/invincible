@@ -446,16 +446,27 @@ describe("the desktop command: deskd's thin client", () => {
     if (!needs()) return;
     const r = await deskd({ INVINCIBLE_DESKTOP_OWNER_UID: me, INVINCIBLE_DESKTOP_HOLD_WAIT: "0.3" });
     const first = await opened(r, true);
+    const took = Date.now();
     await first.ask({ id: 1, name: "take", input: { idle: 1 } });
     await Bun.sleep(700);
-    const again = await first.ask({ id: 2, name: "take", input: { idle: 2 } });
-    expect(again.hold.ends_in).toBeGreaterThan(1.9);
-    await Bun.sleep(700);
-    // (1.4 s after the first take, its idle second long gone: the second's window, to 2.7 s, holds it still.)
-    expect((await agentAsync(r, ["click", "10", "20"])).code).toBe(75);
+    // The second take's window is fresh, its own 30 s ahead of it, far past the little left of the first's second. So
+    // it holds the desktop past that second however long a busy machine takes the agent's click to come. (A window of
+    // 2 s ran out before the click came at 2 % of a core, 28 November 2026, and the click ran.)
+    const again = await first.ask({ id: 2, name: "take", input: { idle: 30 } });
+    expect(again.hold).toMatchObject({ idle: 30 });
+    expect(again.hold.ends_in).toBeGreaterThan(1);
+    // (Once the first take's idle second is surely out: then only the second's window can hold it.)
+    while (Date.now() - took < 1100) await Bun.sleep(50);
+    const held = agentAsync(r, ["click", "10", "20"]);
+    expect(await traced(r, "owner-wait", HELD_WITHIN)).toBe(true);
+    expect((await held).code).toBe(75);
+    // Given back as their connection ends: seen in their own view, from another connection of theirs, never after a
+    // guessed 100 ms. Then the agent's click runs, told nothing.
     await first.close();
-    await Bun.sleep(100);
+    const watching = await opened(r, true);
+    expect(await holdEnded(watching, HELD_WITHIN)).toBe(true);
     expect(await agentAsync(r, ["click", "10", "20"])).toMatchObject({ code: 0, err: "" });
+    await watching.close();
   });
 
   test("desktop stream starts the desktop, says so on stderr, and becomes the encoder: its stdout is the frames alone", async () => {
