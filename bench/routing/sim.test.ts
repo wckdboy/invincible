@@ -1,5 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { memoryTasks, runPolicy, type SimTask, simTasks } from "./sim.ts";
+
+// Whole policies through the real runtime have the time a loaded machine takes. Since the stand-ins cache (337d2220), a
+// budget lasts more calls, and work pinned to the worker that it can't do runs until its budget ends it: the pinned test
+// took 0.48 s alone on the Mac mini, and ran past bun's 5 s on the MacBook at a load of 180 (28 November 2026).
+setDefaultTimeout(60_000);
 
 /*
  * The routing suite's stand-in world (sim.ts): its tasks are the seed's, and what each way of routing does with a task
