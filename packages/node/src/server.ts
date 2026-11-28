@@ -2931,7 +2931,7 @@ export function createApp(ctx: AppContext) {
     } });
     // (Seats' VMs an earlier process of this node left are removed first: the work they ran ended with it. So are other
     // nodes' tasks' VMs: their tasks are taken up again, if at all, each in a VM made for it then.)
-    void seatRuns.sweep();
+    void seatRuns.sweep().catch((error: Error) => ctx.log(`seats: the VMs an earlier process left couldn't be listed: ${redact(String(error?.message ?? error)).slice(0, 200)}`));
     void taskVms.sweep().catch((error: Error) => ctx.log(`fabric: other nodes' tasks' VMs an earlier process left couldn't be listed: ${redact(String(error?.message ?? error)).slice(0, 200)}`));
     ctx.team.service.start();
     // A task another node handed over (fabric/handoff.ts): given to the agents here as that node's (never as yours), at

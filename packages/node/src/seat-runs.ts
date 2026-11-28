@@ -24,7 +24,7 @@ const gatewayModels = (kind: SeatKind): boolean => {
  * Seats live on a node: a run takes one of this node's, for an agent whose VM is on this node (its VM shares that /work).
  */
 
-type Host = Pick<SandboxHost, "createSeatVm" | "exec" | "destroy" | "stream" | "seatVms" | "get">;
+type Host = Pick<SandboxHost, "createSeatVm" | "exec" | "destroy" | "stream" | "seatVms" | "get" | "available">;
 
 /** How long a seat's VM may live: longer than any run on it, which lets it go as it ends (its label can't be renewed). */
 export const SEAT_VM_MINUTES = 7 * 24 * 60;
@@ -100,6 +100,12 @@ export class SeatRuns {
     this.swept ??= (async () => {
       const host = this.opts.host();
       if (!host) return;
+      // A node whose engine isn't there makes no VM, a seat's none: it asks for no list and says nothing, and sweeps once
+      // its engine is (Q5's and C1's rule, 28 November 2026).
+      if (!(await host.available().catch(() => false))) {
+        this.swept = null;
+        return;
+      }
       for (const seat of this.opts.store.seats().filter((s) => s.node === this.opts.node.id)) {
         const vms = await host.seatVms(seat.id).catch(() => null);
         if (vms === null) throw new Error("docker couldn't say which VMs have a seat's home");

@@ -62,6 +62,7 @@ function host(options: { refuse?: (seat: string) => number | null; leftover?: st
       return { id: vm } as never;
     },
     seatVms: async (seat: string) => [...vms].filter(([, v]) => v.seat === seat).map(([vm]) => vm),
+    available: async () => true,
     exec: async (vm: string, cmd: string[]) => {
       calls.push(`exec ${vm} ${cmd[2]!.includes("cleanup(") ? "cleanup" : cmd[2]!.slice(0, 40)}`);
       return { exitCode: 0, stdout: "", stderr: "", durationMs: 1, truncated: false };
@@ -321,6 +322,26 @@ describe("the seat a run takes", () => {
     expect(h.calls.filter((c) => c.startsWith("destroy"))).toEqual([`destroy vm-left-over seat.${A}`]);
     // (The sign-in's VM holds the seat's home: no run is made beside it.)
     expect(taken).toEqual({ none: true });
+  });
+
+  // Q5's and C1's rule (28 November 2026): a node that makes no sandboxes asks for no list and logs nothing. Its engine
+  // isn't there, so no VM of a seat's can be either; and the sweep is done once it is.
+  test("a node whose engine isn't there asks for no list of seats' VMs and logs nothing; once it is, the sweep is done", async () => {
+    const m = mind();
+    m.add(A);
+    const h = host({ leftover: A });
+    let there = false;
+    const asked: string[] = [];
+    const logged: string[] = [];
+    const fake = { ...h.fake, available: async () => there, seatVms: async (seat: string) => (asked.push(seat), there ? h.fake.seatVms(seat) : null), get: async (vm: string) => ({ ...((await h.fake.get(vm)) as unknown as object), createdAt: NOW - 60_000 }) as never };
+    const runs = new SeatRuns({ store: m.store, node: m.node, host: () => fake as never, now: () => NOW, log: (line) => void logged.push(line) });
+    await runs.sweep();
+    expect([asked, logged]).toEqual([[], []]);
+    there = true;
+    await runs.sweep();
+    expect(asked).toEqual([A]);
+    expect(h.calls.filter((c) => c.startsWith("destroy"))).toEqual([`destroy vm-left-over seat.${A}`]);
+    expect(logged).toEqual([]);
   });
 
   test("seats' VMs an earlier process of this node left are removed before the first run takes a seat", async () => {

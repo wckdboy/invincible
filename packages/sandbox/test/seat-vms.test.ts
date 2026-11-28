@@ -125,6 +125,15 @@ describe("a seat's VM", () => {
     expect(await f.host.seatVms(SEAT.id)).toEqual([]);
   });
 
+  // Q5's and C1's rule (28 November 2026): a Mac doesn't send docker's ps to container, which has none. No seat's VM is
+  // made on a Mac (createSeatVm refuses there), so none is listed and nothing is asked.
+  test("on a Mac, no VM has a seat's home: none is listed, and container is asked nothing", async () => {
+    const calls: string[][] = [];
+    const host = new SandboxHost({ node: "test", maxCpus: 8, maxMemoryGb: 16, engine: "container", runner: async (args) => (calls.push(args), { code: 1, stdout: "", stderr: "unknown command" }), ledger: () => {}, tokens: { mint: () => ({ token: "test-only-token", info: { hash: "test-only-hash" } }), revoke: () => true } });
+    expect(await host.seatVms(SEAT.id)).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
   test("a seat's home is in no more VMs at once than it takes: one more is refused, even asked at the same moment", async () => {
     const f = fake();
     const [first, second] = await Promise.allSettled([f.host.createSeatVm({ seat: SEAT, ...ask }), f.host.createSeatVm({ seat: SEAT, ...ask })]);

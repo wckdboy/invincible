@@ -104,6 +104,7 @@ export const suite: Suite = {
         return { id } as never;
       },
       seatVms: async () => [...vms],
+      available: async () => true,
       exec: async () => ({ exitCode: 0, stdout: "", stderr: "", durationMs: 0, truncated: false }),
       destroy: async (id: string) => (vms.delete(id), { verdict: "allow" as const, reason: "its own run" }),
       stream: async () => ({ lines: (async function* () {})(), write() {}, close() {}, kill() {}, exited: Promise.resolve(0) }),

@@ -2571,6 +2571,8 @@ export class SandboxHost {
 
   /** The VMs on this host that have a seat's home, in any state (a stopped one still holds it), by their own ids: null when docker can't say. */
   async seatVms(seat: string): Promise<string[] | null> {
+    // (No seat's VM is made on a Mac, so none is there; and container has no ps to ask: Q5's and C1's rule.)
+    if (this.apple) return [];
     const listed = await this.docker(["ps", "-a", "--filter", `label=${LABEL}=1`, "--filter", `label=${LABEL}.node=${this.opts.node}`, "--filter", `label=${LABEL}.seat=${seat}`, "--format", `{{.Label "${LABEL}.id"}}`]);
     return listed.code === 0 ? listed.stdout.split("\n").map((line) => line.trim()).filter(Boolean) : null;
   }
