@@ -3,7 +3,7 @@ import XCTest
 /*
  * Getting around, counted in taps from Home, where the app opens (the owner's word of 28 November 2026: "use grok bot as
  * the app look/UX. like a chat app, with the primary at the top, the other agents, and a settings menu"): your agent's
- * chat, an agent's and Settings one tap; Needs you two (your agent's chat, then "N more need you" under what waits
+ * chat, an agent's (its details a tap on its name) and Settings one tap; Needs you two (your agent's chat, then "N more need you" under what waits
  * there); an approval two (your agent's chat, its card there); a running task two (its agent, its card); a past chat four
  * (your agent, its menu, Past chats, the chat); a link none. Against the dev node's busy fleet, each from a fresh launch.
  */
@@ -44,6 +44,11 @@ final class NavTests: XCTestCase {
         XCTAssertTrue(agent.waitForExistence(timeout: 10), "No agent on Home")
         agent.tap()
         shown(app, "agent.screen")
+        // What it is and how its day stands: a tap on its name in the bar (Grok Bot's pill).
+        let pill = app.descendants(matching: .any)["agent.pill"]
+        XCTAssertTrue(pill.waitForExistence(timeout: 5), "No name pill in the agent's bar")
+        pill.tap()
+        shown(app, "agent.about.screen")
     }
 
     @MainActor

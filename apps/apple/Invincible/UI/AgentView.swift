@@ -106,20 +106,29 @@ struct AgentView: View {
             }
             #else
             ToolbarItem(placement: .principal) {
-                // Not a Button: the bar sizes a button by its whole line, which then runs under the bar's own buttons; a
-                // plain title gets the room between them, and ends in an ellipsis there.
+                // Its face and its name in a pill, as Grok Bot's (the owner's word of 28 November 2026), a tap from what
+                // it is and how its day stands. (Not a Button: the bar sizes a button by its whole line, which then runs
+                // under the bar's own buttons; a plain pill gets the room between them, its name ending in an ellipsis.)
                 HStack(spacing: Space.s2) {
-                    // Its glass, its state's dot on it, as the roster has it.
-                    AgentFace(id: id, profile: profile, size: 28, mood: row.map { Orb.Mood($0.standing) }, knock: session.knocks[id])
-                    TimelineTitle(title: name, line: row?.line, needs: row?.needs ?? false, alignment: .leading, standing: row?.standing)
+                    // Its glass, its state's dot on it, as Home has it; knocking while it waits on you (Session.knocks).
+                    AgentFace(id: id, profile: profile, size: 24, mood: row.map { Orb.Mood($0.standing) }, knock: session.knocks[id])
+                    Text(name).font(.headline).lineLimit(1)
                 }
-                    .contentShape(.rect)
+                    .padding(.leading, Space.s1)
+                    .padding(.trailing, Space.s3)
+                    .frame(minHeight: 36)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                    .contentShape(.capsule)
                     .onTapGesture { about = true }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityAddTraits(.isButton)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(name)
+                    .accessibilityValue(row?.line ?? "")
+                    .accessibilityAddTraits([.isButton, .isHeader])
                     .accessibilityAction { about = true }
                     .accessibilityHint("What \(name) is and how its day stands")
+                    .accessibilityIdentifier("agent.pill")
             }
+            .sharedBackgroundVisibility(.hidden)
             #endif
             // Everything else of its in one menu (I10: one prominent thing a screen, the rest a tap further): a task to
             // give it, its VM's files, screen and terminal once it has one, what it is.
@@ -670,6 +679,7 @@ private struct AgentAbout: View {
                     ContentUnavailableView("Not at the table", systemImage: "person.slash", description: Text("This agent isn't among your agents any more."))
                 }
             }
+            .screen("agent.about.screen")
             .navigationTitle(agent?.name ?? "Agent")
             .inlineTitle()
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
