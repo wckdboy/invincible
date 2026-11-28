@@ -90,7 +90,12 @@ describe("reading OpenCode", () => {
 describe("a driver and the notes store", () => {
   const MODELS = [{ provider: "orcarouter", model: "anthropic/claude-opus-5.5" }, { provider: "deepseek", model: "deepseek-v4-pro" }];
   /** Everything a driver writes into a VM and runs there (the store changes only what is written: a command says nothing of it). */
-  const made = (driver: (typeof AGENTS)[string], engram?: string) => JSON.stringify([driver.files(MODELS, engram), driver.command(MODELS[0]!, null), driver.command(MODELS[1]!, SESSION), driver.command(OWN_SIGN_IN, null), driver.check]);
+  // (What it writes and what it runs, told the store as a run is: a driver whose command carries all it runs, Antigravity's,
+  // is given it there too.)
+  const made = (driver: (typeof AGENTS)[string], engram?: string) => {
+    const notes = engram ? { engram } : undefined;
+    return JSON.stringify([driver.files(MODELS, engram), driver.command(MODELS[0]!, null, undefined, notes), driver.command(MODELS[1]!, SESSION, undefined, notes), driver.command(OWN_SIGN_IN, null, undefined, notes), driver.check]);
+  };
   const sha256 = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
   /**
    * The SHA-256 of that for each driver as it was before the store existed (commit 6bbab45, 14 November 2026). Hermes'
@@ -145,13 +150,16 @@ describe("a driver and the notes store", () => {
   // seat's sign-in came to be sealed (design (a)): its text differs from round 4's (e28ea774…) in the bridge alone, as
   // written and as its status check carries it: its two imports (shutil, stat), the TOKEN line and its comment, KEPT's
   // comment and key, the reset given what to keep, sealed_in, and a start that names the sealed sign-in, keeps nothing
-  // with one, and copies it in. Its commands are as they were.
+  // with one, and copies it in. Its commands are as they were. And again, when each start came to run its bridge whole
+  // (the fourth re-check's L1 and I6): nothing is written for it, and each command carries what was its file (b2a7f3fc…'s,
+  // byte for byte), quoted after `python3 -I -c` where it ran `python3 -I /work/.agent/antigravity-acp.py`; the rest of
+  // each command, and its status check, are as they were.
   const BEFORE: Record<string, string> = {
     opencode: "cc015190084eb3e39e46df1c15f67e01bb085d0b6649cd5cb39fe5410b20ab22",
     hermes: "a2dcda40c48da625d32e5aa97c122a81bd1945095b369b605e8edf01b7bb4461",
     claude: "da3d8d2b3a1e26f89f545b40d60d28ffbe78d5d0f23a8f2ca53c5927f9ddb96b",
     codex: "e757f19dea735c3929bdbbecaf88ef9924455ec17d754ecab957cdf223e9c00f",
-    antigravity: "b2a7f3fcd218e298688607b9f5e24da342cba31c73c77092b283d12d63b14dbf",
+    antigravity: "b62e24a0b5226464bf785a3576ef686d00e7881a77b0d0dd143b4d4486d15fe3",
   };
 
   test("without a notes project, every driver writes and runs byte for byte what it did before there was a store", () => {

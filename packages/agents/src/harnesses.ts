@@ -126,8 +126,10 @@ export interface AgentDriver {
   /**
    * The command for one run on one model, reading its message from AGENT_DIR/prompt.md (a session id continues one).
    * `cutOff`: its last run in that session was cut off before it ended (its process stopped without an exit code).
+   * `notes`: the VM's notes store, when the run is given it (as `files` is told it), for a driver whose command carries
+   * all it runs (Antigravity's: nothing in /work is run for it).
    */
-  command(model: AgentModel, session: string | null, cutOff?: boolean): string;
+  command(model: AgentModel, session: string | null, cutOff?: boolean, notes?: { engram: string; home?: string }): string;
   /** One line of the event stream, or null if it's nothing to report. */
   read(line: string): AgentEvent[];
 }
@@ -435,7 +437,7 @@ const tellCommand = (line: object, wait?: { run: string; seconds: number }): str
  */
 export async function runAgent(
   driver: AgentDriver,
-  input: { model: AgentModel; prompt: string; session: string | null; deadline: number; workdir: string; pollMs?: number; spent?: () => boolean | Promise<boolean>; audit?: () => Promise<void>; steer?: () => boolean | Promise<boolean>; steers?: () => Promise<readonly string[]>; cutOff?: boolean },
+  input: { model: AgentModel; prompt: string; session: string | null; deadline: number; workdir: string; pollMs?: number; spent?: () => boolean | Promise<boolean>; audit?: () => Promise<void>; steer?: () => boolean | Promise<boolean>; steers?: () => Promise<readonly string[]>; cutOff?: boolean; notes?: { engram: string; home?: string } },
   deps: AgentRunDeps,
 ): Promise<AgentRun> {
   const now = deps.now ?? Date.now;
@@ -479,7 +481,7 @@ export async function runAgent(
         `printf %s ${quote(prompt)} | base64 -d > ${AGENT_DIR}/prompt.md`,
         `cd ${quote(input.workdir)}`,
         // Backgrounded inside braces: `… & && …` isn't shell.
-        `{ setsid bash -c ${quote(`${agentProcessCommand("record", runId)} && ${driver.command(input.model, input.session, input.cutOff)} ${live ? `<> ${AGENT_DIR}/input` : "< /dev/null"} >> ${AGENT_DIR}/events.jsonl 2>> ${AGENT_DIR}/stderr.log; echo $? > ${AGENT_DIR}/exit`)} > /dev/null 2>&1 & echo $! > ${AGENT_DIR}/pid; }`,
+        `{ setsid bash -c ${quote(`${agentProcessCommand("record", runId)} && ${driver.command(input.model, input.session, input.cutOff, input.notes)} ${live ? `<> ${AGENT_DIR}/input` : "< /dev/null"} >> ${AGENT_DIR}/events.jsonl 2>> ${AGENT_DIR}/stderr.log; echo $? > ${AGENT_DIR}/exit`)} > /dev/null 2>&1 & echo $! > ${AGENT_DIR}/pid; }`,
         agentProcessCommand("wait_record", runId),
       ].join(" && "),
       60,

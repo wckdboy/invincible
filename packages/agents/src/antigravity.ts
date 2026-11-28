@@ -202,12 +202,20 @@ export const ANTIGRAVITY: AgentDriver = {
     seatCheck: () => STATUS,
   },
   family: ["gemini"],
+  // Nothing is written for it: each start runs its bridge whole, as its status check does (STATUS), so no file in /work,
+  // which a run, or a process a run left in its agent's own VM, could rewrite before the next start, is ever what runs
+  // there (the fourth re-check of 28 November 2026, L1 and I6).
+  files: (_models, engram, home) => {
+    // (A notes project that isn't one is refused here, as every driver refuses it, before anything is made of it.)
+    if (engram !== undefined) notesServer(engram, home);
+    return {};
+  },
   // With the VM's notes store (engram.ts), its session is opened with the store's one stdio server, as every ACP agent's
   // is (acp.ts's withNotes): agy starts it for itself, and none of agy's own files is written. If agy refuses a session
-  // with it, the session is opened again without it, and the run says it has no notes store.
-  files: (_models, engram, home) => ({ "/work/.agent/antigravity-acp.py": engram ? `${ACP_CLIENT}${BRIDGE}${withNotes([notesServer(engram, home)])}${ACP_ENTRY}` : ANTIGRAVITY_ACP_BRIDGE }),
-  // (No session is named to it: each run's is new.)
-  command: (model) => `python3 -I /work/.agent/antigravity-acp.py --prompt /work/.agent/prompt.md${model.own || !model.model ? "" : ` --model ${quote(model.model)}`}`,
+  // with it, the session is opened again without it, and the run says it has no notes store. (No session is named to it:
+  // each run's is new.)
+  command: (model, _session, _cutOff, notes) =>
+    `python3 -I -c ${quote(notes ? `${ACP_CLIENT}${BRIDGE}${withNotes([notesServer(notes.engram, notes.home)])}${ACP_ENTRY}` : ANTIGRAVITY_ACP_BRIDGE)} --prompt /work/.agent/prompt.md${model.own || !model.model ? "" : ` --model ${quote(model.model)}`}`,
   // Its Google sign-in is in this VM, and a model can make agy print it: its events are scrubbed of it as Claude Code's
   // and Codex's are (the review of 28 November 2026, M1), and core's redaction knows Google's own tokens. And no session
   // is read from them: its bridge says none, since each run's is new, so a line that names one is a run's own, and would

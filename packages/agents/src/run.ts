@@ -1875,7 +1875,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       toldNow = [];
       const run = await runAgent(
         agent.driver,
-        { model, prompt, session, deadline, workdir: agent.workdir, spent: spentNow, audit: auditNow, ...(deps.steers || o.audit ? { steer: steerNow, steers: steersLive } : {}), ...(cutOff ? { cutOff: true } : {}) },
+        { model, prompt, session, deadline, workdir: agent.workdir, spent: spentNow, audit: auditNow, ...(deps.steers || o.audit ? { steer: steerNow, steers: steersLive } : {}), ...(cutOff ? { cutOff: true } : {}), ...(o.engram ? { notes: { engram: o.engram, ...(o.home ? { home: o.home } : {}) } } : {}) },
         {
           exec: deps.harness?.exec ?? deps.exec,
           ...((deps.harness ? deps.harness.follow : deps.follow) ? { follow: (deps.harness ? deps.harness.follow : deps.follow)! } : {}),

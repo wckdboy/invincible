@@ -229,13 +229,16 @@ const WORKED = [
   { type: "tokens", input: 1200, output: 80 },
 ];
 
-/** The run bridge (as the driver writes it, given `bridge`), written into the VM and run as the driver's command runs it: its events, one JSON line each. */
-async function run(box: ReturnType<typeof vm>, extra = "", bridge = ANTIGRAVITY_ACP_BRIDGE) {
+/**
+ * A run, as the driver's command runs it, its bridge carried whole (with the notes store's server, given `notes`): its
+ * events, one JSON line each. `left`: a bridge file a run left where one was once written, which never runs.
+ */
+async function run(box: ReturnType<typeof vm>, extra = "", left = "", notes?: { engram: string; home?: string }) {
   const agent = join(box.dir, "work", ".agent");
   mkdirSync(agent, { recursive: true });
   writeFileSync(join(agent, "prompt.md"), "Fix the sum in calc.py, then run the tests.");
-  writeFileSync(join(agent, "antigravity-acp.py"), bridge);
-  const command = ANTIGRAVITY.command(OWN_SIGN_IN, null).replaceAll("/work/.agent", agent) + extra;
+  if (left) writeFileSync(join(agent, "antigravity-acp.py"), left);
+  const command = ANTIGRAVITY.command(OWN_SIGN_IN, null, undefined, notes).replaceAll("/work/.agent", agent) + extra;
   return asMounted(box, async () => {
     const proc = Bun.spawn(["bash", "-c", command], { cwd: join(box.dir, "work"), env: box.env, stdout: "pipe", stderr: "pipe" });
     const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
@@ -371,7 +374,9 @@ describe("a run on it, as T3 Code drives agy", () => {
     // An agent of yours may be given it, as it may Claude Code or Codex.
     expect(TeamHarness.safeParse("antigravity").success).toBe(true);
     expect(ANTIGRAVITY.family).toEqual(["gemini"]);
-    expect(ANTIGRAVITY.files([OWN_SIGN_IN])).toEqual({ "/work/.agent/antigravity-acp.py": ANTIGRAVITY_ACP_BRIDGE });
+    // Nothing written for it: its command carries its bridge whole, as its status check does.
+    expect(ANTIGRAVITY.files([OWN_SIGN_IN])).toEqual({});
+    expect(ANTIGRAVITY.command(OWN_SIGN_IN, null)).toBe(`python3 -I -c '${ANTIGRAVITY_ACP_BRIDGE.replace(/'/g, "'\\''")}' --prompt /work/.agent/prompt.md`);
   });
 
   test("it speaks Gemini's API, which no model of the gateway's does: it runs on its own sign-in alone, never on a roster model it can't call", () => {
@@ -389,7 +394,7 @@ describe("a run on it, as T3 Code drives agy", () => {
 
 /* The VM's notes store (engram.ts): agy is handed its server when a session is opened, as every ACP agent is (acp.ts). */
 describe("Antigravity and the notes store", () => {
-  const withNotes = () => ANTIGRAVITY.files([], "you-project")["/work/.agent/antigravity-acp.py"]!;
+  const NOTES = { engram: "you-project" };
   /** The one stdio server, as ACP names one: its environment inside the entry (the bridge's own for agy is an allowlist). */
   const server = { name: "engram", command: ENGRAM_BIN, args: engramArgv("you-project").slice(1), env: [{ name: "ENGRAM_DATA_DIR", value: "/work/.memory/engram" }, { name: "ENGRAM_NO_UPDATE_CHECK", value: "1" }] };
   const opened = (box: ReturnType<typeof vm>, method: string) => box.trace().filter((item) => item.asked === method).map((item) => (item.params as { mcpServers: unknown }).mcpServers);
@@ -409,8 +414,8 @@ describe("Antigravity and the notes store", () => {
 
   test("with it, every run's session is a new one, opened with exactly that one server, and the run is otherwise the same", async () => {
     const box = signedIn();
-    expect(await run(box, "", withNotes())).toEqual({ code: 0, events: WORKED });
-    expect(await run(box, " --session sess-FAKE-0001", withNotes())).toEqual({ code: 0, events: WORKED });
+    expect(await run(box, "", "", NOTES)).toEqual({ code: 0, events: WORKED });
+    expect(await run(box, " --session sess-FAKE-0001", "", NOTES)).toEqual({ code: 0, events: WORKED });
     expect(opened(box, "session/new")).toEqual([[server], [server]]);
     expect(opened(box, "session/load")).toEqual([]);
     // Its status check opens no session, with the store or without (it is asked of the bridge without the store).
@@ -420,7 +425,7 @@ describe("Antigravity and the notes store", () => {
   test("an agy that takes no MCP server refuses the session: it is asked again without, and the run says it has no notes store", async () => {
     const box = signedIn("no-mcp");
     const refused = { type: "text", text: "Antigravity refused a session with the notes store's MCP server: this run has no notes store" };
-    expect(await run(box, "", withNotes())).toEqual({ code: 0, events: [refused, ...WORKED] });
+    expect(await run(box, "", "", NOTES)).toEqual({ code: 0, events: [refused, ...WORKED] });
     expect(opened(box, "session/new")).toEqual([[server], []]);
   });
 });
@@ -677,6 +682,20 @@ describe("Antigravity's profile, reset", () => {
  * opened for what it says.
  */
 describe("a Gemini seat's sealed sign-in", () => {
+  // The fourth re-check of 28 November 2026, L1 and I6: each run ran its bridge from /work/.agent, where a run, or a
+  // process a run left in the agent's own VM, can rewrite it before the next start, and so skip the sealed sign-in.
+  // Each start now runs the bridge it is given whole, as the status check does: nothing in /work is run.
+  test("a bridge file a run left in /work/.agent is never what runs: each start runs its own bridge, whole", async () => {
+    const box = vm();
+    seal(box, "FAKE-the-owners-sign-in");
+    const planted = `import sys\nprint('{"type": "error", "message": "the bridge a run left ran"}')\nsys.exit(3)\n`;
+    expect(await run(box, "", planted)).toEqual({ code: 0, events: WORKED });
+    expect(box.trace().flatMap((item) => ("signedInAs" in item ? [item.signedInAs] : []))).toEqual(["FAKE-the-owners-sign-in"]);
+    // (Nothing is written there for it either.)
+    expect(ANTIGRAVITY.files([OWN_SIGN_IN])).toEqual({});
+    expect(ANTIGRAVITY.files([OWN_SIGN_IN], "you-project")).toEqual({});
+  });
+
   const OWNERS = "FAKE-the-owners-sign-in";
   /** The sign-in each start of agy found in its profile, in order. */
   const startedOn = (box: ReturnType<typeof vm>) => box.trace().flatMap((item) => ("signedInAs" in item ? [item.signedInAs] : []));
