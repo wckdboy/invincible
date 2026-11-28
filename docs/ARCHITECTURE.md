@@ -464,7 +464,9 @@ The models layer, carried (§10):
   (big beefy models), workers/builders/subagents (fast cheaper models)"):
   - the planner and the reviewer default to the strongest models first (`LEAD` in `packages/models/src/roster.ts`);
   - the engineer, and the agents' own roles, to the coding plans and the cheaper open models first;
-  - swift's chores to local and fast ones.
+  - swift's chores to local and fast ones;
+  - an audit of an agent's running task, a chore of its own (`audit`): on the reviewer's models until you hire some,
+    so the reviewer's strongest answer for the review that decides, and a cheaper one can look in every 20 commands.
   - A roster you set is never reordered. Work stuck on the engineer's models goes up to the planner's (§6, escalation);
 - the gateway that meters every call at your prices;
 - local models across the fleet (MLX and Ollama);

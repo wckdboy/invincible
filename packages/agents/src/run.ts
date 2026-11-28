@@ -54,7 +54,7 @@ export interface RunDeps {
     role: RunRole,
     /** (A message may carry pictures: the desktop's, before and after the work's actions on it, to the reviewer.) */
     messages: ModelMessage[],
-    turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[] },
+    turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[]; audit?: boolean },
   ): Promise<{ text: string; model: string; skipped?: { model: string; error: string }[]; calls?: ClientCall[]; carry?: string }>;
   /**
    * Run one shell command in the run's workspace. `what`: a gate's (its processes may be ended with it), or one of the
@@ -1328,7 +1328,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
   const toldSkipped = new Set<string>();
   // Every message is redacted before it goes to a model: command output can contain anything, and so can what a tool
   // was called with and what it came to. (A carry is the model's own, and its provider's to check: it goes as it came.)
-  const ask = async (role: RunRole, messages: ModelMessage[], turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[] }) => {
+  const ask = async (role: RunRole, messages: ModelMessage[], turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[]; audit?: boolean }) => {
     const redacted = messages.map((m): ModelMessage => ({
       role: m.role,
       content: redact(m.content),
@@ -1705,8 +1705,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     try {
       // (Asked on the reviewer's models in their order, not apart from the work's: an audit only steers, and asked
       // apart it went to the dearest model there was. On 22 November 2026 an agent's audits, every twenty commands on
-      // Opus through a router that cached nothing, were 42 % of its task's money. The review that decides stays apart.)
-      const reply = await ask("reviewer", [{ role: "user", effort: STEP_EFFORT.audit, content: auditQuestion({ goal: o.goal, plan, gates: gates.map((g) => g.command), steps: since.slice(-2 * AUDIT_EVERY.steps), evidence, last: audits.last, whole: { steps: whole, minutes: (clock() - began) / 60_000 }, steers: taken }) }]);
+      // Opus through a router that cached nothing, were 42 % of its task's money. The review that decides stays apart.
+      // Said to be an audit, so that whoever asks may put it on models of its own: the audit chore, roster.ts.)
+      const reply = await ask("reviewer", [{ role: "user", effort: STEP_EFFORT.audit, content: auditQuestion({ goal: o.goal, plan, gates: gates.map((g) => g.command), steps: since.slice(-2 * AUDIT_EVERY.steps), evidence, last: audits.last, whole: { steps: whole, minutes: (clock() - began) / 60_000 }, steers: taken }) }], { audit: true });
       model = reply.model;
       found = readAudit(reply.text) ?? { verdict: "unread", note: `Its answer couldn't be read; it began: ${clip(redact(reply.text.trim()), 200, 0)}` };
     } catch (error) {

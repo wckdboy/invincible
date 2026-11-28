@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { newNodeIdentity } from "@invincible/core";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
-import { pinnedEffort, roleModels, ROLES, roster, workRole } from "../src/index.ts";
+import { choreRole, pinnedEffort, roleModels, ROLES, roster, workRole } from "../src/index.ts";
 
 function mind() {
   const identity = newNodeIdentity();
@@ -98,6 +98,18 @@ describe("roles you make", () => {
     expect(listed.fold!.description).toContain("story");
     // A name an agent can't carry is still yours to hire models for.
     expect(listed["Odd.Name"]).toMatchObject({ custom: true, forAgents: false });
+  });
+
+  test("a chore runs on its own role once you hire models for it, and until then on the role that does it: a fold on swift's, an audit on the reviewer's", () => {
+    const { store, hire } = mind();
+    expect([choreRole(store, "fold"), choreRole(store, "audit")]).toEqual(["swift", "reviewer"]);
+    hire("audit", ["opencode-go/glm-5.3"]);
+    expect(choreRole(store, "audit")).toBe("audit");
+    const listed = roster(store);
+    expect(listed.audit).toMatchObject({ models: ["opencode-go/glm-5.3"], configured: true, custom: false, forAgents: false });
+    expect(listed.audit!.description).toContain("reviewer's");
+    hire("audit", []);
+    expect(choreRole(store, "audit")).toBe("reviewer");
   });
 });
 

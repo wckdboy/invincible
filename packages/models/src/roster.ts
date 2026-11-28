@@ -123,7 +123,11 @@ export const ROLES: Record<string, RoleSpec> = {
 /** The chores that run on a role of their own once you hire models for one (choreRole), and what each does. */
 export const CHORES: Record<string, string> = {
   fold: "sums up a long chat, or a room's conversation, into its story; the swift role does it until you hire models for this",
+  audit: "looks at an agent's running task every 20 commands or 15 minutes: is it on its task? the reviewer's role does it until you hire models for this",
 };
+
+/** The role that does a chore until you hire models for it: a fold, swift's; an audit, the reviewer's. */
+const CHORE_FALLBACK: Record<string, string> = { audit: "reviewer" };
 
 /** Built-in roles that aren't an agent's to work on: the independent check of its work, and the tools'. */
 const NOT_FOR_AGENTS = new Set(["reviewer", "decider", "eyes", "embedder"]);
@@ -135,12 +139,14 @@ const NOT_FOR_AGENTS = new Set(["reviewer", "decider", "eyes", "embedder"]);
 export const workRole = (role: string): string => (NOT_FOR_AGENTS.has(role) ? "engineer" : role);
 
 /**
- * The role a chore runs on (`fold`: a long chat or a room's conversation summed up into its story): the role named after
- * the chore once you hire models for it (`invincible roster set fold <provider/model> …`), the swift role until then. What a
- * chore costs is yours to choose, apart from what answers you.
+ * The role a chore runs on (`fold`: a long chat or a room's conversation summed up into its story; `audit`: a look at an
+ * agent's running task): the role named after the chore once you hire models for it (`invincible roster set fold
+ * <provider/model> …`), until then the role that does it (CHORE_FALLBACK: swift's, or for an audit the reviewer's). What
+ * a chore costs is yours to choose, apart from what answers you, and the reviewer's strongest models answer for its
+ * review, not for every look at running work.
  */
 export function choreRole(store: LedgerStore, chore: string): string {
-  return store.lww<string[]>(`roster:${chore}`)?.value?.length ? chore : "swift";
+  return store.lww<string[]>(`roster:${chore}`)?.value?.length ? chore : (CHORE_FALLBACK[chore] ?? "swift");
 }
 
 export function roleModels(store: LedgerStore, role: string): string[] {

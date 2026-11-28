@@ -2226,6 +2226,23 @@ test("inside a task an audit is asked in the roster's order, as its run asks it;
   expect(asked.at(-1)).toBe("other");
 });
 
+test("an audit runs on the audit role's models once you hire some, the reviewer's until then; the review that decides stays the reviewer's", async () => {
+  // (With the reviewer on the strongest models, its audits every twenty commands were most of a task's money: 22 November.)
+  const f = fixture([say("1. Make the change."), ...echoes(0, 20), say("ON\nIt is making the change."), say("DONE\nMade and checked."), say("PASS\nThe gate passes.")]);
+  f.setRoster("reviewer", ["local/judge"]);
+  f.setRoster("audit", ["local/cheap"]);
+  expect((await f.runtime.executeTask(member, task, f.context)).verified).toBe(true);
+  // (Which call is the audit and which the review: by what each was asked.)
+  const audits = (bodies: any[]) => bodies.filter((body) => JSON.stringify(body.messages).includes("You audit work that is still going on")).map((body) => body.model as string);
+  const reviews = (bodies: any[]) => bodies.filter((body) => JSON.stringify(body.messages).includes("Reply with PASS on the first line")).map((body) => body.model as string);
+  expect([audits(f.bodies), reviews(f.bodies)]).toEqual([["cheap"], ["judge"]]);
+  // None hired: the reviewer's, as ever.
+  const g = fixture([say("1. Make the change."), ...echoes(0, 20), say("ON\nIt is making the change."), say("DONE\nMade and checked."), say("PASS\nThe gate passes.")]);
+  g.setRoster("reviewer", ["local/judge"]);
+  expect((await g.runtime.executeTask(member, task, g.context)).verified).toBe(true);
+  expect([audits(g.bodies), reviews(g.bodies)]).toEqual([["judge"], ["judge"]]);
+});
+
 test("an agent that finishes its work and goes on without saying so is told to by its audit, and never stopped by one: its work is judged when it says so", async () => {
   // Seen on ultra, 14 November 2026: max made its change to this repository, went on checking it, and ran out of
   // commands. The work was right and nobody was asked: the task ended stopped and unverified. Nothing runs out now,

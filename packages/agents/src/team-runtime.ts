@@ -1212,7 +1212,9 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           const apart = by?.length && !held ? by : undefined;
           const same = (model: string) => (by ?? []).some((from) => apartMatches(model, from));
           const own = held ? (by?.length ? [...held.filter((m) => !same(m)), ...held.filter(same)] : held) : role === "engineer" ? agent.models : undefined;
-          return ask(agent, role === "engineer" ? workRole(agent.role) : role, messages, ctx.signal, role === "reviewer" ? undefined : contextFor(role), (model, usage) => addUsage(spent, role, model, usage), { ...(turn?.loop ? { loop: turn.loop } : {}), ...(turn?.tools ? { tools: turn.tools } : {}), ...(apart ? { apart } : {}) }, own, task.budgetUsd !== undefined, handed);
+          // An audit goes to the audit chore's models once you hire some, the reviewer's until then (roster.ts choreRole).
+          const asked = turn?.audit ? choreRole(deps.brain(agent).store, "audit") : role === "engineer" ? workRole(agent.role) : role;
+          return ask(agent, asked, messages, ctx.signal, role === "reviewer" ? undefined : contextFor(role), (model, usage) => addUsage(spent, role, model, usage), { ...(turn?.loop ? { loop: turn.loop } : {}), ...(turn?.tools ? { tools: turn.tools } : {}), ...(apart ? { apart } : {}) }, own, task.budgetUsd !== undefined, handed);
         },
         exec, signal: ctx.signal,
         // Before each review's evidence is read: another node's task's changes brought back to its agent's side, where that
