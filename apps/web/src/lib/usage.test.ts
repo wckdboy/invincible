@@ -33,6 +33,12 @@ describe("the meter split, its figure and the line under it", () => {
     expect(spentWords(meter(36.6, 1, false))).toBe("At least $36.60");
     expect(spentWords(meter(0, null, false))).toBe("$0.00");
   });
+  test("the figure where a handed task's call was counted at its most (its provider silent in time): \"At most\", \"About\" beside one unreported, never of $0", () => {
+    expect(spentWords({ ...meter(0.3, 2), atMost: true })).toBe("At most $0.30");
+    expect(spentWords({ ...meter(0.3, 2, false), atMost: true })).toBe("About $0.30");
+    expect(spentWords({ ...meter(0, 2), atMost: true })).toBe("$0.00");
+    expect(meterLine({ ...meter(0.3, 2), atMost: true })).toBe("At most $0.30 of $2.00 · $1.70 left");
+  });
   test("under it: of what budget and what is left, all spent, or over budget; with none, its tokens", () => {
     expect(budgetWords(meter(0.4, 1))).toBe("of $1.00 · $0.60 left");
     expect(budgetWords(meter(1, 1))).toBe("of $1.00 · all spent");

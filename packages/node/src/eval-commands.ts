@@ -1,4 +1,5 @@
 import {
+  boundWord,
   type Comparison,
   compareEvals,
   costOf,
@@ -447,7 +448,7 @@ export function spentWindowLine(window: UsageWindow, now: number): string {
  * it, over budget, as the apps say it (lib/usage.ts budgetWords). */
 export function meterLine(m: UsageMeter): string {
   const period = m.per === "day" ? "Today" : "This month";
-  const spent = `${m.complete || m.spentUsd === 0 ? "" : "at least "}${moneyLabel(m.spentUsd)}`;
+  const spent = `${m.spentUsd === 0 ? "" : boundWord(!m.complete, m.atMost === true)}${moneyLabel(m.spentUsd)}`;
   const left = m.budgetUsd === null ? "" : m.spentUsd > m.budgetUsd ? "over budget" : m.leftUsd ? `${moneyLabel(m.leftUsd)} left` : "all spent";
   const against = m.budgetUsd === null ? "no budget (invincible usage budget <usd> sets one)" : `of ${moneyLabel(m.budgetUsd)}, ${left}`;
   return `${period}: ${spent} ${against} · ${tokensLabel(m.tokens)} tokens in ${m.calls} call${m.calls === 1 ? "" : "s"}${m.unpriced.length ? ` · no price for ${m.unpriced.join(", ")}` : ""}`;
@@ -494,8 +495,9 @@ export async function usageCommand(node: NodeClient, flags: Readonly<Record<stri
     for (const { k, lines: ls } of totals) {
       const t = spendTotal(ls);
       const cost = costOf(ls, money);
-      const said = title === "By model" && onPlan(k) ? dim("a coding plan") : cost.complete ? moneyLabel(cost.usd) : cost.unpriced.length ? dim("no price") : `≥ ${moneyLabel(cost.usd)}`;
-      console.log(`  ${k.padEnd(44)} ${String(t.calls).padStart(6)} calls  ${tokensLabel(t.input).padStart(8)} in  ${tokensLabel(t.output).padStart(8)} out  ${said}${t.unknown ? dim(`  (${t.unknown} unreported)`) : ""}`);
+      // (≥ where some call reported nothing, ≤ where one was counted at its most, a handed task's; ≈ where both.)
+      const said = title === "By model" && onPlan(k) ? dim("a coding plan") : cost.complete ? `${cost.atMost ? "≤ " : ""}${moneyLabel(cost.usd)}` : cost.unpriced.length ? dim("no price") : `${cost.atMost ? "≈" : "≥"} ${moneyLabel(cost.usd)}`;
+      console.log(`  ${k.padEnd(44)} ${String(t.calls).padStart(6)} calls  ${tokensLabel(t.input).padStart(8)} in  ${tokensLabel(t.output).padStart(8)} out  ${said}${t.unknown ? dim(`  (${t.unknown} unreported)`) : ""}${t.atMost ? dim(`  (${t.atMost} counted at ${t.atMost === 1 ? "its" : "their"} most)`) : ""}`);
     }
   };
   group("By model", (r) => r.model);

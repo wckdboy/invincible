@@ -1,5 +1,5 @@
 import type { UsageMeter } from "@invincible/core";
-import { moneyLabel, tokensLabel } from "@invincible/core/spend";
+import { boundWord, moneyLabel, tokensLabel } from "@invincible/core/spend";
 
 /*
  * Money as the apps say it, and what a phone's Settings says of what this device may do, in every app's words (held by
@@ -15,10 +15,14 @@ import { moneyLabel, tokensLabel } from "@invincible/core/spend";
  */
 export const moneyWords = (usd: number): string => moneyLabel(usd);
 
-type Meter = Pick<UsageMeter, "spentUsd" | "complete" | "budgetUsd" | "tokens">;
+type Meter = Pick<UsageMeter, "spentUsd" | "complete" | "budgetUsd" | "tokens" | "atMost">;
 
-/** The meter's figure: what this period came to, "At least" where some calls had no price (never of $0). */
-export const spentWords = (m: Pick<Meter, "spentUsd" | "complete">): string => `${m.complete || m.spentUsd === 0 ? "" : "At least "}${moneyWords(m.spentUsd)}`;
+/** The meter's figure: what this period came to, "At least" where some calls had no price, "At most" where one was
+ * counted at its most (a handed task's, its provider silent in time), "About" where both; never of $0. */
+export const spentWords = (m: Pick<Meter, "spentUsd" | "complete" | "atMost">): string => {
+  const bound = m.spentUsd === 0 ? "" : boundWord(!m.complete, m.atMost === true);
+  return `${bound.charAt(0).toUpperCase()}${bound.slice(1)}${moneyWords(m.spentUsd)}`;
+};
 
 /** Under the figure: of what budget, then what is left, all of it spent, or over budget; with no budget, its tokens. */
 export const budgetWords = (m: Pick<Meter, "spentUsd" | "budgetUsd" | "tokens">): string => {

@@ -15,13 +15,27 @@ enum Usage {
         return String(format: n < 10_000_000 ? "%.2fM" : "%.1fM", Double(n) / 1_000_000)
     }
 
-    /// The meter in a line: what it came to ("at least" when some calls had no price), against the budget.
+    /// The meter in a line: what it came to ("at least" when some calls had no price, "at most" when one was counted at its
+    /// most, "about" when both), against the budget.
     static func line(_ m: UsageMeter) -> String {
-        // ("at least" where some calls had no price or reported nothing; never of $0.)
-        let spent = "\(m.complete || m.spentUsd == 0 ? "" : "at least ")\(usd(m.spentUsd))"
+        // ("at least" where some calls had no price or reported nothing; "at most" where a handed task's was counted at its
+        // most, its provider silent in time; never of $0.)
+        let spent = "\(figure(m))\(usd(m.spentUsd))"
         guard let budget = m.budgetUsd else { return "\(spent) · \(tokens(m.tokens)) tokens" }
         guard let left = m.leftUsd, left > 0 else { return "\(spent) of \(usd(budget)) · spent" }
         return "\(spent) of \(usd(budget)) · \(usd(left)) left"
+    }
+
+    /// What the meter's figure is, in the word before it (core's boundWord): "", "at least ", "at most " or "about "; never
+    /// of $0.
+    static func figure(_ m: UsageMeter) -> String {
+        m.spentUsd == 0 ? "" : Spend.boundWord(lower: !m.complete, upper: m.atMost == true)
+    }
+
+    /// The same, starting a line: "At most ", as the PWA's figure says it (lib/usage.ts spentWords).
+    static func figureStarting(_ m: UsageMeter) -> String {
+        let word = figure(m)
+        return word.prefix(1).uppercased() + word.dropFirst()
     }
 
     /// How much of the budget is spent, 0 to 1 (nil with none).
@@ -135,7 +149,7 @@ struct UsageSheet: View {
                 if let meter = session.usage {
                     Section {
                         VStack(alignment: .leading, spacing: Space.s2) {
-                            Text("\(meter.complete || meter.spentUsd == 0 ? "" : "At least ")\(Usage.usd(meter.spentUsd))")
+                            Text("\(Usage.figureStarting(meter))\(Usage.usd(meter.spentUsd))")
                                 .font(.largeTitle.weight(.semibold).monospacedDigit())
                             Text(subline(meter)).font(.subheadline).foregroundStyle(.secondary)
                             if let share = Usage.share(meter) { UsageBar(share: share, spent: (meter.leftUsd ?? 0) <= 0) }

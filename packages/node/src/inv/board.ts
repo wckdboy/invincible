@@ -20,7 +20,7 @@ export const boardJson = (view: BoardView) => {
     working: rows("working"),
     done: rows("done"),
     nodes: view.nodes,
-    cost: view.cost ? { todayUsd: Math.round(view.cost.usd * 1e6) / 1e6, complete: view.cost.complete } : null,
+    cost: view.cost ? { todayUsd: Math.round(view.cost.usd * 1e6) / 1e6, complete: view.cost.complete, atMost: view.cost.atMost === true } : null,
   };
 };
 

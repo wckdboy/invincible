@@ -48,6 +48,15 @@ struct UsageTests {
         #expect(Usage.line(meter(spent: 3.4, budget: nil, left: nil)) == "$3.40 · 3.61M tokens")
         // Nothing priced yet is $0, never "at least $0".
         #expect(Usage.line(meter(spent: 0, budget: nil, left: nil, complete: false)) == "$0 · 3.61M tokens")
+        // A handed task's call counted at its most this period (its provider silent in time): "at most"; beside one
+        // unreported, "about"; the sheet's figure starts its line with a capital, as the PWA's does.
+        var handed = meter(spent: 3.4, budget: 10, left: 6.6)
+        handed.atMost = true
+        #expect(Usage.line(handed) == "at most $3.40 of $10.0 · $6.60 left")
+        #expect(Usage.figureStarting(handed) == "At most ")
+        handed = meter(spent: 3.4, budget: 10, left: 6.6, complete: false)
+        handed.atMost = true
+        #expect(Usage.line(handed) == "about $3.40 of $10.0 · $6.60 left")
         #expect(Usage.share(meter(spent: 15, budget: 10, left: 0)) == 1)
         #expect(Usage.share(meter(spent: 3, budget: nil, left: nil)) == nil)
     }

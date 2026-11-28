@@ -6114,6 +6114,30 @@
         "spent": "$0.00",
         "budget": "8,200 tokens · no budget",
         "line": "$0.00 · 8,200 tokens · no budget"
+      },
+      {
+        "meter": {
+          "spentUsd": 0.3,
+          "budgetUsd": 2,
+          "complete": true,
+          "atMost": true,
+          "tokens": 107200
+        },
+        "spent": "At most $0.30",
+        "budget": "of $2.00 · $1.70 left",
+        "line": "At most $0.30 of $2.00 · $1.70 left"
+      },
+      {
+        "meter": {
+          "spentUsd": 0.3,
+          "budgetUsd": null,
+          "complete": false,
+          "atMost": true,
+          "tokens": 107200
+        },
+        "spent": "About $0.30",
+        "budget": "107k tokens · no budget",
+        "line": "About $0.30 · 107k tokens · no budget"
       }
     ]
   },

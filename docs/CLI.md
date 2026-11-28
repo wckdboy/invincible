@@ -133,7 +133,7 @@ Errors go to stderr as `inv: <what went wrong>`. With `--json` or `--stream`, st
     `resting`).
   - `age` is how long since it last moved (`"12m"`), or null while it is at work.
 - **`inv`:** `{"primary": {"name", "line"}, "needs": [rows], "active": [rows], "working": [rows], "done": [rows],
-  "nodes": [{"name", "online", "self"}], "cost": {"todayUsd", "complete"}}`.
+  "nodes": [{"name", "online", "self"}], "cost": {"todayUsd", "complete", "atMost"}}`.
 - **`inv tasks`:** `{"tasks": [rows]}`.
 - **`inv asks`:** `{"asks": [{"id", "kind", "op", "inputs", "class", "by", "task", "why", "expires", "hidden"}]}`.
   - `kind` is `approval` (an operation waiting for your answer) or `proposal` (a task an agent proposed).

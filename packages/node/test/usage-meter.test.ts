@@ -97,3 +97,30 @@ test("a vendor's tool's own sign-in whose plan is spent is kept through a restar
   now += 3_600_000;
   expect(again.spentSignIns()).toEqual([]);
 });
+
+describe("a handed task's calls counted at their most (their provider silent in time)", () => {
+  test("are counted so, day by day, and the meter and its line say what they came to as an upper bound", () => {
+    const usage = store(at("2026-11-28T18:34:00Z"));
+    usage.note("sandbox:4863d3ce2b", "tool", "deepseek/deepseek-v4-pro", { input: 22_000, output: 28_000, atMost: true });
+    usage.note("arm:team.q5-hello", "planner", "deepseek/deepseek-v4-pro", { input: 1_300, output: 1_000 });
+    const rows = usage.rows(1).rows;
+    expect(rows.map((row) => [row.who, row.atMost ?? 0])).toEqual([["arm:team.q5-hello", 0], ["sandbox:4863d3ce2b", 1]]);
+    // A row with none has no field: it reads as a row from before it did.
+    expect("atMost" in rows[0]!).toBe(false);
+    const meter = usage.meter("ultra", PRICES);
+    expect(meter.atMost).toBe(true);
+    expect(meterLine(meter)).toBe("This month: at most $0.07 no budget (invincible usage budget <usd> sets one) · 52.3k tokens in 2 calls");
+    // A month with none says none, as ever.
+    expect("atMost" in store(at("2026-11-28T18:34:00Z")).meter("ultra", PRICES)).toBe(false);
+  });
+
+  test("a node's table from before it gains the count, and its rows read as they were", () => {
+    const db = new Database(":memory:");
+    db.exec(`CREATE TABLE usage_daily (day TEXT NOT NULL, who TEXT NOT NULL, role TEXT NOT NULL, model TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0, unknown INTEGER NOT NULL DEFAULT 0, input INTEGER NOT NULL DEFAULT 0, output INTEGER NOT NULL DEFAULT 0, cached INTEGER NOT NULL DEFAULT 0, reasoning INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, who, role, model))`);
+    db.query("INSERT INTO usage_daily VALUES ('2026-11-28', 'you', 'planner', 'deepseek/deepseek-v4-pro', 2, 0, 34100, 165, 0, 0)").run();
+    const usage = new UsageStore(db, at("2026-11-28T19:00:00Z"));
+    expect(usage.rows(1).rows).toEqual([{ day: "2026-11-28", who: "you", role: "planner", model: "deepseek/deepseek-v4-pro", calls: 2, unknown: 0, input: 34100, output: 165, cached: 0, reasoning: 0 }]);
+    usage.note("you", "planner", "deepseek/deepseek-v4-pro", { input: 100, output: 10, atMost: true });
+    expect(usage.rows(1).rows[0]!.atMost).toBe(1);
+  });
+});

@@ -96,7 +96,7 @@ fun UsageDialog(app: AppModel, m: UsageMeter, close: () -> Unit) {
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(Space.s3)) {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s1)) {
-                    Text(Usage.spentWords(m.spentUsd, m.complete), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                    Text(Usage.spentWords(m.spentUsd, m.complete, m.atMost), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                     Text(Usage.subline(m), style = MaterialTheme.typography.bodyMedium, color = quiet)
                     Usage.share(m)?.let { UsageBar(it, (m.leftUsd ?: 0.0) <= 0) }
                     Text("Since ${m.since} (UTC), on this node, at the prices you've set. ${Usage.tokens(m.tokens)} tokens in ${m.calls} call${if (m.calls == 1L) "" else "s"}.", style = MaterialTheme.typography.bodySmall, color = quiet)

@@ -102,12 +102,13 @@ export function nodesOf(fleet: FleetView | null): NodeLine[] {
     .map((device) => ({ name: device.name, online: device.id === fleet.self || peers.get(device.id)?.online === true, self: device.id === fleet.self }));
 }
 
-/** What this node's model calls cost today (its UTC day, as it counts them), at your prices; a plan's calls cost nothing. */
-export function todayCost(usage: UsageView | null, now: number): { usd: number; complete: boolean } | null {
+/** What this node's model calls cost today (its UTC day, as it counts them), at your prices; a plan's calls cost nothing;
+ * `atMost`: some call was counted at its most (a handed task's, its provider silent in time), an upper bound for it. */
+export function todayCost(usage: UsageView | null, now: number): { usd: number; complete: boolean; atMost: boolean } | null {
   if (!usage) return null;
   const today = new Date(now).toISOString().slice(0, 10);
   const cost = costOf(usage.rows.filter((row) => row.day === today), moneyPrices(usage.prices, usage.plans ?? []));
-  return { usd: cost.usd, complete: cost.complete && !cost.unpriced.length };
+  return { usd: cost.usd, complete: cost.complete && !cost.unpriced.length, atMost: cost.atMost };
 }
 
 export interface BoardView {
@@ -116,7 +117,7 @@ export interface BoardView {
   /** Approvals that wait for you beyond the rows that stand for them (your agent's own, a loop's): `inv asks` has them. */
   beyond: number;
   nodes: NodeLine[];
-  cost: { usd: number; complete: boolean } | null;
+  cost: { usd: number; complete: boolean; atMost?: boolean } | null;
 }
 
 export function boardView(data: BoardData): BoardView {

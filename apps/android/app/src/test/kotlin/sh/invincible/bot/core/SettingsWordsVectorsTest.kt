@@ -49,9 +49,9 @@ class SettingsWordsVectorsTest {
         assertTrue(meters.size >= 6)
         for (c in meters) {
             val m = c["meter"]
-            assertEquals(c["spent"].string, Usage.spentWords(m["spentUsd"].double!!, m["complete"].bool!!))
+            assertEquals(c["spent"].string, Usage.spentWords(m["spentUsd"].double!!, m["complete"].bool!!, m["atMost"].bool ?: false))
             assertEquals(c["budget"].string, Usage.budgetWords(m["spentUsd"].double!!, m["budgetUsd"].double, m["tokens"].long!!))
-            assertEquals(c["line"].string, Usage.meterLine(m["spentUsd"].double!!, m["complete"].bool!!, m["budgetUsd"].double, m["tokens"].long!!))
+            assertEquals(c["line"].string, Usage.meterLine(m["spentUsd"].double!!, m["complete"].bool!!, m["budgetUsd"].double, m["tokens"].long!!, m["atMost"].bool ?: false))
         }
     }
 

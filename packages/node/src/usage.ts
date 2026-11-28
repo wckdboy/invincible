@@ -16,6 +16,12 @@ export const USAGE_KEEP_DAYS = 400;
 
 const dayOf = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 
+/** A row as the table keeps it, and as it is read: its calls counted at their most only where there are any, so a row with
+ * none reads as one from before the count did. */
+type StoredRow = Omit<UsageRow, "atMost"> & { at_most: number };
+const COLUMNS = "day, who, role, model, calls, unknown, input, output, cached, reasoning, at_most";
+const rowOf = ({ at_most, ...row }: StoredRow): UsageRow => (at_most > 0 ? { ...row, atMost: at_most } : row);
+
 export class UsageStore {
   private lastPruned = "";
 
@@ -29,6 +35,9 @@ export class UsageStore {
       input INTEGER NOT NULL DEFAULT 0, output INTEGER NOT NULL DEFAULT 0,
       cached INTEGER NOT NULL DEFAULT 0, reasoning INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (day, who, role, model))`);
+    // (A table from before calls were counted at their most: it gains the count, every row of it none.)
+    const columns = new Set(db.query<{ name: string }, []>("PRAGMA table_info(usage_daily)").all().map((c) => c.name));
+    if (!columns.has("at_most")) db.exec("ALTER TABLE usage_daily ADD COLUMN at_most INTEGER NOT NULL DEFAULT 0");
     db.exec("CREATE TABLE IF NOT EXISTS usage_budget (k TEXT PRIMARY KEY, usd REAL, per TEXT NOT NULL)");
     db.exec("CREATE TABLE IF NOT EXISTS spent_windows (provider TEXT PRIMARY KEY, until INTEGER NOT NULL, noted INTEGER NOT NULL, said TEXT NOT NULL)");
     db.exec("CREATE TABLE IF NOT EXISTS refused_keys (provider TEXT PRIMARY KEY, refused_at INTEGER NOT NULL, said TEXT NOT NULL)");
@@ -102,8 +111,9 @@ export class UsageStore {
     const today = dayOf(this.now());
     const since = per === "day" ? today : `${today.slice(0, 8)}01`;
     const rows = this.db
-      .query<UsageRow, [string]>("SELECT day, who, role, model, calls, unknown, input, output, cached, reasoning FROM usage_daily WHERE day >= ?")
-      .all(since);
+      .query<StoredRow, [string]>(`SELECT ${COLUMNS} FROM usage_daily WHERE day >= ?`)
+      .all(since)
+      .map(rowOf);
     const lines: UsageLine[] = rows.map(({ day: _day, who: _who, ...line }) => line);
     const cost = costOf(lines, prices);
     const total = spendTotal(lines);
@@ -126,11 +136,13 @@ export class UsageStore {
       leftUsd: budgetUsd === null ? null : Math.max(0, budgetUsd - cost.usd),
       top: byModel.slice(0, 5),
     };
+    if (cost.atMost) meter.atMost = true;
     if (windows.length) meter.windows = windows.map(({ provider, until, said }) => ({ provider, until, said }));
     return meter;
   }
 
-  /** One model call that ended: its tokens as the provider reported them, or null when it reported nothing. */
+  /** One model call that ended: its tokens as the provider reported them, or null when it reported nothing; one counted
+   * at its most (Usage.atMost) is counted so. */
   note(who: string, role: string, model: string, usage: Usage | null): void {
     const day = dayOf(this.now());
     const n = (x: number | undefined): number => (typeof x === "number" && Number.isFinite(x) && x > 0 ? Math.floor(x) : 0);
@@ -138,11 +150,12 @@ export class UsageStore {
     const output = usage ? n(usage.output) : 0;
     this.db
       .query(
-        `INSERT INTO usage_daily (day, who, role, model, calls, unknown, input, output, cached, reasoning) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+        `INSERT INTO usage_daily (day, who, role, model, calls, unknown, input, output, cached, reasoning, at_most) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (day, who, role, model) DO UPDATE SET calls = calls + 1, unknown = unknown + excluded.unknown,
-           input = input + excluded.input, output = output + excluded.output, cached = cached + excluded.cached, reasoning = reasoning + excluded.reasoning`,
+           input = input + excluded.input, output = output + excluded.output, cached = cached + excluded.cached, reasoning = reasoning + excluded.reasoning,
+           at_most = at_most + excluded.at_most`,
       )
-      .run(day, who.slice(0, 100), role.slice(0, 40), model.slice(0, 200), usage ? 0 : 1, input, output, usage ? Math.min(n(usage.cached), input) : 0, usage ? Math.min(n(usage.reasoning), output) : 0);
+      .run(day, who.slice(0, 100), role.slice(0, 40), model.slice(0, 200), usage ? 0 : 1, input, output, usage ? Math.min(n(usage.cached), input) : 0, usage ? Math.min(n(usage.reasoning), output) : 0, usage?.atMost === true ? 1 : 0);
     if (day !== this.lastPruned) {
       this.lastPruned = day;
       this.db.query("DELETE FROM usage_daily WHERE day < ?").run(dayOf(this.now() - USAGE_KEEP_DAYS * 86_400_000));
@@ -153,8 +166,9 @@ export class UsageStore {
   rows(days: number): { since: string; rows: UsageRow[] } {
     const since = dayOf(this.now() - (Math.max(1, Math.floor(days)) - 1) * 86_400_000);
     const rows = this.db
-      .query<UsageRow, [string]>("SELECT day, who, role, model, calls, unknown, input, output, cached, reasoning FROM usage_daily WHERE day >= ? ORDER BY day DESC, who, role, model")
-      .all(since);
+      .query<StoredRow, [string]>(`SELECT ${COLUMNS} FROM usage_daily WHERE day >= ? ORDER BY day DESC, who, role, model`)
+      .all(since)
+      .map(rowOf);
     return { since, rows };
   }
 }

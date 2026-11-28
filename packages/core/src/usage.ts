@@ -90,6 +90,9 @@ export interface UsageMeter {
   spentUsd: number;
   /** Every call in it was counted and priced: `spentUsd` is the whole of it, not a lower bound. */
   complete: boolean;
+  /** Some call in it was counted at its most (a handed task's, its provider silent in time): `spentUsd` is an upper
+   * bound for it. Absent when none, so a client from before it reads the meter as it did. */
+  atMost?: true;
   /** Models that answered in it with no price of yours: their tokens aren't in `spentUsd`. */
   unpriced: string[];
   tokens: number;

@@ -608,6 +608,9 @@ const permissions = {
     { spentUsd: 36.6, budgetUsd: 1, complete: true, tokens: 1_204_000 },
     { spentUsd: 36.6, budgetUsd: null, complete: true, tokens: 1_204_000 },
     { spentUsd: 0, budgetUsd: null, complete: false, tokens: 8_200 },
+    // A handed task's call counted at its most this period (its provider silent in time): "At most"; beside one unreported, "About".
+    { spentUsd: 0.3, budgetUsd: 2, complete: true, atMost: true as const, tokens: 107_200 },
+    { spentUsd: 0.3, budgetUsd: null, complete: false, atMost: true as const, tokens: 107_200 },
   ].map((meter) => ({ meter, spent: spentWords(meter), budget: budgetWords(meter), line: meterLine(meter) })),
 };
 

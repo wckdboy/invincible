@@ -107,7 +107,7 @@ export function boardLines(view: BoardView, style: Style, opts: { doneShown?: nu
   // (A terminal's board keeps a column of margin; piped lines start at the first.)
   const margin = style.width === null ? "" : " ";
   const nodes = view.nodes.map((node) => `${node.online ? "●" : "○"} ${node.name}`).join("  ");
-  const cost = view.cost ? `${view.cost.complete ? "" : "at least "}${moneyLabel(view.cost.usd)} today` : "";
+  const cost = view.cost ? `${boundWord(!view.cost.complete, view.cost.atMost === true)}${moneyLabel(view.cost.usd)} today` : "";
   const line = view.primary.needs ? paint(style, "needs", view.primary.line) : view.primary.line;
   const left = `${strong(style, view.primary.name)} · ${line}`;
   if (style.width === null) {

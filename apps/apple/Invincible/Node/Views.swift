@@ -518,6 +518,9 @@ struct UsageMeter: Decodable, Sendable, Equatable {
     /// Coding plans whose allowance is spent now, as their providers said and until when: their models are passed over
     /// until then (absent when there are none, and from an older node).
     var windows: [SpentWindow]? = nil
+    /// Some call this period was counted at its most (a handed task's, its provider silent in time): `spentUsd` is an upper
+    /// bound for it (absent when none, and from an older node).
+    var atMost: Bool? = nil
 
     struct SpentWindow: Decodable, Sendable, Equatable, Hashable {
         let provider: String

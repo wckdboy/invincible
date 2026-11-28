@@ -29,6 +29,8 @@ data class UsageMeter(
     val top: List<Top>,
     /** Plans whose allowance is spent now, until when (none from an older node). */
     val windows: List<SpentWindow> = emptyList(),
+    /** Some call this period was counted at its most (a handed task's, its provider silent in time): an upper bound. */
+    val atMost: Boolean = false,
 ) {
     data class Top(val model: String, val usd: Double?, val tokens: Long)
 
@@ -52,6 +54,7 @@ data class UsageMeter(
                     val provider = w["provider"].string ?: return@mapNotNull null
                     SpentWindow(provider, w["until"].long ?: return@mapNotNull null, w["said"].string ?: "")
                 },
+                atMost = j["atMost"].bool ?: false,
             )
         }
     }
@@ -77,8 +80,15 @@ object Usage {
         return "$" + BigDecimal(usd).setScale(if (usd > 0 && usd < 0.01) 4 else 2, RoundingMode.HALF_UP).toPlainString()
     }
 
-    /** The meter's figure (lib/usage.ts spentWords): what this period came to, "At least" when some calls had no price (never of $0). */
-    fun spentWords(spentUsd: Double, complete: Boolean): String = "${if (complete || spentUsd == 0.0) "" else "At least "}${money(spentUsd)}"
+    /**
+     * The meter's figure (lib/usage.ts spentWords): what this period came to, "At least" when some calls had no price,
+     * "At most" when one was counted at its most (a handed task's, its provider silent in time), "About" when both; never
+     * of $0.
+     */
+    fun spentWords(spentUsd: Double, complete: Boolean, atMost: Boolean = false): String {
+        val bound = if (spentUsd == 0.0) "" else Spend.boundWord(!complete, atMost)
+        return "${bound.replaceFirstChar { it.uppercase() }}${money(spentUsd)}"
+    }
 
     /**
      * Under the figure (lib/usage.ts budgetWords): of what budget, then what is left, all of it spent, or over budget; with
@@ -95,10 +105,10 @@ object Usage {
     }
 
     /** The meter in a line, as Settings' Providers says it in every app (lib/usage.ts meterLine): the two together. */
-    fun meterLine(spentUsd: Double, complete: Boolean, budgetUsd: Double?, tokenCount: Long): String =
-        "${spentWords(spentUsd, complete)}${if (budgetUsd == null) " · " else " "}${budgetWords(spentUsd, budgetUsd, tokenCount)}"
+    fun meterLine(spentUsd: Double, complete: Boolean, budgetUsd: Double?, tokenCount: Long, atMost: Boolean = false): String =
+        "${spentWords(spentUsd, complete, atMost)}${if (budgetUsd == null) " · " else " "}${budgetWords(spentUsd, budgetUsd, tokenCount)}"
 
-    fun line(m: UsageMeter): String = meterLine(m.spentUsd, m.complete, m.budgetUsd, m.tokens)
+    fun line(m: UsageMeter): String = meterLine(m.spentUsd, m.complete, m.budgetUsd, m.tokens, m.atMost)
 
     /** How much of the budget is spent, 0 to 1 (null with none). */
     fun share(m: UsageMeter): Double? = m.budgetUsd?.takeIf { it > 0 }?.let { minOf(1.0, m.spentUsd / it) }

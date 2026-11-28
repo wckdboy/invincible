@@ -44,6 +44,8 @@ describe("the board", () => {
   test("money as the terminal says it, always in two decimals: \"$12.30 today\", never \"$12.3\" (the lead's word, 28 November 2026)", () => {
     expect(boardLines({ ...boardView(board()), cost: { usd: 12.3, complete: true } }, PLAIN)[0]).toContain("$12.30 today");
     expect(boardLines({ ...boardView(board()), cost: { usd: 240, complete: false } }, PLAIN)[0]).toContain("at least $240.00 today");
+    // A handed task's call counted at its most today (its provider silent in time): an upper bound, said so.
+    expect(boardLines({ ...boardView(board()), cost: { usd: 0.3, complete: true, atMost: true } }, PLAIN)[0]).toContain("at most $0.30 today");
   });
 
   test("in a terminal: your agent's line, the nodes and today's cost, then NEEDS YOU, ACTIVE, WORKING and DONE in the apps' words and colours", () => {
@@ -99,7 +101,7 @@ describe("the board", () => {
     expect(shown.needs[0]).toEqual({ id: "task-needs0000001", title: "Raise the cache's size", section: "needs", state: "needs", word: "Approve?", agent: "ada", project: "invincible", detail: "proposed by its agent", age: "9m", at: T0 + 60_000 });
     expect(shown.working[0]).toMatchObject({ word: "Working · 4m", age: null, detail: "bun test packages/link" });
     expect(shown.nodes).toEqual([{ name: "ultra", online: true, self: true }, { name: "mini", online: false, self: false }]);
-    expect(shown.cost).toEqual({ todayUsd: 2, complete: true });
+    expect(shown.cost).toEqual({ todayUsd: 2, complete: true, atMost: false });
   });
 });
 
