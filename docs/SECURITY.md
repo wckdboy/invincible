@@ -1000,7 +1000,10 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
         - The filler runs in runc, not Kata: what bun does with the registry's tarballs is the filler's to contain, with
           no capability, no network and the cache its one writable mount.
       - A gate whose command runs the task's code runs it as its own user, for that run alone, and that code can make
-        its own gate say anything (in Kata, by tracing its helper too): its verdict is that code's.
+        its own gate say anything (in Kata, by tracing its helper too): its verdict is that code's. A tree's own test
+        configuration makes every `bun test` gate such a command, the planner's contract gate included: its
+        `bunfig.toml` (a `preload`), its `package.json` and its tsconfig's paths. The locked digests cover the test
+        files a gate names, never what configures their run (the thirteenth re-review's Info).
       - What a process the task's end missed can still do:
         - In a repository, it can make the round fail; whatever it does to the clone after the tree is read, the
           round's tree is that tree, hashed, and the review's must be the same.

@@ -144,8 +144,10 @@ export class TaskVms {
       },
       // A round of its gates, in a VM of its own (the eleventh fabric review's ruling): made new, the round before's gone
       // first, and given the task's tree as `take` prints it here to `store` there (its own user's, through this host,
-      // never kept here). Its gates and the node's checks then run there as their own user in their own folder (execArgs,
-      // VM_GATES), and every process of theirs is ended there from an exec of its own before each copy (sweepGates).
+      // never kept here). Its gates and the node's checks then run there, each as a user of its own in a folder of its own
+      // (execArgs, VM_GATES). After each, every process of its user is ended there from an exec of its own (sweepGates),
+      // which decides nothing, and what of that user is still alive is counted as the VM's own user (gateLeft): anything,
+      // and the round ends (team-runtime.ts).
       round: async (take, store, fill, timeoutSec, signal): Promise<HandedRound> => {
         if (signal.aborted) throw new Error("its work has stopped");
         await endRound();

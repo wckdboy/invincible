@@ -304,7 +304,10 @@ transport keys carries all of it:
        A link in the tree that points out of it, by its words or by where it resolves through other links, is refused.
        Its copies count in its gates' 15 minutes, and a copy is at most 2 GiB. A gate whose command runs the task's code
        (`bun test`) runs that code as its own user, for its own run alone: its verdict is that code's, as ever (in Kata
-       that code can trace its gate's helper too), and the review reads what it is.
+       that code can trace its gate's helper too), and the review reads what it is. A tree's own test configuration
+       makes every `bun test` gate the task's code in this way, the planner's contract gate among them: a `bunfig.toml`
+       (its `preload`), its `package.json`, its tsconfig's paths. The node's lock of the tests a gate names is of those
+       test files alone, never of what configures their run.
 
        With no repository, a process the task's end missed can still change what is tarred for a round. Its gates and
        its evidence then both read that, and the same, and nothing is shipped (a task with no repository ships nothing).
