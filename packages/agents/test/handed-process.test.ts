@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { endLeftovers, HANDED_LISTS_COMMAND, HANDED_PROCESS_PY, handedCommand, handedEndCommand } from "../src/handed-process.ts";
+import { endLeftovers, GATES_SWEEP_PY, HANDED_LISTS_COMMAND, HANDED_PROCESS_PY, handedCommand, handedEndCommand } from "../src/handed-process.ts";
 
 // Every test here runs the real helper, a shell and its processes, so its time is the machine's to give: "the 127" took
 // 0.34 s on the Mac mini at a load of 50 on 18 cores, failed in a full run at a load of 77 (27 November 2026), and ran
@@ -277,6 +277,70 @@ test("a module where its helper starts isn't run by it: it is python3 -I (R8-3)"
   } finally {
     s.done();
   }
+});
+
+/*
+ * The ninth fabric review's R9-2: every gate, check and evidence runs as the one gates' user, so what a gate's run of the
+ * task's code leaves behind (its helper ended first) ran on into the next gate and wrote its file. Now each copy, and each
+ * gate's end, ends every process of that user but its own; a gate isn't run while any is left, nor passes. Here /proc is
+ * a procfs-shaped fixture and the signals are intercepted, as end_task's test does: no real process is ended.
+ */
+test("the gates' user's processes are ended, every one but the sweep's own and those it runs under, and only as that user (R9-2)", () => {
+  const scenario = String.raw`
+import shutil, tempfile
+with tempfile.TemporaryDirectory(prefix="sweep-") as root:
+    proc = Path(root)
+    (proc / "self").mkdir()
+    def process(pid, parent, uid, state="S"):
+        path = proc / str(pid)
+        path.mkdir()
+        (path / "stat").write_text(str(pid) + " (sh) x) " + " ".join([state, str(parent)] + ["0"] * 20))
+        (path / "status").write_text("Name:\tsh\nUid:\t%d\t%d\t%d\t%d\n" % (uid, uid, uid, uid))
+    os.getuid = lambda: 65534
+    os.getpid = lambda: 50
+    time.sleep = lambda _: None
+    # The sweep (50), the shell it runs under (41), and its exec's timeout (40), whose parent is outside the VM.
+    process(50, 41, 65534); process(41, 40, 65534); process(40, 0, 65534)
+    # Left behind: 60, which a gate's command started past its helper, and 61, its child; 62, a zombie of theirs; 70, the
+    # task's user's own; 1, the VM's init.
+    process(60, 1, 65534); process(61, 60, 65534); process(62, 60, 65534, "Z"); process(70, 1, 1000); process(1, 0, 1000)
+    killed = []
+    def ended(pid, sig):
+        assert sig == signal.SIGKILL
+        killed.append(pid)
+        shutil.rmtree(proc / str(pid))
+    os.kill = ended
+    assert sweep_gates_user(proc=str(proc)) is True
+    assert sorted(killed) == [60, 61], killed
+    # One that is there again each time it is ended: after a hundred rounds the sweep says so.
+    process(80, 1, 65534)
+    killed.clear()
+    os.kill = lambda pid, sig: killed.append(pid)
+    assert sweep_gates_user(proc=str(proc)) is False
+    assert killed == [80] * 100, len(killed)
+    # As any other user it does nothing, and says all is well: it is the gates' user's alone.
+    os.getuid = lambda: 1000
+    killed.clear()
+    assert sweep_gates_user(proc=str(proc)) is True and killed == []
+print("ok")
+`;
+  const ran = spawnSync("python3", ["-I", "-c", `${HANDED_PROCESS_PY}\n${scenario}`], { encoding: "utf8" });
+  expect(ran.stderr).toBe("");
+  expect(ran.stdout.trim()).toBe("ok");
+  // (The copy's script begins with the same sweep: GATES_SWEEP_PY is one function, in both.)
+  expect(HANDED_PROCESS_PY).toContain(GATES_SWEEP_PY);
+});
+
+test("a gate whose processes couldn't all be ended doesn't pass, whatever its command said (R9-2)", () => {
+  const run = "\nsys.exit(run(";
+  const command = handedCommand("exit 0", { task: "task-test", limitSec: 20, ends: "gate" });
+  expect(command.split(run).length).toBe(2);
+  // (Its end held to say what it would where a process outlived it: the helper's own sweep and group end fail.)
+  const ran = shell(command.replace(run, `\nend_command = lambda group: False\nsweep_gates_user = lambda: False${run}`));
+  expect([ran.status, ran.stderr.trim()]).toEqual([1, "(Processes it started could not all be ended.)\n(So it doesn't pass.)"]);
+  // A task's own command is as it was: its code is its own.
+  const task = shell(handedCommand("exit 0", { task: "task-test", limitSec: 20, ends: "task" }).replace(run, `\nend_command = lambda group: False\nkeep = lambda task, group: None${run}`));
+  expect(task.status).toBe(0);
 });
 
 test("a gate on its copy keeps its VM's read-only PATH where the image's /etc/profile sets PATH afresh, as Debian's does (the lab image's /opt/lab/bin)", () => {

@@ -100,7 +100,7 @@ kind=\${args[0]}
 [ "$kind" = run ] || [ "$kind" = run-task ] || case $all in
   *given.bundle*) kind=take;; *"its workspace as it was given"*) kind=give;; *send-index*) kind=send;; *apply-index*) kind=apply;;
   *tree-index*) kind=tree;; *"no such receive"*) kind=receive;; *"tagged()"*) kind=pipe-end;; *"its gates run on the tree alone"*) kind=copy;;
-  *gate-faker*|*PROFILE*) kind=work;; *"test -f result-real.txt"*) kind=gate;; *"> result-real.txt"*) kind=work;;
+  *gate-faker*|*PROFILE*|*zz-work*) kind=work;; *"test -f result-real.txt"*) kind=gate;; *"> result-real.txt"*) kind=work;;
 esac
 printf '%s %s %s (+%s ms here)\\n' "$asked" "$kind" "$(printf '%q ' "\${args[@]:0:12}" | cut -c1-300)" "$(( $(date +%s%3N) - asked ))" >> "$LOG"
 case \${args[0]} in
@@ -153,6 +153,36 @@ const WORK = {
     "p=$PPID; while [ \"$p\" -gt 1 ]; do if grep -qa 'PR_SET_CHILD_[S]UBREAPER' /proc/$p/cmdline 2>/dev/null; then kill -KILL $p; break; fi; p=$(cut -d' ' -f4 /proc/$p/stat); done",
     "echo started",
   ].join("\n"),
+  // The ninth review's R9-2: the task's work is a test of its own (as a task's work has) and a script it runs. Run by the
+  // gate `bun test` as the gates' user, it starts a process of that user's that writes result-real.txt into every gates'
+  // copy it finds, then ends its helper (the nearest ancestor that is a subreaper) so that the helper's end misses it. In
+  // a later round it finds that process running and does nothing: its test passes.
+  TASK_DAEMON: String.raw`# zz-work
+cat > zz.test.ts <<'ZZ'
+import { expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+test("the work", () => {
+  spawnSync("bash", ["zz-daemon.sh"], { stdio: "ignore" });
+  expect(1 + 1).toBe(2);
+});
+ZZ
+cat > zz-daemon.sh <<'ZZ'
+m=zz-gate-; m="$m"daemon
+if ! grep -qa 'zz-gate-[d]aemon' /proc/[0-9]*/cmdline 2>/dev/null; then
+  setsid python3 -c 'import glob, os, time
+while True:
+    for d in glob.glob("/gates/*/tree"):
+        try:
+            if not os.path.exists(os.path.join(d, "result-real.txt")):
+                open(os.path.join(d, "result-real.txt"), "w").close()
+        except OSError:
+            pass
+    time.sleep(0.002)' "$m" </dev/null >/dev/null 2>&1 &
+  sleep 0.5
+  p=$PPID; while [ "$p" -gt 1 ]; do if grep -qa 'PR_SET_CHILD_[S]UBREAPER' /proc/$p/cmdline 2>/dev/null; then kill -KILL $p; break; fi; p=$(cut -d' ' -f4 /proc/$p/stat); done
+fi
+ZZ
+echo written`,
 } as const;
 type Work = keyof typeof WORK;
 const fence = "```";
@@ -164,7 +194,9 @@ const models = Bun.serve({
     const turns = body.messages.filter((m) => m.role !== "system");
     const sse = (delta: unknown) => new Response(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
     if (body.model === "reviewer") return sse({ content: "PASS\nThe gate passed after the work, and its evidence shows the file written." });
-    if (body.model === "engineer") {
+    // (The work, on the engineer's models, or on the planner's where the node routes it there: after two of an agent's
+    // tasks had to move up to them, its next begins on them. Asked with tools, the planner's model works too.)
+    if (body.model === "engineer" || (body.model === "planner" && body.tools?.length)) {
       const asked = JSON.stringify(body.messages);
       const command = WORK[(Object.keys(WORK) as Work[]).find((work) => asked.includes(`${work}:`)) ?? "TASK_REAL"];
       const worked = turns.some((m) => m.role === "assistant" || m.role === "tool");
@@ -232,11 +264,11 @@ for (const runtime of ["kata", "runc"] as const) {
       })());
 
     /** A task handed to beta's agent, whose work is `work`, followed to its end on alpha; its stages and calls printed. */
-    async function handOff(work: Work) {
+    async function handOff(work: Work, gates: string[] = ["test -f result-real.txt"]) {
       const { callA } = pair;
       const { herVm, madeMs, seededMs } = await her();
       const handedAt = Date.now();
-      const view = await callA<HandedView>("handTask", { node: "beta", goal: `${work}: write the file and prove it`, gates: ["test -f result-real.txt"], agent: "ada" });
+      const view = await callA<HandedView>("handTask", { node: "beta", goal: `${work}: write the file and prove it`, gates, agent: "ada" });
       await until(async () => (await callA<HandedView>("handedTask", { id: view.id, after: 0 })).phase === "ended", 480_000, "the task ended");
       const seenAt = Date.now();
       const done = await callA<HandedView>("handedTask", { id: view.id, after: 0 });
@@ -319,6 +351,21 @@ for (const runtime of ["kata", "runc"] as const) {
       console.log(`  its gates, as its trail says them:\n    ${gates.join("\n    ")}`);
       // (Checked against beta's signature, as any: what beta says is that its gate failed, so not verified.)
       expect(done.proof).toMatchObject({ state: "checked", verified: false, proof: { before: [1], after: [1] } });
+      expect(docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`).status).not.toBe(0);
+    });
+
+    /*
+     * The ninth review's R9-2: every gate ran as the one gates' user, and nothing ended that user's processes between
+     * gates. So a first gate that runs the task's code (its own test) left a process behind that wrote the second gate's
+     * file into each later copy, and the task came back Proven. Now each copy, and each gate's end, ends every process
+     * of that user but its own, and a gate whose processes can't all be ended doesn't pass.
+     */
+    test("R9-2: a process a gate's run of the task's code leaves behind can't pass a later gate: each copy and each gate's end end every process of the gates' user", async () => {
+      const { done, herVm, gates } = await handOff("TASK_DAEMON", ["bun test", "test -f result-real.txt"]);
+      console.log(`  its gates, as its trail says them:\n    ${gates.join("\n    ")}`);
+      // (Checked against beta's signature: what beta says is that its second gate failed each time, so not verified.)
+      expect(done.proof).toMatchObject({ state: "checked", verified: false });
+      expect((done.proof as { proof: { after: number[] } }).proof.after[1]).not.toBe(0);
       expect(docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`).status).not.toBe(0);
     });
   });

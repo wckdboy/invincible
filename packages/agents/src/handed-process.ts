@@ -1,4 +1,52 @@
-import { VM_GATES } from "@invincible/core";
+import { VM_GATES, VM_GATES_USER } from "@invincible/core";
+
+/**
+ * The gates' own user's processes in a task's VM, ended (the ninth fabric review's R9-2): every one but this one and those
+ * it runs under (its exec's timeout and shell, whose parent is outside the VM), until none is left. A gate's command runs
+ * the task's code as that user (its test, say), and that code may leave a process behind by ending the gate's helper
+ * first; one left so could write what a later gate looks for into that gate's copy. So each copy begins with this, and so
+ * does each gate's end, and a gate isn't run, nor passes, while any is left. A zombie is no process. As that user alone,
+ * and only where /proc says so: anywhere else (a test on your machine, as you) it does nothing at all.
+ */
+export const GATES_SWEEP_PY = String.raw`def sweep_gates_user(uid=${VM_GATES_USER.split(":")[0]}, proc="/proc"):
+    if os.getuid() != uid or not os.path.isdir(os.path.join(proc, "self")):
+        return True
+    def stat(pid):
+        try:
+            fields = open(os.path.join(proc, str(pid), "stat")).read().rsplit(")", 1)[1].split()
+            return fields[0], int(fields[1])
+        except (OSError, IndexError, ValueError):
+            return None
+    def owner(pid):
+        try:
+            for line in open(os.path.join(proc, str(pid), "status")):
+                if line.startswith("Uid:"):
+                    return int(line.split()[1])
+        except (OSError, IndexError, ValueError):
+            pass
+        return None
+    mine, p = set(), os.getpid()
+    while p > 0 and p not in mine:
+        mine.add(p)
+        seen = stat(p)
+        p = seen[1] if seen else 0
+    for _ in range(100):
+        left = []
+        for name in os.listdir(proc):
+            if name.isdigit() and int(name) not in mine:
+                seen = stat(int(name))
+                if seen and seen[0] not in ("Z", "X") and owner(int(name)) == uid:
+                    left.append(int(name))
+        if not left:
+            return True
+        for pid in left:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        time.sleep(0.02)
+    return False
+`;
 
 /*
  * The processes of another node's task (fabric/handoff.ts) in its agent's VM: none outlives what it was started for.
@@ -21,7 +69,7 @@ import { VM_GATES } from "@invincible/core";
  * PATH or module of the task's (a `json.py` where it starts, a `.pth` of its user's) stands in for it or runs in it.
  */
 export const HANDED_PROCESS_PY = String.raw`import json, os, signal, sys, time
-from pathlib import Path
+${GATES_SWEEP_PY}from pathlib import Path
 PROC = Path("/proc")
 D = Path("/work/.agent/handed")
 
@@ -190,14 +238,24 @@ def run(mode, task, limit, command, on=""):
         if time.monotonic() >= deadline:
             break
         time.sleep(0.05)
+    ended = True
     if code is None or mode == "gate":
-        if not end_command(child):
+        ended = end_command(child)
+        # (A gate's end ends every other process of the gates' own user too: what its command left past its helper,
+        # having ended it. R9-2.)
+        if mode == "gate":
+            ended = sweep_gates_user() and ended
+        if not ended:
             sys.stderr.write("(Processes it started could not all be ended.)\n")
     else:
         keep(task, child)
     if code is None:
         sys.stderr.write("(Its time ran out after %g s: it was ended, and every process it started with it.)\n" % limit)
         return 137
+    # (A gate whose processes outlive it doesn't pass: what it left could answer for a later one.)
+    if mode == "gate" and not ended and code == 0:
+        sys.stderr.write("(So it doesn't pass.)\n")
+        return 1
     return code
 
 def end_task(task):

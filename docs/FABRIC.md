@@ -210,21 +210,28 @@ transport keys carries all of it:
        gate, and each check of the node's on what they judge (the digests of the test files they name), then runs on a
        copy of that tree of its own:
        - made by the gates' own user (nobody, never the VMs' user the task's commands run as) in their own folder, a
-         filesystem in memory of theirs alone (`/gates`, mode 0700). No process of the task's, one its end missed among
-         them, can list, write or move anything there, nor signal or trace what runs there;
+         filesystem in memory of theirs alone (`/gates`, mode 0700). No process of the task's user, one its end missed
+         among them, can list, write or move anything there, nor signal or trace what runs there;
        - its objects taken from the clone through `index-pack`, each hashed as it comes, so the copy is that tree
          whatever the clone holds or does meanwhile. With no repository, the folder is copied, and each copy must hash to
          what it was as the gates began;
        - with a HOME and a temporary folder of its own, nothing of the VM's environment but a PATH of its read-only
          folders, and of the login profiles only the image's own (`/etc/profile`): never a profile, a `~/.local/bin` or
          a `~/.npmrc` the task wrote;
-       - and nothing a gate before it left there.
+       - and nothing a gate before it left: neither a file (each copy is a new one, every earlier one gone) nor a
+         process. A gate's command runs the task's code as the gates' user (its test, say), and that code could end the
+         gate's helper and leave a process behind that writes a later gate's file into its copy (the ninth re-review's
+         R9-2: a first gate of `bun test` so passed a second of `test -f`, and the task came back verified, in Kata and
+         runc). So each copy begins, and each gate ends, by ending every process of the gates' user but the sweep's own,
+         until none is left. No gate runs while one is, and a gate whose own processes couldn't all be ended doesn't
+         pass.
 
        Every other command of the node's in its VM runs in a shell that reads no profile. The handed helper and its end
        run as `/usr/bin/python3 -I`, named by its path. The task's own commands keep their login shell, inside the helper.
-       In Kata and in runc, the review's PoC (a profile whose python3 says each gate passed) and a process that ended its
-       own helper and writes the gate's file while a gate looks for it both come back not verified, their gate failing
-       as it does (`handed-real.integration.test.ts`); before, both came back verified.
+       In Kata and in runc, the eighth review's PoC (a profile whose python3 says each gate passed), a process that ended
+       its own helper and writes the gate's file while a gate looks for it, and the ninth's (a first gate's run of the
+       task's test leaving a process that writes the second gate's file) all come back not verified, their gate failing
+       as it does (`handed-real.integration.test.ts`); before, each came back verified.
      - **What a gate gets is what CI gives a job: a checkout of the tree that comes back.**
        - Nothing the task installed or built in its worktree that isn't in that tree: a gate that needs `node_modules`
          makes them (`bun install && bun test`).
@@ -233,7 +240,10 @@ transport keys carries all of it:
 
        A link in the tree that points out of it is refused. Its copy's time counts in its gates' 15 minutes, and a copy is
        at most 2 GiB. A gate whose command runs the task's code (`bun test`) runs that code as the gates' user, for its
-       own run alone: its verdict is that code's, as ever, and the review reads what it is.
+       own run alone: its verdict is that code's, as ever, and the review reads what it is. A gate shares the VM's network,
+       its `/dev/shm` and its `/tmp` with the task's processes, one its end missed among them: a gate that talks to a
+       local port or an abstract socket, or reads a fixed path in `/tmp` (a tool's that ignores TMPDIR), talks to what the
+       task may have left there (the ninth re-review's I-1). None of its gates' own files or processes is reachable so.
      - The VM goes as the task ends, however it ends (done, failed, stopped, its agent paused), and with it everything
        the task started there. When its work ends (a revocation among its ends: your brake), its lease ends and the VM
        is removed at once, the command in flight there with it, never once that command returns (the fifth re-review's

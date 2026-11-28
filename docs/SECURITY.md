@@ -912,13 +912,20 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       runs on a copy of that tree of its own, made by the gates' own user (nobody, never the VMs' user the task runs
       as) in their own folder, a filesystem in memory of theirs alone (`/gates`, 0700), its objects hashed as they come
       from the clone (`index-pack`), with a HOME and temporary folder of its own, `env -i` but a PATH of the VM's
-      read-only folders, and of the login profiles only the image's own `/etc/profile`. No process of the task's, one
-      its end missed among them, can list, write or move what is there, or signal or trace what runs there, and no gate
-      sees what one before it left. Every other command of the node's in that VM reads no profile (`bash --noprofile
-      --norc`), and the handed helper and its end run as `/usr/bin/python3 -I` by its path; the task's own commands get
+      read-only folders, and of the login profiles only the image's own `/etc/profile`. No process of the task's user,
+      one its end missed among them, can list, write or move what is there, or signal or trace what runs there. Nor
+      can a process a gate before it left behind: a gate's command runs the task's code as the gates' user, and that
+      code could end the gate's helper and leave a process that writes a later gate's file into its copy (the ninth
+      re-review's R9-2: a first gate of `bun test` so passed a second of `test -f`, verified, in Kata and runc). So each
+      copy begins, and each gate ends, by ending every process of the gates' user but the sweep's own until none is
+      left; no gate runs while one is, and a gate whose own processes couldn't all be ended doesn't pass. Every other
+      command of the node's in that VM reads no profile (`bash --noprofile --norc`), and the handed helper and its end
+      run as `/usr/bin/python3 -I` by its path; the task's own commands get
       their login shell inside the helper. A gate gets the tree that comes back, as CI's job gets a checkout: what the
       task installed or built in its worktree outside that tree, its lease and its HOME are not there, and a link out of
-      the tree is refused. A gate whose command runs the task's code runs it as the gates' user, for that run alone. The
+      the tree is refused. A gate whose command runs the task's code runs it as the gates' user, for that run alone. A
+      gate shares the VM's network, `/dev/shm` and `/tmp` with the task's processes: one that talks to a local port, an
+      abstract socket or a fixed `/tmp` path talks to what the task may have left there (I-1). The
       VM goes as the task ends, however it ends, and with it everything the task started there. When its task's work
       ends (a revocation among its ends: your brake), its lease ends and its VM is removed at once, the command in
       flight there with it, never once that command returns (the fifth re-review's I-1, `task-vms.test.ts`). Its lease
@@ -939,7 +946,7 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       In the VM (Linux) the helper is the command's subreaper while it lives. What a gate starts ends with the gate;
       what its other commands leave running, its coding tool's included, is listed and ended with the task however it
       ends (R3-5). A command that ends or stops its own helper, or a process that double-forks out of it, escapes that
-      bound, but not the task's VM (R3-1, closed), and reaches none of its gates (R8-3, above).
+      bound, but not the task's VM (R3-1, closed), and reaches none of its gates (R8-3 and R9-2, above).
     - The runner stops it at its call's deadline or after 24 hours, whichever comes first. A stop that can't be
       written (the node stopping, or a write that fails) ends its call all the same, answered as failed (the third
       re-review's R3-2). A task you take up again by its id is held to 24 hours from then (R3-6).

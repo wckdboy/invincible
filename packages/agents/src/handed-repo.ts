@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { VM_GATES } from "@invincible/core";
+import { GATES_SWEEP_PY } from "./handed-process.ts";
 import { heldGit } from "./held-git.ts";
 
 /*
@@ -540,7 +541,11 @@ if git(root,'rev-parse','-q','--verify',ref).returncode == 0 and git(root,'updat
  * It prints how many files the copy holds, their bytes, and its tree.
  */
 const GATES_SCRIPT = `root, tree, on, was = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-import stat
+import signal, stat, time
+${GATES_SWEEP_PY}
+# (First, every process of the gates' own user in its VM ended: none a gate before left runs beside this one. R9-2.)
+if not sweep_gates_user():
+    sys.exit("processes of its gates' user are still running in its VM, so no gate runs")
 hexed = lambda t: re.fullmatch('[0-9a-f]{40}|[0-9a-f]{64}', t)
 if not re.fullmatch('[0-9a-f]{32}', os.path.basename(on)) or not os.path.isabs(on) or (tree and not hexed(tree)) or (was and (tree or not hexed(was))):
     sys.exit('not a copy for its gates')
