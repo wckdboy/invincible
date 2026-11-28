@@ -1,0 +1,379 @@
+{
+  "suite": "desktop-model",
+  "note": "C1 step 7's model baseline: five runs of each of the four tasks by each model, on OpenCode Go, held to 18 of 20 passes. 27 November 2026 (12 runs, images from bf67db17) and 28 November (8 runs, from c12cefd9), on Ultra in Kata VMs. GLM-5.3 isn't here until it has five runs of each task.",
+  "models": [
+    {
+      "suite": "desktop-model",
+      "at": "2026-11-28T04:30:55.007Z",
+      "commit": "bf67db17, c12cefd9",
+      "model": "opencode-go/kimi-k3.1-pro",
+      "route": "opencode-go/kimi-k3.1-pro",
+      "eyes": "opencode-go/kimi-k3.1-pro",
+      "bar": {
+        "passed": 18,
+        "of": 20
+      },
+      "passed": 19,
+      "of": 20,
+      "held": true,
+      "dollars": {
+        "meter": 0,
+        "upperBound": 0
+      },
+      "tasks": {
+        "form": {
+          "passed": 5,
+          "of": 5,
+          "calls": {
+            "median": 7,
+            "most": 14
+          },
+          "actions": {
+            "median": 22,
+            "most": 30
+          },
+          "callsPerAction": {
+            "median": 0.32,
+            "most": 0.54
+          },
+          "tokens": {
+            "input": 180777,
+            "cached": 128128,
+            "output": 4785,
+            "unreported": 0
+          },
+          "dollars": {
+            "meter": 0,
+            "upperBound": 0
+          },
+          "minutes": {
+            "median": 0.6,
+            "most": 1.22
+          },
+          "eyes": {
+            "calls": {
+              "median": 1,
+              "most": 1
+            },
+            "tokens": {
+              "input": 6119,
+              "output": 1341
+            },
+            "failed": 0
+          }
+        },
+        "terminal": {
+          "passed": 5,
+          "of": 5,
+          "calls": {
+            "median": 5,
+            "most": 9
+          },
+          "actions": {
+            "median": 4,
+            "most": 11
+          },
+          "callsPerAction": {
+            "median": 1.25,
+            "most": 1.25
+          },
+          "tokens": {
+            "input": 85025,
+            "cached": 53504,
+            "output": 2749,
+            "unreported": 0
+          },
+          "dollars": {
+            "meter": 0,
+            "upperBound": 0
+          },
+          "minutes": {
+            "median": 0.34,
+            "most": 0.96
+          },
+          "eyes": {
+            "calls": {
+              "median": 0,
+              "most": 1
+            },
+            "tokens": {
+              "input": 1517,
+              "output": 348
+            },
+            "failed": 0
+          }
+        },
+        "settings": {
+          "passed": 5,
+          "of": 5,
+          "calls": {
+            "median": 9,
+            "most": 9
+          },
+          "actions": {
+            "median": 23,
+            "most": 26
+          },
+          "callsPerAction": {
+            "median": 0.36,
+            "most": 0.5
+          },
+          "tokens": {
+            "input": 185932,
+            "cached": 128128,
+            "output": 3665,
+            "unreported": 0
+          },
+          "dollars": {
+            "meter": 0,
+            "upperBound": 0
+          },
+          "minutes": {
+            "median": 0.88,
+            "most": 1.56
+          },
+          "eyes": {
+            "calls": {
+              "median": 0,
+              "most": 1
+            },
+            "tokens": {
+              "input": 1526,
+              "output": 600
+            },
+            "failed": 0
+          }
+        },
+        "editor": {
+          "passed": 4,
+          "of": 5,
+          "failed": [
+            "run 1: the file holds \"Written on desktop\""
+          ],
+          "calls": {
+            "median": 11,
+            "most": 12
+          },
+          "actions": {
+            "median": 17,
+            "most": 26
+          },
+          "callsPerAction": {
+            "median": 0.53,
+            "most": 1.09
+          },
+          "tokens": {
+            "input": 202081,
+            "cached": 143616,
+            "output": 5393,
+            "unreported": 0
+          },
+          "dollars": {
+            "meter": 0,
+            "upperBound": 0
+          },
+          "minutes": {
+            "median": 0.75,
+            "most": 1.14
+          },
+          "eyes": {
+            "calls": {
+              "median": 1,
+              "most": 2
+            },
+            "tokens": {
+              "input": 6126,
+              "output": 1877
+            },
+            "failed": 0
+          }
+        }
+      }
+    },
+    {
+      "suite": "desktop-model",
+      "at": "2026-11-28T04:38:40.914Z",
+      "commit": "bf67db17, c12cefd9",
+      "model": "opencode-go/qwen4-max",
+      "route": "opencode-go/qwen4-max",
+      "eyes": "opencode-go/qwen4-max",
+      "bar": {
+        "passed": 18,
+        "of": 20
+      },
+      "passed": 20,
+      "of": 20,
+      "held": true,
+      "dollars": {
+        "meter": 0,
+        "upperBound": 0
+      },
+      "tasks": {
+        "form": {
+          "passed": 5,
+          "of": 5,
+          "calls": {
+            "median": 12,
+            "most": 14
+          },
+          "actions": {
+            "median": 23,
+            "most": 31
+          },
+          "callsPerAction": {
+            "median": 0.45,
+            "most": 0.57
+          },
+          "tokens": {
+            "input": 294699,
+            "cached": 255488,
+            "output": 10642,
+            "unreported": 0
+          },
+          "dollars": {
+            "meter": 0,
+            "upperBound": 0
+          },
+          "minutes": {
+            "median": 0.97,
+            "most": 1.23
+          },
+          "eyes": {
+            "calls": {
+              "median": 1,
+              "most": 2
+            },
+            "tokens": {
+              "input": 6834,
+              "output": 538
+            },
+            "failed": 0
+          }
+        },
+        "terminal": {
+          "passed": 5,
+          "of": 5,
+          "calls": {
+            "median": 8,
+            "most": 14
+          },
+          "actions": {
+            "median": 10,
+            "most": 14
+          },
+          "callsPerAction": {
+            "median": 0.77,
+            "most": 1
+          },
+          "tokens": {
+            "input": 157855,
+            "cached": 136448,
+            "output": 6471,
+            "unreported": 0
+          },
+          "dollars": {
+            "meter": 0,
+            "upperBound": 0
+          },
+          "minutes": {
+            "median": 0.65,
+            "most": 0.91
+          },
+          "eyes": {
+            "calls": {
+              "median": 1,
+              "most": 3
+            },
+            "tokens": {
+              "input": 8966,
+              "output": 1176
+            },
+            "failed": 0
+          }
+        },
+        "settings": {
+          "passed": 5,
+          "of": 5,
+          "calls": {
+            "median": 12,
+            "most": 15
+          },
+          "actions": {
+            "median": 24,
+            "most": 26
+          },
+          "callsPerAction": {
+            "median": 0.57,
+            "most": 0.63
+          },
+          "tokens": {
+            "input": 284329,
+            "cached": 251904,
+            "output": 7625,
+            "unreported": 0
+          },
+          "dollars": {
+            "meter": 0,
+            "upperBound": 0
+          },
+          "minutes": {
+            "median": 1.04,
+            "most": 1.14
+          },
+          "eyes": {
+            "calls": {
+              "median": 1,
+              "most": 1
+            },
+            "tokens": {
+              "input": 5560,
+              "output": 83
+            },
+            "failed": 0
+          }
+        },
+        "editor": {
+          "passed": 5,
+          "of": 5,
+          "calls": {
+            "median": 12,
+            "most": 15
+          },
+          "actions": {
+            "median": 21,
+            "most": 22
+          },
+          "callsPerAction": {
+            "median": 0.57,
+            "most": 0.75
+          },
+          "tokens": {
+            "input": 264534,
+            "cached": 232448,
+            "output": 9206,
+            "unreported": 0
+          },
+          "dollars": {
+            "meter": 0,
+            "upperBound": 0
+          },
+          "minutes": {
+            "median": 0.86,
+            "most": 1.23
+          },
+          "eyes": {
+            "calls": {
+              "median": 1,
+              "most": 2
+            },
+            "tokens": {
+              "input": 6750,
+              "output": 658
+            },
+            "failed": 0
+          }
+        }
+      }
+    }
+  ]
+}

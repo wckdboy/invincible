@@ -198,6 +198,23 @@ everything but the model.
     C0 had the form task at 20 agent turns and 6 looks; here it took 6 to 19 turns and 0 to 4 looks. Kimi's one miss
     was its own: it typed "Written on desktop" for "Written on the desktop", and the look it asked for afterwards didn't
     catch it. The calls: qwen4-max 149, kimi-k3.1-pro 110, glm-5.3 110, kimi-k3 14.
+  - **28 November 2026, on OpenCode Go, paced.** On Ultra, in Kata VMs from images built from c12cefd9, on a token
+    scoped to opencode-go alone, each model within 120 calls of the day (four fifths of its 150). Its calls began 4 s
+    apart at least (the bench's pacer: at 01:26 a burst past about 25 calls a minute had been refused with a 429), and
+    none was refused. The load was 2 to 6.5 on 32 cores. Two runs of each task:
+
+    | Engineer, and its eyes | Passed | Calls per action, median (worst) | Looks a run, median (most) | Minutes a task, median (most) |
+    |---|---|---|---|---|
+    | qwen4-max, which sees; itself | 8 of 8 | 0.58 (0.80) | 1 (2) | 1.01 (1.23) |
+    | kimi-k3.1-pro, which sees; itself | 8 of 8 | 0.46 (1.25) | 0 (1) | 0.81 (1.22) |
+    | glm-5.3, the tree alone; kimi-k3.1-pro | 6 of 6, and one cut at its call cap | 0.55 (0.90) | 1 (2) | 0.99 (1.25) |
+
+    The calls: qwen4-max 100, kimi-k3.1-pro 85 (13 of them GLM-5.3's looks), glm-5.3 93, its cap for the day.
+  - **The model baseline** (`bench/baseline/desktop-model.json`), five runs of each task from the two days, the bench's
+    own record of them: qwen4-max 20 of 20 and kimi-k3.1-pro 19 of 20, each over the bar of 18. GLM-5.3 isn't in it
+    until it has its five of each: run to the end, it has form 5, terminal 4, settings 4 and editor 2, all passed; two
+    more were cut, at 01:26 by that refusal and on 28 November by the cap. Its five come on another day's cap, as a
+    baseline of their own.
 
 ### hardware: KiCad and FreeCAD on an agent's desktop
 
