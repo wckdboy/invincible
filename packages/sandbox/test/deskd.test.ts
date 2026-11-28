@@ -966,9 +966,10 @@ print(json.dumps(b.front()[0]))`)).toBe("T2");
     const busy = await deskd({ DESKD_BUSY: "1" });
     const opened = await desktop(busy, ["open", "https://example.test/"]);
     expect(opened).toMatchObject({ code: 0, out: "Example · https://example.test/\n" });
-    // (A screen that never stops: the open waits its settle out, a second at most.)
+    // (A screen that never stops: the open waits its settle out, a second at most. The deadline it took is checked, its
+    // 1 s, not the settle's own 3 s: on the real clock, "under 3 s" counted a busy machine's time too.)
     expect(opened.ms).toBeGreaterThan(900);
-    expect(opened.ms).toBeLessThan(3000);
+    expect(calls(busy.trace(), "settle").map((t) => t.cap)).toEqual([1]);
   }, BUSY(11.4));
 });
 

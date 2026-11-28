@@ -2,7 +2,8 @@
 """deskd as it runs in a VM, with stand-ins for what a VM has: the display (its input, its pixels, its windows), the
 window manager's list, the browser and the desktop's processes. Each stand-in writes what it was asked to the trace
 file, a JSON line a call, and the tests read it. Nothing here is deskd's own logic: that is imported, as it is. (Of
-deskd's own, the trace says one thing more: when an agent's request begins to wait on the owner's hold, owner-wait.)
+deskd's own, the trace says two things more: when an agent's request begins to wait on the owner's hold, owner-wait;
+and each settle deskd begins, with its cap, settle.)
 
   INVINCIBLE_DESKTOP_RUN=<dir> DESKD_TRACE=<file> python3 deskd-harness.py      serves on <dir>/deskd.sock
   DESKD_QUIET=1             the screen never changes after an input (an action that shows nothing)
@@ -354,6 +355,18 @@ def wait_for_owner(cap=None):
 
 
 desk.wait_for_owner = wait_for_owner
+
+# Each settle deskd begins is traced with the cap it took (settle): a test checks the deadline deskd took, never how
+# long a busy machine took to reach it. deskd's settle itself runs as it is.
+_settle = desk.settle
+
+
+def settle(cap=deskd.SETTLE_CAP):
+    trace(call="settle", cap=cap)
+    return _settle(cap)
+
+
+desk.settle = settle
 
 
 def ends_with_its_test():
