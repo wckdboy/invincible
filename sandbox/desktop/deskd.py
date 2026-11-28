@@ -871,6 +871,8 @@ ROLES = ("invalid", "accelerator label", "alert", "animation", "arrow", "calenda
          "description list", "description term", "description value", "footnote", "content deletion", "content insertion",
          "mark", "suggestion", "push button menu", "switch")
 # What a person acts on: clicks, types into, picks from.
+# How many nodes keep their refs at most: several trees' worth (a tree says 400 at most).
+NUMBERS_KEPT = 4000
 ACTABLE = {"check box", "check menu item", "combo box", "entry", "link", "list item", "menu", "menu item", "page tab",
            "password text", "push button", "push button menu", "radio button", "radio menu item", "slider", "spin button",
            "switch", "toggle button", "tree item", "text"}
@@ -921,6 +923,7 @@ class Tree:
         self.conn = None
         self.known = {}  # bus name -> the app: its name, its toolkit, its process
         self.refs = {}  # n -> the node said as [n]
+        self.numbers = {}  # a node's place on the bus -> its n: it keeps its n from one tree to the next (number)
         self.lock = threading.RLock()
         self.pool = None
 
@@ -1088,8 +1091,24 @@ class Tree:
                     if len(found) >= limit:
                         break
             found = found[:limit]
-            self.refs = {i + 1: n for i, (n, _) in enumerate(found)}
-            return [(i + 1, n, box) for i, (n, box) in enumerate(found)]
+            # (Kept for as many nodes as several trees show; beyond that, those not shown now are let go, and their refs
+            # are refused, never another node's.)
+            if len(self.numbers) + len(found) > NUMBERS_KEPT:
+                shown = {(n["bus"], n["path"]) for n, _ in found}
+                self.numbers = {k: r for k, r in self.numbers.items() if k in shown}
+                self.refs = {r: self.refs[r] for r in self.numbers.values() if r in self.refs}
+            return [(self.number(n), n, box) for n, box in found]
+
+    def number(self, node):
+        """A node's ref: the one it was given before, while it is the same node on the bus; else the next not given. A
+        ref so stays the node it was said for whatever comes between (a select's options, a dialog), and one whose node
+        is gone fails as gone (at). Several actions on refs from one tree are then safe in one command."""
+        key = (node["bus"], node["path"])
+        ref = self.numbers.get(key)
+        if ref is None:
+            ref = self.numbers[key] = max(self.refs, default=0) + 1
+        self.refs[ref] = node
+        return ref
 
     def caret_text(self, pid=None, title=None, before=400):
         """What is before the caret in the field with the keyboard's focus, as its app's tree shows it, or None when the
@@ -1125,9 +1144,7 @@ class Tree:
                         if n and name in n["name"].lower():
                             box = self._on_screen(n)
                             if box:
-                                ref_n = max(self.refs, default=0) + 1
-                                self.refs[ref_n] = n
-                                return ref_n, n, box
+                                return self.number(n), n, box
         return None
 
     def at(self, ref):

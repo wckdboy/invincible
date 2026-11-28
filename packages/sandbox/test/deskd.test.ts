@@ -1369,6 +1369,33 @@ print(json.dumps({"lines": [d.say_node(r, n, b) for r, n, b in said], "refs": so
     expect(got).toMatchObject({ matches: 1, walked: 2 });
   });
 
+  test("a node keeps its ref from one tree to the next, one that appears gets the next, and a ref whose node is gone fails: never another node's", () => {
+    // (On Ultra, 28 November 2026: a select's options appeared in the second tree, before the check box, and took its
+    // ref; a click on the first tree's ref clicked an option, and said nothing was wrong.)
+    const got = py(`${BUS}
+first = {r: n["name"] for r, n, b in t.actable(pid=300, title="Form - Chromium")}
+NODES["/o1"] = (":1.5", "/n3", "menu item", "Free", ON, (100, 304, 200, 24))
+NODES["/o2"] = (":1.5", "/n3", "menu item", "Team", ON, (100, 328, 200, 24))
+second = [[r, n["name"]] for r, n, b in t.actable(pid=300, title="Form - Chromium")]
+terms = t.at(4)[0]["name"]
+found = t.find("check box", "terms", pid=300)[0]
+del NODES["/o1"], NODES["/o2"]
+gone = []
+for ref in (7, 8):
+    try:
+        t.at(ref)
+    except d.Failed as e:
+        gone.append(str(e))
+print(json.dumps({"first": first, "second": second, "terms": terms, "found": found, "gone": gone}))`) as { first: Record<string, string>; second: [number, string][]; terms: string; found: number; gone: string[] };
+    expect(got.first).toEqual({ 1: "Name", 2: "Email", 3: "Plan", 4: "I agree to the terms", 5: "Send", 6: "Not now" });
+    // In the tree's order, each kept its number; the options, new, took the next ones.
+    expect(got.second).toEqual([[1, "Name"], [2, "Email"], [3, "Plan"], [7, "Free"], [8, "Team"], [4, "I agree to the terms"], [5, "Send"], [6, "Not now"]]);
+    expect(got.terms).toBe("I agree to the terms");
+    // Found again, it is the ref it has.
+    expect(got.found).toBe(4);
+    expect(got.gone).toEqual(['ref=7 (menu item "Free") is gone: desktop tree, again', 'ref=8 (menu item "Team") is gone: desktop tree, again']);
+  });
+
   test("an app that can't search its own tree (no Collection) is walked, many calls in flight, never below what isn't showing: the same nodes", () => {
     const got = py(`${BUS}
 COLLECTION = False
