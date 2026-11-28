@@ -1109,6 +1109,9 @@ try {
       { name: "primary", hash: `#/chat?c=${conversation}`, wait: ".turn.assistant" },
       // A new chat with it: its orb, large, and what it asks you under it (where the checkout has it).
       { name: "primary-welcome", hash: "#/chat", steps: [press("Chat options"), press("New chat")], wait: ".chat-hero" },
+      // Your agent's mark in pearl glass (this device's choice, Settings): its welcome's, large, and its row among the agents.
+      { name: "primary-pearl", hash: "#/chat", prefs: { "invincible.guardian-mark": "pearl" }, steps: [press("Chat options"), press("New chat")], wait: ".chat-hero" },
+      { name: "agents-pearl", hash: "#/team", prefs: { "invincible.guardian-mark": "pearl" } },
       // Files with a message: a kept one that carried a picture and a text, and the message box with two waiting to go.
       ...(attachedChat ? [{ name: "primary-attached", hash: `#/chat?c=${attachedChat}`, wait: ".attached-picture img[src]" }] : []),
       { name: "chat-attaching", hash: "#/chat", steps: [ATTACHING], wait: ".composer-file.up ~ .composer-file.up" },
