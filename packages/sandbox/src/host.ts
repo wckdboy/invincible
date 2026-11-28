@@ -65,6 +65,7 @@ import {
   TERMINAL_HANG_UP,
   terminalArgs,
   volumeName,
+  withoutInput,
 } from "./spec.ts";
 import { COLLECT_MISSING, COLLECT_REFUSED, collectSkipped } from "./walk.ts";
 import { type ExtractLimits, type ExtractResult, extractTar } from "./tar.ts";
@@ -2202,8 +2203,10 @@ export class SandboxHost {
    * What one of this host's sandboxes prints, given as it is printed to a command in another as its input, never kept
    * here: another node's task's clone, from its agent's VM into its own, and its changes back (the fifth fabric review's
    * R5-3). At most `maxBytes` go through, past which the pipe is cut and says so. Each side runs as an exec does, with the
-   * pipe's own tag in its environment (pipeArgs: its deadline, /work), and both VMs are busy for it. What the receiving
-   * side prints comes back, capped; what either side says on stderr too, redacted.
+   * pipe's own tag in its environment (pipeArgs: its deadline, /work), and both VMs are busy for it. The receiving side
+   * starts with its input: at the sending side's first chunk, or, when that gives none, with no input at all, its stdin
+   * /dev/null in its VM (withoutInput), so that in a Kata VM it sees its input's end however late its exec starts. What
+   * the receiving side prints comes back, capped; what either side says on stderr too, redacted.
    *
    * A side is ended in two steps: its docker client here is killed, and once that client has gone, PIPE_END runs in its
    * VM. PIPE_END kills everything there with the pipe's tag in its environment, and the process group each such process
@@ -2233,7 +2236,16 @@ export class SandboxHost {
     const tag = hex(randomBytes(16));
     try {
       const source = Bun.spawn([this.bin, ...pipeArgs(from.id, from.cmd, opts.timeoutSec, tag, false)], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-      const sink = Bun.spawn([this.bin, ...pipeArgs(to.id, to.cmd, opts.timeoutSec, tag, true)], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      // The receiving side starts with its input: at the first chunk the sending side gives, as an interactive exec, or,
+      // once the sending side has ended having given none, as no interactive exec, its input /dev/null in its VM
+      // (withoutInput). A Kata VM's interactive exec whose input has ended before its command starts never sees that end,
+      // so it runs to its deadline and holds every other exec of its VM meanwhile, and its start waits behind any command
+      // its VM runs: a receiver started with the pipe and given nothing ran to its 120 s deadline behind an 8 s command
+      // there (Ultra, 28 November 2026). Given a chunk first, or no input at all, it ended with its input, however late it
+      // started. One never started, the pipe cut or ended before any input came, says it was ended (exit 137).
+      const receiving: { side: Bun.Subprocess<"pipe", "pipe", "pipe"> | null; ended: boolean } = { side: null, ended: false };
+      let startedSink: (side: Bun.Subprocess<"pipe", "pipe", "pipe"> | null) => void = () => {};
+      const sinkStarted = new Promise<Bun.Subprocess<"pipe", "pipe", "pipe"> | null>((resolve) => (startedSink = resolve));
       // Each side is ended once: PIPE_END in its VM, while its client still takes its output, and then its client killed,
       // once that has run or past its bound, whatever it did. Killed first, a client left an exec whose output nothing
       // read, and in a Kata VM that held the next exec, PIPE_END's, back for its whole bound: 45 s on Ultra (28 November
@@ -2241,24 +2253,27 @@ export class SandboxHost {
       const ends: Promise<unknown>[] = [];
       /** The sending side's end has run: what it still gives, drained since a cut or a broken pipe, is let go. */
       let fromEnded = false;
-      const ender = (id: string, client: { kill(signal: "SIGKILL"): void }, then?: () => void) => {
+      const ender = (id: string, client: () => { kill(signal: "SIGKILL"): void } | null, then?: () => void) => {
         let asked = false;
         return () => {
-          if (asked) return;
+          const side = client();
+          // (A receiving side not yet started has nothing in its VM to end, and is started no more: end() says so.)
+          if (asked || !side) return;
           asked = true;
           ends.push(
             this.docker(execArgs(id, ["sh", "-c", PIPE_END, "end", tag], 30), 45_000)
               .catch(() => null)
               .finally(() => {
-                client.kill("SIGKILL");
+                side.kill("SIGKILL");
                 then?.();
               }),
           );
         };
       };
-      const endFrom = ender(from.id, source, () => (fromEnded = true));
-      const endTo = ender(to.id, sink);
+      const endFrom = ender(from.id, () => source, () => (fromEnded = true));
+      const endTo = ender(to.id, () => receiving.side);
       const end = () => {
+        receiving.ended = true;
         endFrom();
         endTo();
       };
@@ -2270,6 +2285,24 @@ export class SandboxHost {
       let drained = false;
       /** The receiving side's client has exited: nothing reads what is carried to it now. */
       let gone = false;
+      /** The receiving side, started once: with its input, at the first chunk, or with none, once the sender gave none. */
+      const startSink = (input: boolean): Bun.Subprocess<"pipe", "pipe", "pipe"> | null => {
+        if (receiving.side || receiving.ended) return receiving.side;
+        const side = Bun.spawn([this.bin, ...pipeArgs(to.id, input ? to.cmd : withoutInput(to.cmd), opts.timeoutSec, tag, input)], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+        receiving.side = side;
+        // (Given no input, its client reads none: the stdin Bun gave it is closed at once.)
+        if (!input) void Promise.resolve(side.stdin.end()).catch(() => {});
+        // A broken pipe: the receiving side's client has exited while the sending side is still going, its output not
+        // read to its end. Nothing reads it now, so it would wait on its output until its deadline. It is ended, and only
+        // in its own VM: the receiver's client exited because its command did. A sender whose output was all read is let
+        // finish, however soon after it the receiver exits.
+        void side.exited.then(() => {
+          gone = true;
+          if (!drained && source.exitCode === null && source.signalCode === null) endFrom();
+        });
+        startedSink(side);
+        return side;
+      };
       const carried = (async () => {
         try {
           for await (const chunk of source.stdout) {
@@ -2285,34 +2318,37 @@ export class SandboxHost {
               cut = true;
               end();
               // (What came before the cut is all the receiving side gets: its input ends there.)
-              void Promise.resolve(sink.stdin.end()).catch(() => {});
+              void Promise.resolve(receiving.side?.stdin.end()).catch(() => {});
               continue;
             }
+            const into = startSink(true);
+            // (Ended before its first chunk, at the pipe's deadline: the rest is drained, as past a cut.)
+            if (!into) continue;
             // (Waited for, as its flush is: a write to a receiving side that is gone rejects with EPIPE, which is the
             // pipe's to catch, never a failure nothing waited for.)
-            await sink.stdin.write(chunk);
-            await sink.stdin.flush();
+            await into.stdin.write(chunk);
+            await into.stdin.flush();
           }
           drained = true;
         } catch {
           // (The other side gone: what it exits with says so.)
         } finally {
+          // The sending side has ended: so does the receiving side's input, or, given none, it starts with none.
+          startSink(false);
+          startedSink(receiving.side);
           try {
-            await sink.stdin.end();
+            await receiving.side?.stdin.end();
           } catch {
             // (Ended already.)
           }
         }
       })();
-      // A broken pipe: the receiving side's client has exited while the sending side is still going, its output not read
-      // to its end. Nothing reads it now, so it would wait on its output until its deadline. It is ended, and only in its
-      // own VM: the receiver's client exited because its command did. A sender whose output was all read is let finish,
-      // however soon after it the receiver exits.
-      void sink.exited.then(() => {
-        gone = true;
-        if (!drained && source.exitCode === null && source.signalCode === null) endFrom();
+      type Read = Awaited<ReturnType<typeof readCapped>>;
+      const received = sinkStarted.then(async (side): Promise<[Read, Read, number]> => {
+        if (!side) return [{ text: "", truncated: false }, { text: "", truncated: false }, 137];
+        return Promise.all([readCapped(side.stdout, MAX_OUTPUT), readCapped(side.stderr, MAX_OUTPUT), side.exited]);
       });
-      const [fromErr, toOut, toErr, fromCode, toCode] = await Promise.all([readCapped(source.stderr, MAX_OUTPUT), readCapped(sink.stdout, MAX_OUTPUT), readCapped(sink.stderr, MAX_OUTPUT), source.exited, sink.exited, carried]);
+      const [fromErr, fromCode, [toOut, toErr, toCode]] = await Promise.all([readCapped(source.stderr, MAX_OUTPUT), source.exited, received, carried]);
       clearTimeout(timer);
       const durationMs = Math.round(performance.now() - started);
       // (What was ended here is ended in its VM before the pipe says how it went.)

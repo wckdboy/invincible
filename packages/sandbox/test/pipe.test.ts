@@ -38,6 +38,8 @@ while :; do
 done
 shift
 [ "$1" = timeout ] && shift 3
+# (Given no input, as withoutInput runs a receiving side: its stdin /dev/null, as in its VM.)
+if [ "$1" = sh ] && [ "$2" = -c ] && [ "$3" = 'exec "$@" </dev/null' ] && [ "$4" = sh ]; then shift 4; exec </dev/null; fi
 [ "$1" = bash ] && [ "$2" = -lc ] && exec bash -c "$3"
 exec "$@"
 `,
@@ -84,6 +86,31 @@ describe("a pipe between two of a host's sandboxes", () => {
     expect([piped.from.exitCode, piped.from.stderr.trim()]).toEqual([3, "could not read it"]);
     expect([piped.to.exitCode, piped.to.stdout]).toEqual([0, "part and its end\n"]);
     expect([piped.bytes, piped.cut]).toEqual([4, false]);
+  });
+
+  test("a sending side that gives nothing: the receiving side starts only then, with no input at all, its stdin /dev/null in its VM, as no interactive exec", async () => {
+    // (In a Kata VM an interactive exec whose input ended before its command started never saw that end: the Kata audit,
+    // 28 November 2026. Given no input at all, its stdin is /dev/null there, and it ends at once.)
+    const mark = randomBytes(6).toString("hex");
+    const piped = await host().pipe(side("a", `: ${mark}; exit 0`), side("b", `: ${mark}; wc -c | tr -d ' '`), { timeoutSec: 30, maxBytes: 64 << 20 });
+    expect([piped.bytes, piped.cut, piped.from.exitCode, piped.to.exitCode, piped.to.stdout.trim()]).toEqual([0, false, 0, 0, "0"]);
+    const sides = sidesOf(mark);
+    expect(sides.b!.includes("--interactive")).toBe(false);
+    expect(sides.b!.slice(sides.b!.indexOf("timeout"))).toEqual(["timeout", "--signal=KILL", "30s", "sh", "-c", 'exec "$@" </dev/null', "sh", "bash", "-lc", `: ${mark}; wc -c | tr -d ' '`]);
+    // (One given its input is an interactive exec, its command as it is: the first test's.)
+    const given = randomBytes(6).toString("hex");
+    await host().pipe(side("a", `: ${given}; printf x`), side("b", `: ${given}; cat`), { timeoutSec: 30, maxBytes: 64 << 20 });
+    const b = sidesOf(given).b!;
+    expect(b.includes("--interactive")).toBe(true);
+    expect(b.slice(b.indexOf("timeout"))).toEqual(["timeout", "--signal=KILL", "30s", "bash", "-lc", `: ${given}; cat`]);
+  });
+
+  test("cut at its first chunk: the receiving side, given nothing yet, is never started, says it was ended, and no end is asked in its VM", async () => {
+    const mark = randomBytes(6).toString("hex");
+    const piped = await host().pipe(side("a", `: ${mark}; printf xy`), side("b", `: ${mark}; cat`), { timeoutSec: 30, maxBytes: 1 });
+    expect([piped.cut, piped.bytes, piped.to.exitCode, piped.to.stdout]).toEqual([true, 2, 137, ""]);
+    const seen = asked(mark);
+    expect([seen.sides, seen.ends]).toEqual([["a"], ["a"]]);
   });
 
   test("is refused before anything runs: on a Mac, for a VM not on this node, or for one that isn't running", async () => {
@@ -150,6 +177,15 @@ function asked(mark: string) {
   const ends = all.filter((argv) => argv.includes(PIPE_END) && tags.includes(argv.at(-1)));
   return { sides: sides.map(vmOf).sort(), tags, ends: ends.map(vmOf).sort(), endsRanWith: ends.map(tagOf), endArgs: ends.map((argv) => argv.slice(argv.indexOf(PIPE_END) - 2)) };
 }
+
+/** Each side's arguments for one pipe as the stand-in was asked them, by the VM each ran in (found by a mark in its command). */
+const sidesOf = (mark: string): Record<string, string[]> =>
+  Object.fromEntries(
+    readdirSync(calls)
+      .map((name) => readFileSync(join(calls, name), "utf8").split("\0").slice(0, -1))
+      .filter((argv) => !argv.includes(PIPE_END) && argv.some((arg) => arg.includes(mark)))
+      .map((argv) => [vmOf(argv) ?? "", argv]),
+  );
 
 /** What a test started here, killed by its pids where it is still there (a Mac has no /proc for the end to find it by). */
 function tidy(pids: number[]): void {

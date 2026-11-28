@@ -346,11 +346,20 @@ export const execArgs = (id: string, cmd: string[], timeoutSec: number): string[
  * tag in its environment. What the side starts inherits the tag unless it is given an environment of its own (as the
  * node's git is), and stays in the process group its `timeout` leads unless it makes one of its own. The tag and that
  * group are how what the side started is found again in its VM and ended there when the pipe ends it (PIPE_END; the
- * seventh fabric review's I-c). Only the receiving side is given its input (`input`): a Kata VM runs no other exec while
- * an interactive one runs (on Ultra, 28 November 2026, a second exec waited out the first; with neither interactive it ran
- * in 42 ms), so the sending side, which reads none, is no interactive exec, and its end can run beside it.
+ * seventh fabric review's I-c). Only the receiving side is given its input (`input`): a Kata VM starts no other exec
+ * while an interactive one whose input has ended still runs, and one given no input has its input end at once (on Ultra,
+ * 28 November 2026, a second exec waited out the first; with neither interactive it ran in 42 ms; the Kata audit found
+ * why). So the sending side, which reads none, is no interactive exec, and its end can run beside it.
  */
 export const pipeArgs = (id: string, cmd: string[], timeoutSec: number, tag: string, input: boolean): string[] => ["exec", "--env", `INVINCIBLE_PIPE=${tag}`, ...(input ? ["--interactive"] : []), "--workdir", "/work", containerName(id), "timeout", "--signal=KILL", `${timeoutSec}s`, ...cmd];
+
+/**
+ * A command given no input at all: its stdin /dev/null in its VM, as a pipe's receiving side runs when the sending side
+ * gave nothing (SandboxHost.pipe). A command that reads stdin in a Kata VM never sees its end otherwise, with or without
+ * --interactive (the Kata audit, 28 November 2026). `sh` execs into the command, so its `timeout`'s group and the pipe's
+ * tag are as they were.
+ */
+export const withoutInput = (cmd: string[]): string[] => ["sh", "-c", 'exec "$@" </dev/null', "sh", ...cmd];
 
 /**
  * A pipe's end, run in one of its VMs with the pipe's tag (`sh -c PIPE_END end <tag>`) once a side's docker client has

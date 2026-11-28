@@ -181,10 +181,14 @@ transport keys carries all of it:
        changes' read) runs one at a time, in order (R7-3). Both ways go through the node, one side's output the
        other's input, never kept on the host (`SandboxHost.pipe`); a pipe cut at its cap or past its deadline ends both
        sides' commands in their VMs, not only the node's two clients, and one whose receiving side is gone ends its
-       sender's (I-c). A Kata microVM runs no other exec while an interactive one runs, and the receiving side is one
-       (its input): one that runs on past its input's end there is ended only by its own deadline. The node's own
-       receivers end with their input, which a cut ends at once. A task with no repository keeps its files in its own
-       VM, and they go with it.
+       sender's (I-c). In a Kata microVM, once an interactive exec's input has ended, no other exec of its VM starts
+       until that exec's output ends, and one whose input ended before its command started never sees that end, so it
+       runs to its deadline (the Kata audit, 28 November 2026). So a pipe's receiving side starts with its input: at
+       the sending side's first chunk, or, if that gives none, with no input at all, its stdin `/dev/null` in its VM;
+       started with the pipe and given nothing, one ran to its 120 s deadline behind an 8 s command of its VM's. A
+       receiving side that runs on past its input's end, its output open, is ended there only by its own deadline; the
+       node's own receivers end with their input, which a cut ends at once. A task with no repository keeps its files in
+       its own VM, and they go with it.
      - **What its review passes is what is shipped** (the seventh re-review's I-b). Its review's evidence is read on its
        agent's side, on the tree its last bring-back made there, never in its VM, whose processes are the task's own.
        When the review passes, that tree is what is kept and shipped as verified, and nothing its VM had after it; the
@@ -484,6 +488,8 @@ answered and a Q-AMP release with the sidecar is pinned.
   image's git is 2.47.3, past CVE-2023-23946's fix to `git apply`'s checks of links
   (`handed-docker.integration.test.ts`, 27 November 2026). A pipe cut at its cap left nothing of either side running
   in either VM, the children a side started without the pipe's tag among them, in 0.7 s in containers and 4.2 s in
-  Kata, with the sides' own deadline past the test's (I-c, 28 November 2026). No node has taken a handed task through
+  Kata, with the sides' own deadline past the test's (I-c, 28 November 2026). A task that changed nothing came back
+  at once, empty, and applied as its base, also while its agent's VM ran an 8 s command of its own: in Kata it had
+  run to its 120 s deadline before its receiving side started with its input. No node has taken a handed task through
   it yet.
 - **Relays and NAT traversal** (Q-AMP's `feat/relays`) aren't used: nodes reach each other on the tailnet, directly.

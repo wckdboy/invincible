@@ -129,6 +129,49 @@ for (const runtime of ["runc", "kata"] as const) {
       }
     }, 300_000);
 
+    test("a task that changed nothing sends nothing, and its bring-back comes back at once: empty, kept, and applied as the base it was", async () => {
+      // (A Kata VM's exec whose input ends before any of it comes never sees its end: the Kata audit of 28 November 2026,
+      // where `: | docker exec -i … cat` ran to its deadline and held the VM meanwhile. A review's evidence waits on this
+      // bring-back, I-b.)
+      try {
+        const [agent, task] = [vm(runtime), vm(runtime)];
+        const pipes = host([agent, task]);
+        const id = "task-q5unchanged";
+        const root = `/work/tasks/${id}`;
+        const setUp = inside(agent, `set -e; export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t.invalid
+          git init -q /work/repo; cd /work/repo; printf 'one\\n' > app.txt; git add -A; git commit -q -m first
+          git worktree add -q --detach ${root} HEAD; git -C ${root} rev-parse HEAD HEAD^{tree}`);
+        expect(setUp.status).toBe(0);
+        const [base, baseTree] = setUp.stdout.trim().split("\n").slice(-2);
+        const given = await pipes.pipe(side(agent, handedGive(root, id)), side(task, handedTake(root, base!, "Ada", "ada@agents.invalid")), { timeoutSec: 120, maxBytes: Number.POSITIVE_INFINITY });
+        expect([given.cut, given.from.exitCode, given.to.exitCode]).toEqual([false, 0, 0]);
+        const nonce = handedNonce();
+        const began = Date.now();
+        const back = await pipes.pipe(side(task, handedSend(root, base!)), side(agent, handedReceive(id, nonce, HANDED_CHANGES_BYTES)), { timeoutSec: 120, maxBytes: HANDED_CHANGES_BYTES });
+        const took = Date.now() - began;
+        expect([back.cut, back.bytes, back.from.exitCode, back.to.exitCode, back.to.stdout.trim()]).toEqual([false, 0, 0, 0, "0"]);
+        // (At once: well within its deadline, never by it.)
+        expect(took).toBeLessThan(30_000);
+        const applied = inside(agent, handedApply(root, base!, id, nonce, 0, HANDED_CHANGES_BYTES));
+        expect([applied.status, applied.stdout.trim(), applied.stderr.trim()]).toEqual([0, `0 ${baseTree}`, ""]);
+        // And while the agent's VM runs a command of its own, as the node runs one (its input /dev/null, interactive): in
+        // a Kata VM that holds every other exec there until it ends, so the receiving side starts only then, after the
+        // task's side has sent its nothing and its input has ended.
+        const busy = Bun.spawn(["docker", "exec", "--interactive", "--workdir", "/work", agent, "sleep", "8"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+        await Bun.sleep(1_500);
+        const again = handedNonce();
+        const busyBegan = Date.now();
+        const behind = await pipes.pipe(side(task, handedSend(root, base!)), side(agent, handedReceive(id, again, HANDED_CHANGES_BYTES)), { timeoutSec: 120, maxBytes: HANDED_CHANGES_BYTES });
+        const behindTook = Date.now() - busyBegan;
+        await busy.exited;
+        expect([behind.cut, behind.bytes, behind.from.exitCode, behind.to.exitCode, behind.to.stdout.trim()]).toEqual([false, 0, 0, 0, "0"]);
+        // (At most the rest of that command, and never the pipe's deadline.)
+        expect(behindTook).toBeLessThan(30_000);
+      } finally {
+        drop();
+      }
+    }, 300_000);
+
     test("a pipe past its cap is cut and its other side ended; a side past its deadline is ended", async () => {
       try {
         const [from, to] = [vm(runtime), vm(runtime)];
