@@ -66,6 +66,8 @@ fun Root(app: AppModel) {
     val stack = rememberSaveable { mutableStateOf(listOf(Nav.ROOT)) }
     val nav = remember { Nav(stack) }
     var giving by remember { mutableStateOf(false) }
+    // On a tablet Settings opens as a sheet over the list and the chat (I10's structure, §4); its page, "" its list.
+    var settingsSheet by rememberSaveable { mutableStateOf<String?>(null) }
     val focus = LocalFocusManager.current
     // A tablet, or a foldable open (the window's width, as Android's own size classes read it).
     val width: Dp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() }
@@ -107,7 +109,7 @@ fun Root(app: AppModel) {
                     },
                 )
             }
-            o.address == "settings" -> nav.open("settings")
+            o.address == "settings" -> if (wide) settingsSheet = "" else nav.open("settings")
             else -> nav.open(Nav.ROOT)
         }
         app.opening.value = null
@@ -150,7 +152,7 @@ fun Root(app: AppModel) {
                 HomeList(
                     app,
                     open = { address -> nav.open(if (address == "chat") Nav.ROOT else address) },
-                    settings = { nav.open("settings") },
+                    settings = { settingsSheet = "" },
                     current = if (nav.top == Nav.ROOT) "chat" else nav.top,
                     modifier = Modifier.width(Space.sidebar).fillMaxHeight(),
                 )
@@ -183,6 +185,7 @@ fun Root(app: AppModel) {
     } }
     content()
     if (giving) GiveDialog(app) { giving = false }
+    settingsSheet?.let { start -> SettingsSheet(app, start) { settingsSheet = null } }
 }
 
 private val DIGITS = listOf(Key.One, Key.Two, Key.Three, Key.Four, Key.Five, Key.Six, Key.Seven, Key.Eight, Key.Nine)

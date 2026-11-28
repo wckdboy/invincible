@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -92,6 +93,28 @@ fun SettingsScreen(app: AppModel, page: String?, open: (String) -> Unit, openKey
         "device" -> ThisDevicePage(app, back)
         "about" -> AboutPage(visit, back)
         else -> SettingsList(app, open, openKeys, openConnectors, visit, back)
+    }
+}
+
+/**
+ * Settings on a tablet (I10's structure, §4: "Settings opens as a sheet"): over the list and the chat, its list and each
+ * of its pages one tap deep in it, Keys and Connectors too. Back steps back to its list, then closes it; a swipe down or
+ * a tap outside closes it whole. [start]: the page it opens on ("" its list).
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsSheet(app: AppModel, start: String, close: () -> Unit) {
+    var at by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(start) }
+    val back = { if (at.isEmpty()) close() else at = "" }
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = close, sheetState = rememberFullSheet(), containerColor = MaterialTheme.colorScheme.surface) {
+        androidx.activity.compose.BackHandler(enabled = at.isNotEmpty()) { at = "" }
+        Box(Modifier.fillMaxWidth().fillMaxHeight(0.92f)) {
+            when (at) {
+                "keys" -> KeysScreen(app, back)
+                "connectors" -> ConnectorsScreen(app, back)
+                else -> SettingsScreen(app, page = at.ifEmpty { null }, open = { at = it }, openKeys = { at = "keys" }, openConnectors = { at = "connectors" }, back = back)
+            }
+        }
     }
 }
 
