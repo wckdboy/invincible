@@ -142,6 +142,9 @@ data class RosterRow(
     val expression: String? = null,
     val state: AgentState? = null,
     val avatar: Json? = null,
+    /** The same in plain words, as a phone's list says it (lib/roster.ts RosterRow.plain, I10's phone-gaps): what it is
+     * doing, never a status label; what waits on you as it would ask it. The row's dot says it needs you. */
+    val plain: String = line,
 )
 
 object Roster {
@@ -176,6 +179,13 @@ object Roster {
         return if (job.task) withWhy("Failed: ${titled(job)}", job.error) else withWhy(if (who != null) "$who couldn't reply" else "Couldn't reply", job.error)
     }
 
+    /** The same in plain words (RosterRow.plain): how it ended, as it is said, never as a label (lib/roster.ts troublePlain). */
+    private fun troublePlain(job: Job?, who: String?): String? {
+        if (job == null || (job.status != "failed" && job.status != "interrupted")) return null
+        if (job.status == "interrupted") return "Stopped partway through ${if (job.task) titled(job) else "${if (who != null) "$who's" else "a"} reply"}"
+        return if (job.task) "Couldn't finish ${titled(job)}" else if (who != null) "$who couldn't reply" else "Couldn't reply"
+    }
+
     private fun named(s: Snapshot, id: String): String = if (id == "primary") "Your agent" else s.agents.firstOrNull { it.id == id }?.name ?: id
     private fun proposals(jobs: List<Job>) = jobs.filter { it.task && it.status == "proposed" }.sortedByDescending { it.updatedAt }
     private fun proposing(proposed: List<Job>, by: (String) -> String?): String {
@@ -183,6 +193,22 @@ object Roster {
         val who = latest.proposedBy?.let(by)
         return "${if (who != null) "$who proposes" else "Proposes"} ${titled(latest)}${if (proposed.size > 1) ", and ${proposed.size - 1} more" else ""}"
     }
+    /** The same as it would ask it (RosterRow.plain; lib/roster.ts proposingPlain): its own, a question; another's, who suggests it. */
+    private fun proposingPlain(proposed: List<Job>, by: (String) -> String?): String {
+        val latest = proposed.first()
+        val who = latest.proposedBy?.let(by)
+        return if (who != null) "$who suggests ${titled(latest)}" else "Shall I start ${titled(latest)}?"
+    }
+
+    /** The same in plain words (RosterRow.plain; lib/roster.ts endedPlain): finished, couldn't, stopped, never a verdict's label. */
+    private fun endedPlain(task: Job): String = when (task.status) {
+        "done" -> "Finished ${titled(task)}"
+        "failed" -> "Couldn't finish ${titled(task)}"
+        "interrupted" -> "Stopped partway through ${titled(task)}"
+        "stopped" -> "Stopped ${titled(task)}"
+        else -> ended(task)
+    }
+
     /** How a task ended: its verdict as its proof allows (Steps.verdict, from its record), as its card and its thread say
      * it, never "Verified" where its gates proved nothing (lib/roster.ts ended). */
     private fun ended(task: Job): String {
@@ -236,26 +262,27 @@ object Roster {
         val rest = if (s.seen != null) {
             if (fresh != null) (if (fresh.task && fresh.verified) AgentState.VERIFIED else AgentState.UNREAD) else AgentState.RESTING
         } else if (expression == "pleased") AgentState.VERIFIED else AgentState.RESTING
-        fun say(line: String, needs: Boolean = false, state: AgentState = rest) =
-            RosterRow("agent", person.id, person.name, room?.id, line, needs, fresh != null, expression, state, person.avatar)
+        fun say(line: String, needs: Boolean = false, state: AgentState = rest, plain: String = line) =
+            RosterRow("agent", person.id, person.name, room?.id, line, needs, fresh != null, expression, state, person.avatar, plain)
 
-        asked.firstOrNull()?.let { return say("Asks for approval: ${it.connector}.${it.tool}${if (asked.size > 1) ", and ${asked.size - 1} more" else ""}", true, AgentState.NEEDS) }
-        if (proposed.isNotEmpty()) return say(proposing(proposed) { if (it == person.id) null else named(s, it) }, true, AgentState.NEEDS)
+        asked.firstOrNull()?.let { return say("Asks for approval: ${it.connector}.${it.tool}${if (asked.size > 1) ", and ${asked.size - 1} more" else ""}", true, AgentState.NEEDS, "Asks to use ${it.connector}.${it.tool}") }
+        val proposer = { id: String -> if (id == person.id) null else named(s, id) }
+        if (proposed.isNotEmpty()) return say(proposing(proposed, proposer), true, AgentState.NEEDS, proposingPlain(proposed, proposer))
         jobs.firstOrNull { it.status == "running" && it.task }?.let {
-            return say(if (firstLine(it.progress).isNotEmpty()) "${it.title} · ${firstLine(it.progress)}" else "Working on ${titled(it)}", false, AgentState.WORKING)
+            return say(if (firstLine(it.progress).isNotEmpty()) "${it.title} · ${firstLine(it.progress)}" else "Working on ${titled(it)}", false, AgentState.WORKING, "Working on ${titled(it)}")
         }
         if (jobs.any { it.status == "running" }) return say("Writing a reply", false, AgentState.WORKING)
         val latest = latestOf(jobs)
-        trouble(latest, null)?.let { return say(it, true, if (latest!!.status == "interrupted") AgentState.NEEDS else AgentState.FAILED) }
+        trouble(latest, null)?.let { return say(it, true, if (latest!!.status == "interrupted") AgentState.NEEDS else AgentState.FAILED, troublePlain(latest, null)!!) }
         val waiting = waitingIn(jobs)
         val held = if (!person.enabled) "Paused" else if (person.turnsToday >= person.dailyTurns) "Daily allowance spent" else null
-        if (held != null) return say(if (waiting > 0) "$held · $waiting waiting" else held, waiting > 0, if (!person.enabled) AgentState.PAUSED else if (waiting > 0) AgentState.NEEDS else AgentState.RESTING)
+        if (held != null) return say(if (waiting > 0) "$held · $waiting waiting" else held, waiting > 0, if (!person.enabled) AgentState.PAUSED else if (waiting > 0) AgentState.NEEDS else AgentState.RESTING, if (!person.enabled) "Paused" else "Done for today")
         jobs.firstOrNull { it.status == "queued" && it.task }?.let { queued ->
             val blocking = queued.dependsOn.map { id -> s.tasks.firstOrNull { it.id == id }.let { parent -> (parent?.title ?: id) to (parent?.status == "done" && parent.verified) } }.firstOrNull { !it.second }
-            return say(if (blocking != null) "Waiting for “${blocking.first}”" else "Queued: ${titled(queued)}", false, AgentState.QUEUED)
+            return say(if (blocking != null) "Waiting for “${blocking.first}”" else "Queued: ${titled(queued)}", false, AgentState.QUEUED, if (blocking != null) "Waiting for “${blocking.first}”" else "Starts ${titled(queued)} next")
         }
-        if (waiting > 0) return say("Reply queued", false, AgentState.QUEUED)
-        latestOf(jobs.filter { it.task })?.let { return say(ended(it)) }
+        if (waiting > 0) return say("Reply queued", false, AgentState.QUEUED, "Replies when free")
+        latestOf(jobs.filter { it.task })?.let { return say(ended(it), plain = endedPlain(it)) }
         val job = firstLine(person.instructions).ifEmpty { person.role }
         return say(maker(person, s)?.let { "Made by $it · $job" } ?: job)
     }
@@ -263,17 +290,19 @@ object Roster {
     private fun roomRow(room: Room, s: Snapshot): RosterRow {
         val jobs = roomJobs(s, room.id)
         val fresh = endedSince(jobs, s.seen?.get("room:${room.id}"), s.seen != null)
-        fun say(line: String, needs: Boolean = false) = RosterRow("room", room.id, room.name, room.id, line, needs, fresh != null)
+        fun say(line: String, needs: Boolean = false, plain: String = line) = RosterRow("room", room.id, room.name, room.id, line, needs, fresh != null, plain = plain)
         val proposed = proposals(jobs)
-        if (proposed.isNotEmpty()) return say(proposing(proposed) { named(s, it) }, true)
+        val nameOf = { id: String -> named(s, id) }
+        if (proposed.isNotEmpty()) return say(proposing(proposed, nameOf), true, proposingPlain(proposed, nameOf))
         val working = jobs.filter { it.status == "running" && it.task }
-        if (working.isNotEmpty()) return say("${if (working.size > 1) "${working.size} at work" else named(s, working[0].who)} · ${working[0].title}")
+        if (working.isNotEmpty()) return say("${if (working.size > 1) "${working.size} at work" else named(s, working[0].who)} · ${working[0].title}", false, "${if (working.size > 1) "${working.size} are" else "${named(s, working[0].who)} is"} working on ${titled(working[0])}")
         val writing = jobs.filter { it.status == "running" && !it.task }
         if (writing.isNotEmpty()) return say("${writing.joinToString(", ") { named(s, it.who) }} ${if (writing.size > 1) "are" else "is"} writing")
         val latest = latestOf(jobs)
-        trouble(latest, latest?.takeIf { !it.task }?.let { named(s, it.who) })?.let { return say(it, true) }
+        val who = latest?.takeIf { !it.task }?.let { named(s, it.who) }
+        trouble(latest, who)?.let { return say(it, true, troublePlain(latest, who)!!) }
         val waiting = waitingIn(jobs)
-        if (room.paused) return say(if (waiting > 0) "Paused · $waiting waiting" else "Paused", waiting > 0)
+        if (room.paused) return say(if (waiting > 0) "Paused · $waiting waiting" else "Paused", waiting > 0, "Paused")
         return say(room.members.joinToString(", ") { named(s, it) })
     }
 

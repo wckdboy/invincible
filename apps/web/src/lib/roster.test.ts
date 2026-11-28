@@ -304,3 +304,47 @@ describe("your agent's line in the list that is home", () => {
     expect(homePrimaryLine(idle, null, null)).not.toContain("need");
   });
 });
+
+describe("a row's plain line, as a phone's list says it (phone-gaps: what was last said, or what it is doing, no status labels)", () => {
+  const forge = (input: Partial<RosterInput["snapshot"]>, more: Partial<Omit<RosterInput, "snapshot">> = {}) =>
+    rows({ agents: [person("ada"), person("lin")], rooms: [room("forge", ["ada", "lin"], { name: "Forge", ...(input.rooms?.[0] ?? {}) })], tasks: input.tasks ?? [], deliveries: input.deliveries ?? [] }, more).find((row) => row.id === "forge")!;
+
+  test("what it is doing, in plain words: never a step's raw line", () => {
+    expect(ada({}).plain).toBe("Does ada's job.");
+    expect(ada({ tasks: [task("ada", "running", { progress: "Running · bun test packages/link" })] }).plain).toBe("Working on “Fix the importer”");
+    expect(ada({ deliveries: [delivery("ada", "running")] }).plain).toBe("Writing a reply");
+    expect(ada({ tasks: [task("ada", "queued")] }).plain).toBe("Starts “Fix the importer” next");
+    expect(ada({ deliveries: [delivery("ada", "queued")] }).plain).toBe("Replies when free");
+    expect(ada({ agents: [person("ada", { enabled: false })] }).plain).toBe("Paused");
+    expect(ada({ agents: [person("ada", { turnsToday: 40 })], tasks: [task("ada", "queued")] }).plain).toBe("Done for today");
+  });
+
+  test("how its work ended, said as it is, never as a label", () => {
+    expect(ada({ tasks: [task("ada", "failed", { error: "gave-up" })] })).toMatchObject({ plain: "Couldn't finish “Fix the importer”", needs: true });
+    expect(ada({ tasks: [task("ada", "interrupted")] }).plain).toBe("Stopped partway through “Fix the importer”");
+    expect(ada({ deliveries: [delivery("ada", "failed", { error: "no model answers as engineer" })] }).plain).toBe("Couldn't reply");
+    expect(ada({ tasks: [task("ada", "done")] }).plain).toBe("Finished “Fix the importer”");
+    expect(ada({ tasks: [task("ada", "stopped")] }).plain).toBe("Stopped “Fix the importer”");
+  });
+
+  test("what waits on you, as it would ask it: the dot marks it, never a count", () => {
+    expect(ada({ tasks: [task("ada", "proposed", { proposedBy: "ada", title: "Draft the notes" })] }).plain).toBe("Shall I start “Draft the notes”?");
+    expect(ada({ tasks: [task("ada", "proposed", { proposedBy: "primary", title: "Draft the notes" }), task("ada", "proposed", { id: "task-adaproposed2", proposedBy: "ada", title: "Older", updatedAt: 5 })] }).plain).toBe("Your agent suggests “Draft the notes”");
+    expect(ada({}, { asks: [{ by: "arm:team.0123456789.ada", connector: "github", tool: "merge" }, { by: "arm:team.0123456789.ada", connector: "forge", tool: "post" }] }).plain).toBe("Asks to use github.merge");
+  });
+
+  test("what was last said: its own words as they are, yours after You", () => {
+    expect(ada({}, { said: new Map([["dm-ada", { speaker: "ada", speakerName: "Ada", text: "The gate passes.\nDetails follow.", createdAt: 50 }]]) }).plain).toBe("The gate passes.");
+    expect(ada({}, { said: new Map([["dm-ada", { speaker: "owner", speakerName: "You", text: "Start with the parser", createdAt: 50 }]]) }).plain).toBe("You: Start with the parser");
+  });
+
+  test("a room's: who is doing what, and who said what there", () => {
+    expect(forge({}).plain).toBe("Ada, Lin");
+    expect(forge({ tasks: [task("ada", "running", { room: "forge" })] }).plain).toBe("Ada is working on “Fix the importer”");
+    expect(forge({ tasks: [task("ada", "running", { room: "forge" }), task("lin", "running", { room: "forge" })] }).plain).toBe("2 are working on “Fix the importer”");
+    expect(forge({ deliveries: [delivery("lin", "running", { room: "forge" })] }).plain).toBe("Lin is writing");
+    expect(forge({ tasks: [task("ada", "failed", { room: "forge" })] }).plain).toBe("Couldn't finish “Fix the importer”");
+    expect(forge({ tasks: [task("ada", "proposed", { room: "forge", proposedBy: "lin", title: "Check it" })] }).plain).toBe("Lin suggests “Check it”");
+    expect(forge({}, { said: new Map([["forge", { speaker: "lin", speakerName: "Lin", text: "I take the app.", createdAt: 50 }]]) }).plain).toBe("Lin: I take the app.");
+  });
+});

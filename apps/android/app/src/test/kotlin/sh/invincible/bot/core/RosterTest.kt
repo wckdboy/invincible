@@ -23,6 +23,7 @@ class RosterTest {
         assertEquals(want.map { it["id"].string }, rows.map { it.id })
         for ((w, got) in want.zip(rows)) {
             assertEquals(w["id"].string, w["line"].string, got.line)
+            assertEquals(w["id"].string, w["plain"].string, got.plain)
             assertEquals(w["id"].string, w["needs"].bool, got.needs)
             w["expression"].string?.let { assertEquals(w["id"].string, it, got.expression) }
             w["state"].string?.let { assertEquals(w["id"].string, it, got.state?.wire) }
@@ -88,9 +89,18 @@ class RosterTest {
         val rows = Roster.rows(Snapshot.of(u["snapshot"]!!), emptyList(), v["agents"]["now"].long!!)
         for (w in u["rows"].list) {
             val got = rows.first { it.id == w["id"].string }
-            assertEquals(w["id"].string, listOf(w["kind"].string, w["line"].string, w["needs"].bool, w["unread"].bool, w["state"].string),
-                listOf(got.kind, got.line, got.needs, got.unread, got.state?.wire))
+            assertEquals(w["id"].string, listOf(w["kind"].string, w["line"].string, w["plain"].string, w["needs"].bool, w["unread"].bool, w["state"].string),
+                listOf(got.kind, got.line, got.plain, got.needs, got.unread, got.state?.wire))
         }
+    }
+
+    @Test fun eachRoomsRowSaysWhatThePwasSaysInBothItsLines() {
+        val r = v["rooms"]
+        val rows = Roster.rows(Snapshot.of(r["snapshot"]!!), emptyList(), v["agents"]["now"].long!!).filter { it.kind == "room" }
+        val want = r["rows"].list
+        assertTrue(want.size >= 4)
+        assertEquals(want.map { it["id"].string }, rows.map { it.id })
+        for ((w, got) in want.zip(rows)) assertEquals(w["id"].string, listOf(w["line"].string, w["plain"].string, w["needs"].bool), listOf(got.line, got.plain, got.needs))
     }
 
     @Test fun primaryOwnLine() {

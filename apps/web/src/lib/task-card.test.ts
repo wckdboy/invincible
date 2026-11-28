@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TeamTask } from "@invincible/core/team";
-import { gatesLine, givenLine, handedFrom, keptChanges, latestLine, proposedLine, sensitiveLine, steppedLine, taskActions, taskAnswers, taskBadge, taskEnd, taskStanding } from "./task-card.ts";
+import { gatesLine, givenLine, handedFrom, keptChanges, latestLine, proposedLine, sensitiveLine, steppedLine, taskActions, taskAnswers, taskBadge, taskEnd, taskStanding, taskWord } from "./task-card.ts";
 
 const task = (status: TeamTask["status"], more: Partial<TeamTask> = {}): TeamTask => ({ id: "task-abcdefghijkl", room: "dm-ada", assignee: "ada", title: "Fix the importer", goal: "Fix it", dependsOn: [], gates: ["bun test"], status, verified: status === "done", progress: "", output: "", error: null, chainId: "c", createdAt: 1, updatedAt: 2, ...more });
 /** A task's output as the runner writes it: the agent's summary, then the review and where it worked. */
@@ -177,5 +177,14 @@ describe("a task another node handed over (the fabric)", () => {
     expect(givenLine(task("queued", { givenBy: "node:n_beta" }))).toBe("Handed over by another node of yours");
     expect(proposedLine(task("proposed", { givenBy: "node:n_beta", proposedBy: "node:n_beta" }), "beta")).toBe("beta handed this over beyond your grant: it starts when you approve it");
     expect(proposedLine(task("running", { givenBy: "node:n_beta", proposedBy: "node:n_beta" }), null)).toBe("Handed over by another node of yours, beyond your grant");
+  });
+});
+
+describe("a task's one grey word, as a chat's compact row says it (phone-gaps)", () => {
+  test("where it stands, in one word, whatever its verdict: the rest is a tap away", () => {
+    const words = (["running", "proposed", "queued", "done", "failed", "stopped", "interrupted"] as const).map((status) => taskWord(task(status)));
+    expect(words).toEqual(["working", "waiting", "waiting", "done", "failed", "stopped", "stopped"]);
+    // (Done is done, verified or not: its proof is in its thread.)
+    expect(taskWord(task("done", { verified: false }))).toBe("done");
   });
 });

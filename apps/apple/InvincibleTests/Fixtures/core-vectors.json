@@ -4009,6 +4009,7 @@
       {
         "id": "ada",
         "line": "The run task · Running · bun test packages/link",
+        "plain": "Working on “The run task”",
         "needs": false,
         "expression": "working",
         "state": "working"
@@ -4016,6 +4017,7 @@
       {
         "id": "bea",
         "line": "Working on “The plain task”",
+        "plain": "Working on “The plain task”",
         "needs": false,
         "expression": "working",
         "state": "working"
@@ -4023,6 +4025,7 @@
       {
         "id": "cy",
         "line": "Reviewed: “The keep task” · 3 files kept",
+        "plain": "Finished “The keep task”",
         "needs": false,
         "expression": "idle",
         "state": "resting"
@@ -4030,6 +4033,7 @@
       {
         "id": "dot",
         "line": "Paused",
+        "plain": "Paused",
         "needs": false,
         "expression": "resting",
         "state": "paused"
@@ -4037,6 +4041,7 @@
       {
         "id": "eve",
         "line": "Daily allowance spent · 1 waiting",
+        "plain": "Done for today",
         "needs": true,
         "expression": "waiting",
         "state": "needs"
@@ -4044,6 +4049,7 @@
       {
         "id": "fay",
         "line": "Failed: “The fail task” · The gate needs a Postgres this VM doesn't have.",
+        "plain": "Couldn't finish “The fail task”",
         "needs": true,
         "expression": "idle",
         "state": "failed"
@@ -4051,6 +4057,7 @@
       {
         "id": "gus",
         "line": "Waiting for “The blocker task”",
+        "plain": "Waiting for “The blocker task”",
         "needs": false,
         "expression": "waiting",
         "state": "queued"
@@ -4058,6 +4065,7 @@
       {
         "id": "hal",
         "line": "Made by your agent · Hal keeps the build green.",
+        "plain": "Made by your agent · Hal keeps the build green.",
         "needs": false,
         "expression": "idle",
         "state": "resting"
@@ -4065,6 +4073,7 @@
       {
         "id": "ivy",
         "line": "Made by Hal · Ivy keeps the build green.",
+        "plain": "Made by Hal · Ivy keeps the build green.",
         "needs": false,
         "expression": "idle",
         "state": "resting"
@@ -4072,6 +4081,7 @@
       {
         "id": "jo",
         "line": "Couldn't reply · Model unavailable",
+        "plain": "Couldn't reply",
         "needs": true,
         "expression": "idle",
         "state": "failed"
@@ -4079,6 +4089,7 @@
       {
         "id": "kit",
         "line": "Interrupted: “The halt task” · review it before resuming",
+        "plain": "Stopped partway through “The halt task”",
         "needs": true,
         "expression": "idle",
         "state": "needs"
@@ -4086,6 +4097,7 @@
       {
         "id": "lou",
         "line": "Stopped: “The stop task”",
+        "plain": "Stopped “The stop task”",
         "needs": false,
         "expression": "idle",
         "state": "resting"
@@ -4093,6 +4105,7 @@
       {
         "id": "max",
         "line": "Asks for approval: forge.post, and 1 more",
+        "plain": "Asks to use forge.post",
         "needs": true,
         "expression": "asking",
         "state": "needs"
@@ -4100,6 +4113,7 @@
       {
         "id": "ned",
         "line": "Paused · 1 waiting",
+        "plain": "Paused",
         "needs": true,
         "expression": "resting",
         "state": "paused"
@@ -4107,6 +4121,7 @@
       {
         "id": "oz",
         "line": "Proposes “The ask task”, and 1 more",
+        "plain": "Shall I start “The ask task”?",
         "needs": true,
         "expression": "asking",
         "state": "needs"
@@ -4114,6 +4129,7 @@
       {
         "id": "pip",
         "line": "Ada proposes “The askpip task”",
+        "plain": "Ada suggests “The askpip task”",
         "needs": true,
         "expression": "asking",
         "state": "needs"
@@ -4121,6 +4137,7 @@
       {
         "id": "quin",
         "line": "Your agent proposes “The backlog task”",
+        "plain": "Your agent suggests “The backlog task”",
         "needs": true,
         "expression": "asking",
         "state": "needs"
@@ -4893,6 +4910,7 @@
         "id": "ada",
         "kind": "agent",
         "line": "Ada keeps the build green.",
+        "plain": "Ada keeps the build green.",
         "needs": false,
         "unread": true,
         "state": "unread"
@@ -4901,6 +4919,7 @@
         "id": "bea",
         "kind": "agent",
         "line": "Bea keeps the build green.",
+        "plain": "Bea keeps the build green.",
         "needs": false,
         "unread": false,
         "state": "resting"
@@ -4909,6 +4928,7 @@
         "id": "cy",
         "kind": "agent",
         "line": "Reviewed: “The pass task”",
+        "plain": "Finished “The pass task”",
         "needs": false,
         "unread": true,
         "state": "verified"
@@ -4917,6 +4937,7 @@
         "id": "dee",
         "kind": "agent",
         "line": "Not verified: “The ran task”",
+        "plain": "Finished “The ran task”",
         "needs": false,
         "unread": false,
         "state": "resting"
@@ -4925,6 +4946,7 @@
         "id": "eli",
         "kind": "agent",
         "line": "Eli keeps the build green.",
+        "plain": "Eli keeps the build green.",
         "needs": false,
         "unread": false,
         "state": "resting"
@@ -4933,6 +4955,7 @@
         "id": "fin",
         "kind": "agent",
         "line": "Failed: “The fell task”",
+        "plain": "Couldn't finish “The fell task”",
         "needs": true,
         "unread": true,
         "state": "failed"
@@ -4941,6 +4964,7 @@
         "id": "forge",
         "kind": "room",
         "line": "Eli, Fin",
+        "plain": "Eli, Fin",
         "needs": false,
         "unread": true,
         "state": null
@@ -4949,6 +4973,7 @@
         "id": "shed",
         "kind": "room",
         "line": "Fin",
+        "plain": "Fin",
         "needs": false,
         "unread": false,
         "state": null
@@ -5462,66 +5487,79 @@
       {
         "id": "quiet",
         "line": "Ada, Bea, gone",
+        "plain": "Ada, Bea, gone",
         "needs": false
       },
       {
         "id": "asks",
         "line": "Bea proposes “The asks2 task”",
+        "plain": "Bea suggests “The asks2 task”",
         "needs": true
       },
       {
         "id": "held",
         "line": "Paused · 2 waiting",
+        "plain": "Paused",
         "needs": true
       },
       {
         "id": "rest",
         "line": "Paused",
+        "plain": "Paused",
         "needs": false
       },
       {
         "id": "failed",
         "line": "Failed: “The failed1 task” · No Postgres here.",
+        "plain": "Couldn't finish “The failed1 task”",
         "needs": true
       },
       {
         "id": "gave",
         "line": "Failed: “The gave1 task” · gave up",
+        "plain": "Couldn't finish “The gave1 task”",
         "needs": true
       },
       {
         "id": "unsure",
         "line": "Failed: “The unsure1 task” · not verified",
+        "plain": "Couldn't finish “The unsure1 task”",
         "needs": true
       },
       {
         "id": "cut",
         "line": "Interrupted: Cy's reply · review it before resuming",
+        "plain": "Stopped partway through Cy's reply",
         "needs": true
       },
       {
         "id": "broken",
         "line": "Cy couldn't reply · Model unavailable",
+        "plain": "Cy couldn't reply",
         "needs": true
       },
       {
         "id": "chatter",
         "line": "Ada, Bea are writing",
+        "plain": "Ada, Bea are writing",
         "needs": false
       },
       {
         "id": "talk",
         "line": "Bea is writing",
+        "plain": "Bea is writing",
         "needs": false
       },
       {
         "id": "pair",
         "line": "2 at work · The pair1 task",
+        "plain": "2 are working on “The pair1 task”",
         "needs": false
       },
       {
         "id": "studio",
         "line": "Ada · The studio1 task",
+        "plain": "Ada is working on “The studio1 task”",
         "needs": false
       }
     ],
@@ -31685,9 +31723,40 @@
       "You",
       "tester"
     ],
+    "words": [
+      {
+        "status": "proposed",
+        "word": "waiting"
+      },
+      {
+        "status": "queued",
+        "word": "waiting"
+      },
+      {
+        "status": "running",
+        "word": "working"
+      },
+      {
+        "status": "done",
+        "word": "done"
+      },
+      {
+        "status": "failed",
+        "word": "failed"
+      },
+      {
+        "status": "stopped",
+        "word": "stopped"
+      },
+      {
+        "status": "interrupted",
+        "word": "stopped"
+      }
+    ],
     "cards": [
       {
         "id": "task-sync00000000",
+        "word": "done",
         "badge": {
           "text": "Verified",
           "tone": "ok"
@@ -31709,6 +31778,7 @@
       },
       {
         "id": "task-run000000000",
+        "word": "working",
         "badge": {
           "text": "Running",
           "tone": "accent"
@@ -31727,6 +31797,7 @@
       },
       {
         "id": "task-same00000000",
+        "word": "waiting",
         "badge": {
           "text": "Queued",
           "tone": "neutral"
@@ -31745,6 +31816,7 @@
       },
       {
         "id": "task-old000000000",
+        "word": "failed",
         "badge": {
           "text": "Failed",
           "tone": "danger"
@@ -31767,6 +31839,7 @@
       },
       {
         "id": "task-cut000000000",
+        "word": "stopped",
         "badge": {
           "text": "Interrupted",
           "tone": "warn"
@@ -31789,6 +31862,7 @@
       },
       {
         "id": "task-halt00000000",
+        "word": "stopped",
         "badge": {
           "text": "Stopped",
           "tone": "neutral"
@@ -31811,6 +31885,7 @@
       },
       {
         "id": "task-half00000000",
+        "word": "done",
         "badge": {
           "text": "Not verified",
           "tone": "warn"
@@ -31832,6 +31907,7 @@
       },
       {
         "id": "task-elsewhere000",
+        "word": "working",
         "badge": {
           "text": "Running",
           "tone": "accent"
@@ -31850,6 +31926,7 @@
       },
       {
         "id": "task-roomwork0000",
+        "word": "waiting",
         "badge": {
           "text": "Queued",
           "tone": "neutral"
@@ -31868,6 +31945,7 @@
       },
       {
         "id": "task-ask000000000",
+        "word": "waiting",
         "badge": {
           "text": "Waiting for you",
           "tone": "accent"
@@ -31887,6 +31965,7 @@
       },
       {
         "id": "task-asked0000000",
+        "word": "working",
         "badge": {
           "text": "Running",
           "tone": "accent"
@@ -31905,6 +31984,7 @@
       },
       {
         "id": "task-declined0000",
+        "word": "stopped",
         "badge": {
           "text": "Stopped",
           "tone": "neutral"
@@ -31927,6 +32007,7 @@
       },
       {
         "id": "task-shipped00000",
+        "word": "done",
         "badge": {
           "text": "Verified",
           "tone": "ok"
@@ -31946,6 +32027,7 @@
       },
       {
         "id": "task-revised00000",
+        "word": "failed",
         "badge": {
           "text": "Failed",
           "tone": "danger"
@@ -31968,6 +32050,7 @@
       },
       {
         "id": "task-fixing000000",
+        "word": "done",
         "badge": {
           "text": "Verified",
           "tone": "ok"
@@ -31987,6 +32070,7 @@
       },
       {
         "id": "task-held00000000",
+        "word": "waiting",
         "badge": {
           "text": "Queued",
           "tone": "neutral"

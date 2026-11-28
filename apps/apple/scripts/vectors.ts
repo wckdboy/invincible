@@ -45,7 +45,7 @@ import { againGoal, timeline, timelineTasks } from "../../web/src/lib/timeline.t
 import { activityLine, activityOf, activityOthers, activityShort } from "../../web/src/lib/live-activity.ts";
 import { describeTask } from "../../web/src/lib/loops.ts";
 import { describeWakes } from "../../web/src/lib/wakes.ts";
-import { givenLine, keptChanges, proposedLine, sensitiveLine, shippedLine, steppedLine, taskActions, taskBadge, taskEnd } from "../../web/src/lib/task-card.ts";
+import { givenLine, keptChanges, proposedLine, sensitiveLine, shippedLine, steppedLine, taskActions, taskBadge, taskEnd, taskWord } from "../../web/src/lib/task-card.ts";
 import { agentModelChoices, agentModelsLine, agentRoleLine, agentRoles, type AgentRoleSpec, agentWorksOn, removalPlan, teamSpeaker, agentId, toggleAgentModel } from "../../web/src/lib/team.ts";
 import { budgetFrom } from "../../web/src/lib/give.ts";
 import { applyEvent, ASIDE_ANSWERING, ASIDE_FAILED, ASIDE_NOTHING_YET, asideNote, asideOf, asidePlaceholder, BRING_BACK_FAILED, beginTurn, broughtBackWords, busyPlaceholder, composerAction, endTurn, failTurn, FILES_WAIT, JUST_STARTING, keptDiffers, NOT_KEPT, queueHead, shownAgain, steeringLine, turnOf, undeliveredWords } from "../../web/src/lib/turns.ts";
@@ -391,7 +391,7 @@ const snapshot: core.TeamSnapshot = {
   deliveries: [delivery("busy", "bea", "running"), delivery("think", "eve", "queued"), delivery("old", "jo", "failed", { error: "Model unavailable", updatedAt: at(2) })],
 };
 const asks = [{ by: `arm:team.0123456789.max`, connector: "forge", tool: "post" }, { by: `arm:team.0123456789.max`, connector: "forge", tool: "bucket.delete" }, { by: "loop:morning", connector: "github", tool: "comment" }];
-const rows = rosterRows({ snapshot, asks, now: NOW }).filter((row) => row.kind === "agent").map((row) => ({ id: row.id, line: row.line, needs: row.needs, expression: row.expression ?? null, state: row.state ?? "resting" }));
+const rows = rosterRows({ snapshot, asks, now: NOW }).filter((row) => row.kind === "agent").map((row) => ({ id: row.id, line: row.line, plain: row.plain, needs: row.needs, expression: row.expression ?? null, state: row.state ?? "resting" }));
 // Each line as it reads beside its state's chip (lib/agent-state.ts), every row's and a few that only start alike.
 const besides = [
   ...rows.map((row) => ({ line: row.line, state: row.state })),
@@ -478,7 +478,7 @@ const roomsSnapshot: core.TeamSnapshot = {
 };
 const rooms = {
   snapshot: roomsSnapshot,
-  rows: rosterRows({ snapshot: roomsSnapshot, asks: [], now: NOW }).filter((row) => row.kind === "room").map((row) => ({ id: row.id, line: row.line, needs: row.needs })),
+  rows: rosterRows({ snapshot: roomsSnapshot, asks: [], now: NOW }).filter((row) => row.kind === "room").map((row) => ({ id: row.id, line: row.line, plain: row.plain, needs: row.needs })),
   home: homeOf({ snapshot: roomsSnapshot, asks: [], now: NOW }),
 };
 
@@ -611,7 +611,7 @@ const homePrimary = (
 
 const unread = {
   snapshot: seenSnapshot,
-  rows: rosterRows({ snapshot: seenSnapshot, asks: [], now: NOW }).map((row) => ({ id: row.id, kind: row.kind, line: row.line, needs: row.needs, unread: row.unread, state: row.state ?? null })),
+  rows: rosterRows({ snapshot: seenSnapshot, asks: [], now: NOW }).map((row) => ({ id: row.id, kind: row.kind, line: row.line, plain: row.plain, needs: row.needs, unread: row.unread, state: row.state ?? null })),
   home: homeOf({ snapshot: seenSnapshot, asks: [], now: NOW }),
 };
 
@@ -1330,7 +1330,9 @@ const timelines = {
   sinceAt: at(100),
   since: timeline(adaMessages, timelineTasks(adaRoom, adaTasks), { since: at(100) }).map((item) => item.key),
   speakers: adaMessages.map((message) => teamSpeaker(message, snapshot.agents)),
-  cards: adaTasks.map((t) => ({ id: t.id, badge: taskBadge(t), end: taskEnd(t), actions: taskActions(t), given: givenLine(t), sensitive: sensitiveLine(t), kept: keptChanges(t)?.text ?? null, proposed: proposedLine(t, t.proposedBy === "ada" ? "Ada" : null), stepped: steppedLine(t), shipped: shippedLine(t)?.text ?? null, again: againGoal(t) })),
+  // A task's one grey word, as a chat's compact row says it (lib/task-card.ts taskWord), for every status a task has.
+  words: (["proposed", "queued", "running", "done", "failed", "stopped", "interrupted"] as const).map((status) => ({ status, word: taskWord({ status }) })),
+  cards: adaTasks.map((t) => ({ id: t.id, word: taskWord(t), badge: taskBadge(t), end: taskEnd(t), actions: taskActions(t), given: givenLine(t), sensitive: sensitiveLine(t), kept: keptChanges(t)?.text ?? null, proposed: proposedLine(t, t.proposedBy === "ada" ? "Ada" : null), stepped: steppedLine(t), shipped: shippedLine(t)?.text ?? null, again: againGoal(t) })),
 };
 
 // ---- where a notice came from, in words (the PWA's lib/notices.ts) ----------------------------------------------------

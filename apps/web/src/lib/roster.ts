@@ -36,6 +36,10 @@ export interface RosterRow {
   /** The conversation the row opens (an agent you have not written to yet has none). */
   room: string | null;
   line: string;
+  /** The same in plain words, as a phone's list says it (I10's phone-gaps, the lead's word of 28 November 2026): what
+   * was last said, or what it is doing, never a status label ("Failed:", "Proposes", a step's raw line); what waits on
+   * you as it would ask it. The row's dot says it needs you, never a colour or a count. */
+  plain: string;
   /** Only you can move this on: a failure to read, an approval to give, work waiting on a pause. */
   needs: boolean;
   /** Something ended there since you last looked, on any device (a reply, a task's end): new to you until you open it. */
@@ -86,6 +90,13 @@ function trouble(job: Job | undefined, who: string | null): string | null {
   return job.task ? withWhy(`Failed: ${titled(job)}`, job.error) : withWhy(who ? `${who} couldn't reply` : "Couldn't reply", job.error);
 }
 
+/** The same in plain words (RosterRow.plain): how it ended, as it is said, never as a label. */
+function troublePlain(job: Job | undefined, who: string | null): string | null {
+  if (!job || (job.status !== "failed" && job.status !== "interrupted")) return null;
+  if (job.status === "interrupted") return `Stopped partway through ${job.task ? titled(job) : `${who ? `${who}'s` : "a"} reply`}`;
+  return job.task ? `Couldn't finish ${titled(job)}` : who ? `${who} couldn't reply` : "Couldn't reply";
+}
+
 /** Who someone is, by their id: an agent by its name; the primary, who proposes work from your backlog (backlog.ts), by its. */
 const named = (snapshot: TeamSnapshot, id: string): string => (id === "primary" ? "Your agent" : snapshot.agents.find((person) => person.id === id)?.name ?? id);
 
@@ -100,6 +111,13 @@ function proposing(proposed: TeamTask[], by: (id: string) => string | null): str
   return `${who ? `${who} proposes` : "Proposes"} ${titled(latest)}${proposed.length > 1 ? `, and ${proposed.length - 1} more` : ""}`;
 }
 
+/** The same as it would ask it (RosterRow.plain): its own, a question; another's, who suggests it. */
+function proposingPlain(proposed: TeamTask[], by: (id: string) => string | null): string {
+  const latest = proposed[0]!;
+  const who = latest.proposedBy ? by(latest.proposedBy) : null;
+  return who ? `${who} suggests ${titled(latest)}` : `Shall I start ${titled(latest)}?`;
+}
+
 /** How a task ended, when that is the latest thing to say: its verdict as its proof allows (verdictOf, from its record),
  * as its card and its thread say it, never "Verified" where its gates proved nothing. */
 function ended(task: TeamTask): string {
@@ -108,12 +126,23 @@ function ended(task: TeamTask): string {
   return `${verdictOf(task, factsOfRecord(task.record))?.word ?? taskBadge(task).text}: ${titled(task)}${kept}`;
 }
 
+/** The same in plain words (RosterRow.plain): finished, couldn't, stopped, never a verdict's label. */
+function endedPlain(task: TeamTask): string {
+  if (task.status === "done") return `Finished ${titled(task)}`;
+  if (task.status === "failed") return `Couldn't finish ${titled(task)}`;
+  if (task.status === "interrupted") return `Stopped partway through ${titled(task)}`;
+  if (task.status === "stopped") return `Stopped ${titled(task)}`;
+  return ended(task);
+}
+
 /** The last thing said in a conversation, if the app's reading of it is still the latest (the room hasn't moved since). */
 function lastSaid(room: TeamRoom | undefined, input: RosterInput): Said | null {
   const said = room ? input.said?.get(room.id) : undefined;
   return said && room!.updatedAt <= said.createdAt ? said : null;
 }
 const saidLine = (said: Said, agents: Agent[]): string => `${teamSpeaker(said, agents)}: ${firstLine(said.text)}`;
+/** The same on an agent's own row (RosterRow.plain): its own words as they are, anyone else's after their name. */
+const saidPlain = (said: Said, own: string, agents: Agent[]): string => (said.speaker === own ? firstLine(said.text) : saidLine(said, agents));
 
 function agentRow(person: Agent, input: RosterInput): RosterRow {
   const { snapshot } = input;
@@ -128,32 +157,33 @@ function agentRow(person: Agent, input: RosterInput): RosterRow {
   // At rest, its ring is green while something that ended there is new to you (verified work says so) and until you look;
   // from a node that keeps no such thing, while its work passed review a moment ago (its face is pleased).
   const rest: AgentState = snapshot.seen ? (fresh ? (fresh.task && fresh.verified ? "verified" : "unread") : "resting") : expression === "pleased" ? "verified" : "resting";
-  const say = (line: string, needs = false, state: AgentState = rest): RosterRow => ({ key: `person:${person.id}`, kind: "agent", id: person.id, name: person.name, room: room?.id ?? null, line, needs, unread: fresh !== undefined, expression, state, avatar: person.avatar });
+  const say = (line: string, needs = false, state: AgentState = rest, plain = line): RosterRow => ({ key: `person:${person.id}`, kind: "agent", id: person.id, name: person.name, room: room?.id ?? null, line, plain, needs, unread: fresh !== undefined, expression, state, avatar: person.avatar });
 
   // What only you can answer comes first: it is what the row is marked for.
-  if (asked[0]) return say(`Asks for approval: ${asked[0].connector}.${asked[0].tool}${asked.length > 1 ? `, and ${asked.length - 1} more` : ""}`, true, "needs");
-  if (proposed[0]) return say(proposing(proposed, (id) => (id === person.id ? null : named(snapshot, id))), true, "needs");
+  if (asked[0]) return say(`Asks for approval: ${asked[0].connector}.${asked[0].tool}${asked.length > 1 ? `, and ${asked.length - 1} more` : ""}`, true, "needs", `Asks to use ${asked[0].connector}.${asked[0].tool}`);
+  const proposer = (id: string): string | null => (id === person.id ? null : named(snapshot, id));
+  if (proposed[0]) return say(proposing(proposed, proposer), true, "needs", proposingPlain(proposed, proposer));
   const running = jobs.find((job) => job.status === "running" && job.task);
-  if (running?.task) return say(firstLine(running.progress) ? `${running.title} · ${firstLine(running.progress)}` : `Working on ${titled(running)}`, false, "working");
+  if (running?.task) return say(firstLine(running.progress) ? `${running.title} · ${firstLine(running.progress)}` : `Working on ${titled(running)}`, false, "working", `Working on ${titled(running)}`);
   if (jobs.some((job) => job.status === "running")) return say("Writing a reply", false, "working");
   const latest = latestOf(jobs);
   const wrong = trouble(latest, null);
   // (Work the node cut short is yours to look at before it resumes; work that failed is a failure.)
-  if (wrong) return say(wrong, true, latest!.status === "interrupted" ? "needs" : "failed");
+  if (wrong) return say(wrong, true, latest!.status === "interrupted" ? "needs" : "failed", troublePlain(latest, null)!);
   const waiting = waitingIn(jobs);
   const held = !person.enabled ? "Paused" : person.turnsToday >= person.dailyTurns ? "Daily allowance spent" : null;
   // Paused is yours to lift; a spent allowance renews by itself, and needs you only while work waits on it.
-  if (held) return say(waiting ? `${held} · ${waiting} waiting` : held, waiting > 0, !person.enabled ? "paused" : waiting ? "needs" : "resting");
+  if (held) return say(waiting ? `${held} · ${waiting} waiting` : held, waiting > 0, !person.enabled ? "paused" : waiting ? "needs" : "resting", !person.enabled ? "Paused" : "Done for today");
   const queued = jobs.find((job) => job.status === "queued" && job.task);
   if (queued?.task) {
     const blocking = taskDependencies(queued, snapshot.tasks).find((dependency) => !dependency.satisfied);
-    return say(blocking ? `Waiting for “${blocking.title}”` : `Queued: ${titled(queued)}`, false, "queued");
+    return say(blocking ? `Waiting for “${blocking.title}”` : `Queued: ${titled(queued)}`, false, "queued", blocking ? `Waiting for “${blocking.title}”` : `Starts ${titled(queued)} next`);
   }
-  if (waiting) return say("Reply queued", false, "queued");
+  if (waiting) return say("Reply queued", false, "queued", "Replies when free");
   const task = latestOf(jobs.filter((job) => job.task));
   const said = lastSaid(room, input);
-  if (said && (!task || said.createdAt >= task.updatedAt)) return say(saidLine(said, snapshot.agents));
-  if (task?.task) return say(ended(task));
+  if (said && (!task || said.createdAt >= task.updatedAt)) return say(saidLine(said, snapshot.agents), false, rest, saidPlain(said, person.id, snapshot.agents));
+  if (task?.task) return say(ended(task), false, rest, endedPlain(task));
   const job = firstLine(person.instructions) || person.role;
   const maker = agentMaker(person, snapshot.agents, snapshot.removed);
   return say(maker ? `Made by ${maker} · ${job}` : job);
@@ -164,20 +194,20 @@ function roomRow(room: TeamRoom, input: RosterInput): RosterRow {
   const nameOf = (id: string): string => named(snapshot, id);
   const jobs = roomJobs(snapshot, room.id);
   const fresh = endedSince(jobs, snapshot.seen?.[`room:${room.id}`], snapshot.seen !== undefined);
-  const say = (line: string, needs = false): RosterRow => ({ key: `room:${room.id}`, kind: "room", id: room.id, name: room.name, room: room.id, line, needs, unread: fresh !== undefined });
+  const say = (line: string, needs = false, plain = line): RosterRow => ({ key: `room:${room.id}`, kind: "room", id: room.id, name: room.name, room: room.id, line, plain, needs, unread: fresh !== undefined });
 
   const proposed = proposals(jobs);
-  if (proposed[0]) return say(proposing(proposed, nameOf), true);
+  if (proposed[0]) return say(proposing(proposed, nameOf), true, proposingPlain(proposed, nameOf));
 
   const working = jobs.filter((job) => job.status === "running" && job.task) as (TeamTask & { task: true })[];
-  if (working[0]) return say(`${working.length > 1 ? `${working.length} at work` : nameOf(working[0].assignee)} · ${working[0].title}`);
+  if (working[0]) return say(`${working.length > 1 ? `${working.length} at work` : nameOf(working[0].assignee)} · ${working[0].title}`, false, `${working.length > 1 ? `${working.length} are` : `${nameOf(working[0].assignee)} is`} working on ${titled(working[0])}`);
   const writing = jobs.filter((job) => job.status === "running" && !job.task) as TeamDelivery[];
   if (writing.length) return say(`${writing.map((delivery) => nameOf(delivery.agent)).join(", ")} ${writing.length > 1 ? "are" : "is"} writing`);
   const latest = latestOf(jobs);
   const wrong = trouble(latest, latest && !latest.task ? nameOf(latest.agent) : null);
-  if (wrong) return say(wrong, true);
+  if (wrong) return say(wrong, true, troublePlain(latest, latest && !latest.task ? nameOf(latest.agent) : null)!);
   const waiting = waitingIn(jobs);
-  if (room.paused) return say(waiting ? `Paused · ${waiting} waiting` : "Paused", waiting > 0);
+  if (room.paused) return say(waiting ? `Paused · ${waiting} waiting` : "Paused", waiting > 0, "Paused");
   const said = lastSaid(room, input);
   return say(said ? saidLine(said, snapshot.agents) : room.members.map(nameOf).join(", "));
 }

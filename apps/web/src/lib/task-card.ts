@@ -101,6 +101,26 @@ export function taskStanding(task: Pick<TeamTask, "status" | "verified" | "recor
   return { word: "Interrupted", tone: "active", strong: true };
 }
 
+/** Where a task stands in one grey word, as a chat's compact row says it beside its title (I10's phone-gaps, the lead's
+ * word of 28 November 2026): working, waiting (its turn, or your yes), done, failed, or stopped (by you, or cut short).
+ * Its verdict and the rest are a tap away, in its thread. */
+export type TaskWord = "working" | "waiting" | "done" | "failed" | "stopped";
+export function taskWord(task: Pick<TeamTask, "status">): TaskWord {
+  switch (task.status) {
+    case "running":
+      return "working";
+    case "proposed":
+    case "queued":
+      return "waiting";
+    case "done":
+      return "done";
+    case "failed":
+      return "failed";
+    default:
+      return "stopped";
+  }
+}
+
 /** What proves a proposal, in a line under its goal (null: no command was given to prove it). */
 export const gatesLine = (gates: readonly string[]): string | null => (gates.length ? `Done when ${gates.join(" · ")} pass${gates.length === 1 ? "es" : ""}` : null);
 

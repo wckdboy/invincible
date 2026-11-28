@@ -16,6 +16,14 @@ class TaskWordsVectorsTest {
 
     /** How each ended, what can be done with it (Ship it among them, where its verified work kept changes) and what it is
      * asked when given again: the PWA's taskEnd, taskActions and againGoal, card for card. */
+    /** Where a task stands in one grey word, as a chat's compact row says it (lib/task-card.ts taskWord). */
+    @Test fun eachTasksOneWordIsThePwas() {
+        val words = t["words"].list
+        assertEquals(7, words.size)
+        for (w in words) assertEquals(w["status"].string, w["word"].string, TaskWords.word(w["status"].string!!))
+        for (card in t["cards"].list) assertEquals(card["id"].string, card["word"].string, TaskWords.word(tasks.getValue(card["id"].string!!).status))
+    }
+
     @Test fun eachTasksEndActionsAndAgainAreThePwas() {
         val cards = t["cards"].list
         assertEquals(tasks.size, cards.size)

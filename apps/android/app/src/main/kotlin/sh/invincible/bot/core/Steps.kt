@@ -503,6 +503,19 @@ object Steps {
  * ended and why, what the agent said of it, what can be done with it, and the same task given again.
  */
 object TaskWords {
+    /**
+     * Where a task stands in one grey word, as a chat's compact row says it beside its title (lib/task-card.ts taskWord,
+     * I10's phone-gaps): working, waiting (its turn, or your yes), done, failed, or stopped (by you, or cut short). Its
+     * verdict and the rest are a tap away, in its thread.
+     */
+    fun word(status: String): String = when (status) {
+        "running" -> "working"
+        "proposed", "queued" -> "waiting"
+        "done" -> "done"
+        "failed" -> "failed"
+        else -> "stopped"
+    }
+
     /** How an agent's run can end, as the runner records it on a task that wasn't verified. */
     private val RUN_ENDS = mapOf(
         "gave-up" to "It gave up.",
