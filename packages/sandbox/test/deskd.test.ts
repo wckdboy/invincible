@@ -1166,10 +1166,26 @@ desk = d.Desk(pieces=P(), display=object(), watch=object(), browser=b)
 `;
 
   test("a JavaScript alert is reported within a second, with its words and its buttons, never waited out (C0's F4)", async () => {
+    // Never waited out, counted: with the alert up and known, the read is answered with it having asked the page
+    // nothing, so nothing waited at all. (On the real clock, "within a second" counted a busy machine's connecting too.)
     const got = await py(`${ALERT}
-t0 = time.monotonic(); code, out, err = d.cli(desk, ["text"])
-print(json.dumps({"code": code, "err": err, "ms": (time.monotonic() - t0) * 1000}))`) as { code: number; err: string; ms: number };
-    expect(got.ms).toBeLessThan(1000);
+asked = []
+_send = b._send
+def send(message, reply=None):
+    if reply is not None:
+        asked.append(message["method"])
+    return _send(message, reply)
+b._send = send
+b.connect()
+for _ in range(3000):
+    if b.dialog():
+        break
+    time.sleep(0.01)
+known = bool(b.dialog())
+code, out, err = d.cli(desk, ["text"])
+print(json.dumps({"code": code, "err": err, "known": known, "reads": asked.count("Runtime.evaluate")}))`) as { code: number; err: string; known: boolean; reads: number };
+    expect(got.known).toBe(true);
+    expect(got.reads).toBe(0);
     expect(got.code).toBe(1);
     expect(got.err).toContain('a JavaScript alert is open on the page: "Hello from the page" [OK]');
     expect(got.err).toContain("desktop dialog accept");
