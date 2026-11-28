@@ -1446,6 +1446,8 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           // Going round on both tiers: you are told at once (a notice, one a task), and the work goes on (run.ts round).
           if (event.type === "round") {
             roundRaised = true;
+            // (Its record keeps it: the notice goes as the task ends, and the routing report reads it after.)
+            routing = { ...routing, round: true };
             deps.roundNotice?.raise({ key: roundKey(task.id), ...roundNotice({ agent: agent.name, task: task.title, id: task.id, rereads: event.rereads, files: event.files }) });
           }
           // What proves it, kept for its record: each gate before the work and in the last round, and the last verdict.

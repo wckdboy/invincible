@@ -20,6 +20,7 @@ export interface TaskRoutingRead {
   because?: string;
   moved?: string;
   kind?: string;
+  round?: boolean;
 }
 
 /** A task's record as this reads it (a TeamTaskRecord has all of this). */
@@ -108,6 +109,7 @@ export function taskRoutingFacts(routing: TaskRoutingRead): string[] {
     routing.began === "planner" ? `began on the planner's models: ${routing.because === "memory" ? memory : "its plan asked for them"}` : "",
     routing.began === "engineer" && routing.because === "probe" ? `began on the engineer's models: a try of them after its ${kind?.many ?? "tasks"} began on the planner's` : "",
     routing.moved ? `moved up to the planner's models: ${MOVED[routing.moved] ?? routing.moved}` : "",
+    routing.round ? "went round on the planner's models too: you were told" : "",
   ].filter(Boolean);
 }
 

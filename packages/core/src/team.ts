@@ -533,6 +533,8 @@ export const TeamTaskRouting = z.strictObject({
   moved: z.enum(["gate", "review", "stall", "rereads"]).optional(),
   /** Its kind (routing.ts TASK_KINDS, said again here: core's tests hold them equal); absent: a record from before kinds were kept. */
   kind: z.enum(["fix", "desktop", "code", "task"]).optional(),
+  /** It went round on both tiers, and you were told (run.ts `round`, routing.ts roundNotice); absent: it didn't, or a record from before. */
+  round: z.literal(true).optional(),
 });
 export type TeamTaskRouting = z.infer<typeof TeamTaskRouting>;
 

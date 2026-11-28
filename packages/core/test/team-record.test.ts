@@ -83,6 +83,8 @@ describe("a task's record, in words", () => {
     expect(taskRoutingFacts({ began: "planner", because: "memory", kind: "fix" })).toEqual(["began on the planner's models: its agent's last fix was verified there"]);
     expect(taskRoutingFacts({ began: "engineer", because: "probe", kind: "desktop" })).toEqual(["began on the engineer's models: a try of them after its desktop tasks began on the planner's"]);
     expect(taskRoutingFacts({ began: "engineer", because: "probe", kind: "code", moved: "gate" })).toEqual(["began on the engineer's models: a try of them after its code tasks began on the planner's", "moved up to the planner's models: the same gate failed twice"]);
+    // Gone round on both tiers (run.ts round): said after its moving up, as it came.
+    expect(taskRoutingFacts({ began: "engineer", moved: "rereads", round: true, kind: "code" })).toEqual(["moved up to the planner's models: it read the same files again and again", "went round on the planner's models too: you were told"]);
     for (const routing of [{ began: "reviewer" }, { began: "engineer", moved: "boredom" }, { began: "planner", because: "a hunch" }, { began: "engineer", why: "x" }]) {
       expect([routing, TeamTaskRecord.safeParse({ ...base, routing }).success]).toEqual([routing, false]);
     }

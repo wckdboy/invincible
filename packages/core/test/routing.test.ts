@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { beginFor, Bodies, PROBE_AFTER, ROUND_SOURCE, roundKey, roundNotice, roundTask, type RoutedTaskRead, TASK_KINDS, type TaskKind, taskKindOf, TeamTaskRouting } from "../src/index.ts";
+import { beginFor, Bodies, PROBE_AFTER, ROUND_SOURCE, roundKey, roundNotice, roundTask, type RoutedTaskRead, TASK_KINDS, type TaskKind, taskKindOf, TeamTaskRecord, TeamTaskRouting } from "../src/index.ts";
 
 /*
  * Smart routing's memory, by kind of task (routing.ts): an agent's tasks of a kind begin on the tier that last verified
@@ -149,5 +149,12 @@ describe("work going round on both tiers: a notice, so you are told at once", ()
     // A long title or many files stay within what a notice holds.
     const long = roundNotice({ agent: "Ada", task: "x".repeat(5000), id: "task-a1b2c3d4e5f6", rereads: 8, files: Array.from({ length: 40 }, (_, i) => `src/${"d".repeat(60)}/f${i}.ts`) });
     expect(Bodies["notice.raised"].safeParse({ key: roundKey("task-a1b2c3d4e5f6"), severity: "warn", source: ROUND_SOURCE, at: 1, ...long }).success).toBe(true);
+  });
+
+  test("the record keeps that the work went round on both tiers (the store keeps only a record its schema takes), and one without it reads as before", () => {
+    const base = { startedAt: 0, endedAt: 1, ended: "done", commands: 0, revisions: 0, spent: [] };
+    expect(TeamTaskRecord.safeParse({ ...base, routing: { began: "engineer", moved: "rereads", round: true, kind: "code" } }).success).toBe(true);
+    expect(TeamTaskRecord.safeParse({ ...base, routing: { began: "engineer", kind: "code" } }).success).toBe(true);
+    expect(TeamTaskRecord.safeParse({ ...base, routing: { began: "engineer", round: "yes" } }).success).toBe(false);
   });
 });

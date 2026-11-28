@@ -2,7 +2,7 @@ import { afterEach, expect, setSystemTime, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { costOf, moneyPrices, newNodeIdentity, roundNotice, type ExecResult, type Prices, type TeamCheckpoint, type Agent, type TeamRoom, type TeamTask, type TeamMessage } from "@invincible/core";
+import { costOf, moneyPrices, newNodeIdentity, roundNotice, TeamTaskRecord, type ExecResult, type Prices, type TeamCheckpoint, type Agent, type TeamRoom, type TeamTask, type TeamMessage } from "@invincible/core";
 import { taskStep, type AvatarExpression } from "@invincible/core/avatar";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { acpDriver, AGENTS, OWN_SIGN_IN, planTaken, type RunEvent } from "@invincible/agents";
@@ -401,6 +401,10 @@ test("work going round on both tiers: you are told at once, a notice of the node
   expect(f.bodies.at(-2).model).toBe("plan");
   expect(raised).toEqual([{ key: "went-round:task-abcdefghijkl", ...roundNotice({ agent: "Ada", task: "Build", id: "task-abcdefghijkl", rereads: REREADS, files: ["src/a.ts", "src/b.ts"] }) }]);
   expect(cleared).toEqual(["went-round:task-abcdefghijkl"]);
+  // Its record keeps it, for the routing report once the notice is gone.
+  expect(outcome.record.routing).toEqual({ began: "engineer", kind: "task", moved: "rereads", round: true });
+  // (One the store keeps: it keeps a record only as its schema takes it, team-store.ts finish.)
+  expect(TeamTaskRecord.safeParse(outcome.record).success).toBe(true);
   expect(told.filter((line) => line.startsWith("Going round ·"))).toEqual([`Going round · it has read the same files again ${REREADS} times on the planner's models too, nothing changed: you were told, and it goes on until you stop it or its budget ends it`]);
   // A task that never went round on both tiers raises nothing, and clears nothing.
   const quiet: string[] = [];

@@ -43,6 +43,8 @@ export interface RoutingRead {
   because?: string;
   moved?: string;
   kind?: string;
+  /** It went round on both tiers (run.ts `round`). */
+  round?: boolean;
 }
 
 /** An agent's task as this reads it: its id, how it stands, and its record's routing (absent: running, or from before). */
