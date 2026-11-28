@@ -33,9 +33,14 @@
  *                                  waiting: [{ at, method, path }] } (waiting: what a dead link holds at the front now)
  *   POST /__dev/blackhole?on=1|0   a dead link while on: nothing goes through either way, as a half-open connection
  *   POST /__dev/poke               something that needs you, at once (a device asking to join): { label, at }
+ *   POST /__dev/say?agent=<id>     your words in that agent's own room, written on the node as from another device of
+ *                                  yours (the agent answers after): { room, at }
  *   POST /__dev/loop               a loop drafted for you, woken by a webhook (adding it says the webhook's secret, this
  *                                  once): { draft }
  *   GET  /__dev/tasks              the fixture's tasks by what they show: { working, failed, proven } (proven: --heavy's)
+ *   GET  /__dev/chats              --heavy's kept chats with the primary: { long: [ids], shown } (long: its three of
+ *                                  twenty-five exchanges; shown: the one that shows what an answer can hold), for a
+ *                                  runner to open by its link
  *   POST /__dev/demo               a task to step through, for the Live Activity's pictures: held at its start and at its
  *                                  review until /__dev/demo/until lets it go; it ends proven: { task }
  *   POST /__dev/demo/fail          a task whose second gate fails at the end, however often it's worked, held at its
@@ -493,6 +498,11 @@ const chatOnce = async (input: Record<string, unknown>): Promise<string | null> 
 };
 /** One of --heavy's tasks that ended proven, for the pictures. */
 let provenFixture: string | null = null;
+/** --heavy's kept chats with the primary (GET /__dev/chats). */
+const longChats: string[] = [];
+let shownChat: string | null = null;
+/** How many words /__dev/say has written. */
+let said = 0;
 if (heavy) {
   const started = Date.now();
   const more = [
@@ -533,8 +543,9 @@ if (heavy) {
       const message = { role: "user", content: `SEED ${n}: where are we with ${topic}? (${n} of 25)` };
       conversation = await chatOnce(conversation ? { conversation, messages: [message] } : { save: true, messages: [message] });
     }
+    if (conversation) longChats.push(conversation);
   }
-  await chatOnce({ save: true, messages: [{ role: "user", content: "Show me what the release looks like." }] });
+  shownChat = await chatOnce({ save: true, messages: [{ role: "user", content: "Show me what the release looks like." }] });
   // More approvals waiting: the release bot's posts, each held for you.
   for (const text of ["Sync survives a dropped connection: thanks to everyone who tested it.", "The importer now reads ISO 8601 dates.", "Backups are taken daily on every node.", "0.4 is out: here is what changed."]) {
     await call(bot, "callConnector", { connector: "forge", tool: "post", args: { text }, why: "Tell people what shipped." });
@@ -591,6 +602,13 @@ const front = Bun.serve({
         return Response.json({ blackhole, at: Date.now() });
       }
       if (control === "tasks") return Response.json({ working: syncing.id, failed: failing.id, proven: provenFixture });
+      if (control === "chats") return Response.json({ long: longChats, shown: shownChat });
+      if (control === "say" && req.method === "POST") {
+        const room = own[url.searchParams.get("agent") ?? "builder"];
+        if (!room) return new Response("no such agent's room", { status: 404 });
+        await admin("postTeamMessage", { room, text: `A word from another device of yours (${++said}).` });
+        return Response.json({ room, at: Date.now() });
+      }
       if (control === "demo" && req.method === "POST") {
         const n = demoOf.size + 1;
         const task = (await admin("createTeamTask", { room: own.writer, assignee: "writer", title: "Sync resumes after a dropped link", goal: `TASK_PROVE_d${n} TASK_DEMO_STEPS demo-${n}: make sync resume after a dropped connection, with the test that drops it.`, dependsOn: [], gates: [`bun test sync # gate-prove-d${n}`] })).task;

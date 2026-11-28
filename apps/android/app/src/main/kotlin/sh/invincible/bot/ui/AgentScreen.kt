@@ -263,7 +263,11 @@ private fun Timeline(
             delay(if (busy) 2_000 else 4_000)
         }
     }
-    LaunchedEffect(entries.size) { if (entries.isNotEmpty()) list.toEnd() }
+    LaunchedEffect(entries.size) {
+        if (entries.isNotEmpty()) list.toEnd()
+        // (For the performance runner: what was said here, as many as are shown.)
+        sh.invincible.bot.app.PerfProbe.mark("said ${entries.size}")
+    }
 
     val headerGone by remember { derivedStateOf { list.firstVisibleItemIndex > 0 } }
     Column(Modifier.fillMaxSize().imePadding()) {
