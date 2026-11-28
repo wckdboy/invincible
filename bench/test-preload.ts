@@ -1,4 +1,7 @@
 // Loaded before every test file (bunfig.toml's [test] preload): bench/test-preload.test.ts holds it to what it says.
+import { afterEach, beforeAll, beforeEach } from "bun:test";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 /*
  * A test's git never reaches the repository the tests run in. In a linked worktree, `git rebase --exec` and git's hooks
@@ -30,3 +33,31 @@ const spawn = Bun.spawn as unknown as Spawn;
 const spawnSync = Bun.spawnSync as unknown as Spawn;
 Bun.spawn = ((...args: unknown[]) => spawn(...withEnv(args))) as unknown as typeof Bun.spawn;
 Bun.spawnSync = ((...args: unknown[]) => spawnSync(...withEnv(args))) as unknown as typeof Bun.spawnSync;
+
+/*
+ * Where each worker of a watched run stands (scripts/test-check.ts runs `bun run check`'s tests): the file it is in, how
+ * many of that file's tests have begun, and whether one is running, written as each begins and ends. A test whose thread
+ * is held by a synchronous wait can't end or time out, so its worker's record stands still, and the runner names it. On
+ * the Mac mini (28 November 2026) a Bun.spawnSync lost its child and held a worker 58 minutes, and the check with it.
+ * Only in a watched run, which gives the directory.
+ */
+const watched = process.env.INVINCIBLE_TEST_WATCH;
+if (watched) {
+  const record = join(watched, `${process.pid}.json`);
+  let begun = 0;
+  // (Wall-clock milliseconds from performance, not Date: a test may stub Date.now or set the system time.)
+  const now = (): number => Math.round(performance.timeOrigin + performance.now());
+  const say = (running: boolean): void => {
+    try {
+      writeFileSync(record, JSON.stringify({ pid: process.pid, file: Bun.main, test: begun, running, at: now() }));
+    } catch {
+      /* the runner's directory is gone: nothing to tell */
+    }
+  };
+  beforeAll(() => say(false));
+  beforeEach(() => {
+    begun += 1;
+    say(true);
+  });
+  afterEach(() => say(false));
+}
