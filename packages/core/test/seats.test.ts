@@ -27,6 +27,7 @@ import {
   SHARED_RUNS_PROVEN,
   signInUrlOk,
   tokenShaped,
+  codeTokenShaped,
 } from "../src/seats.ts";
 
 /*
@@ -43,6 +44,40 @@ const FAKE_SIGNED = "eyJGQUtFIjoibm90LWEtdG9rZW4ifQ.eyJGQUtFIjoibm90LWEtdG9rZW4i
 const FAKE_GITHUB = `ghp_${"F".repeat(36)}`;
 /** One short enough for a seat's name, so it is its shape that is refused there, not its length. */
 const FAKE_SIGNED_SHORT = "eyJGQUtFIn0.eyJGQUtFIn0.RkFLRS1zaWc";
+/** Fake, made the same on every run (xorshift32), never anyone's: shaped as a vendor's random codes are, so made here, not written down. */
+const fakeRun = (seed: number, n: number): string => {
+  const abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  let x = Math.imul(seed, 2654435761) >>> 0 || 1;
+  let out = "";
+  for (let i = 0; i < n; i++) {
+    x ^= x << 13;
+    x >>>= 0;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    x >>>= 0;
+    out += abc[x % 64];
+  }
+  return out;
+};
+/** Fake bytes, made the same on every run (xorshift32), never anyone's. */
+const fakeBytes = (seed: number, n: number): Uint8Array => {
+  let x = Math.imul(seed, 2654435761) >>> 0 || 1;
+  const out = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    x ^= x << 13;
+    x >>>= 0;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    x >>>= 0;
+    out[i] = x >>> 24;
+  }
+  return out;
+};
+/**
+ * Claude Code's state, made as Claude Code makes one (2.1.325, read from its binary by the re-check of 28 November 2026,
+ * R5: base64url of 32 random bytes, 43 characters), of fake bytes.
+ */
+const claudeState = (seed: number): string => Buffer.from(fakeBytes(seed, 32)).toString("base64url");
 
 const facts = (over: Partial<SeatFacts> = {}): SeatFacts => ({
   id: ID,
@@ -126,6 +161,33 @@ describe("the inputs", () => {
     expect(refused.success ? "" : refused.error.issues[0]!.message).toContain("A seat never takes one");
     expect(tokenShaped("Work Max")).toBeNull();
     expect(tokenShaped("q8XyFAKEcode0#FAKEstate0")).toBeNull();
+  });
+
+  // Claude Code asks for what its page shows as "code#state", and makes the state itself (the re-check of 28 November
+  // 2026, R5). That state alone is a random run the scanner's high-entropy guess refuses, so no Claude seat could be
+  // signed in from the card or inv; the fixtures' short, plain state hid it. Its code half is Anthropic's and unseen:
+  // here a plain one, and random ones of two lengths.
+  test("Claude Code's paste, code#state with the state as Claude Code makes it, is taken: random by design, it is no token (the re-check's R5)", () => {
+    const answer = (code: string) => SeatSignInAnswerInput.safeParse({ id: ID, attempt: ATTEMPT, code });
+    for (let seed = 1; seed <= 200; seed++) {
+      const state = claudeState(seed);
+      expect([seed, state.length, /^[A-Za-z0-9_-]+$/.test(state)]).toEqual([seed, 43, true]);
+      // The scanner's high-entropy rule refuses the state alone: what refused the paste.
+      expect([seed, tokenShaped(state)]).toEqual([seed, "high-entropy token"]);
+      for (const half of ["FAKEcode0000", fakeRun(1000 + seed, 43), fakeRun(2000 + seed, 96)]) expect([seed, half.length, answer(`${half}#${state}`).success]).toEqual([seed, half.length, true]);
+    }
+  });
+
+  test("in Claude Code's shape a key or a token is still refused, and so is a random run of no code's shape", () => {
+    const answer = (code: string) => SeatSignInAnswerInput.safeParse({ id: ID, attempt: ATTEMPT, code });
+    const state = claudeState(201);
+    const github = `ghp_${fakeRun(9, 39).replace(/[-_]/g, "F")}`;
+    const signed = `${Buffer.from('{"alg":"RS256"}').toString("base64url")}.${Buffer.from('{"sub":"0"}').toString("base64url")}.${fakeRun(8, 40)}`;
+    // An Anthropic token, a key the scanner knows by name in either half; a signed token; and a random run alone, or with
+    // a state a character short or long.
+    const refused = [`sk-ant-oat01-${fakeRun(5, 40)}#${state}`, `${github}#${state}`, `FAKEcode0000#${github}`, signed, state, `FAKEcode0000#${state.slice(1)}`, `FAKEcode0000#${state}A`];
+    for (const code of refused) expect([code.slice(0, 16), answer(code).success]).toEqual([code.slice(0, 16), false]);
+    expect(refused.map(codeTokenShaped)).toEqual(["an Anthropic key or token", "GitHub token", "GitHub token", "a signed token", "high-entropy token", "high-entropy token", "high-entropy token"]);
   });
 });
 

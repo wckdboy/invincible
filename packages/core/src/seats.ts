@@ -107,6 +107,22 @@ export function tokenShaped(text: string): string | null {
 const NO_TOKEN = "That looks like a token or a key. A seat never takes one: its account is signed in on the vendor's own page.";
 const untokened = <T extends z.ZodType<string>>(schema: T) => schema.refine((text) => tokenShaped(text) === null, NO_TOKEN);
 
+/**
+ * The codes a vendor's page shows you to paste back, by their shape. Each is random by design, so the scanner's guess at
+ * a token of no kind it knows (its high-entropy rule) is no reason to refuse one: Claude Code's, "code#state", whose
+ * state Claude Code makes itself as base64url of 32 random bytes, 43 characters (2.1.325, read from its binary: the
+ * re-check of 28 November 2026, R5; its code half is Anthropic's). What the scanner knows by name is still refused in
+ * one, and so are an Anthropic key and a signed token. (Codex's sign-in takes no paste: you enter its code on its page.)
+ */
+const VENDOR_CODES: readonly RegExp[] = [/^[A-Za-z0-9_-]{8,512}#[A-Za-z0-9_-]{43}$/];
+/** Why a code you paste for a seat's sign-in is refused, or null: as tokenShaped, but a vendor's code of its own shape isn't a token. */
+export function codeTokenShaped(code: string): string | null {
+  if (!VENDOR_CODES.some((shape) => shape.test(code))) return tokenShaped(code);
+  if (/sk-ant-/i.test(code)) return "an Anthropic key or token";
+  if (SIGNED.test(code)) return "a signed token";
+  return findSecrets(code).find((found) => found.kind !== "high-entropy token")?.kind ?? null;
+}
+
 /** What you call a seat: one plain line ("Work Max", "Personal Pro"). */
 export const SeatLabel = untokened(
   z
@@ -148,7 +164,13 @@ export const SeatIdInput = z.strictObject({ id: SeatId });
 export const SeatSignInAnswerInput = z.strictObject({
   id: SeatId,
   attempt: SeatAttemptId,
-  code: untokened(z.string().trim().min(1).max(SEAT_LIMITS.code).regex(/^[!-~]+$/, "a code is one word of letters, digits and signs")),
+  code: z
+    .string()
+    .trim()
+    .min(1)
+    .max(SEAT_LIMITS.code)
+    .regex(/^[!-~]+$/, "a code is one word of letters, digits and signs")
+    .refine((code) => codeTokenShaped(code) === null, NO_TOKEN),
 });
 export const SeatSignInCancelInput = z.strictObject({ id: SeatId, attempt: SeatAttemptId });
 /** A seat's own setting: how many runs at once it takes, at most (D4; never above SHARED_RUNS_PROVEN for a subscription). */

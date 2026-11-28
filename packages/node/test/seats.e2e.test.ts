@@ -62,6 +62,8 @@ const logText = () => JSON.stringify(daemon.store.eventsSince({}, 100_000).event
 // Fake, every one: shaped as each vendor's are.
 const FAKE_SETUP_TOKEN = "sk-ant-oat01-FAKE-not-a-token-0000000000000000";
 const FAKE_SIGNED = "eyJGQUtFIn0.eyJGQUtFIn0.RkFLRS1zaWc";
+/** A state as Claude Code makes one, base64url of 32 random bytes (the re-check's R5), of fake bytes made here: never anyone's. */
+const CLAUDE_STATE = Buffer.from(Array.from({ length: 32 }, (_, i) => (i * 73 + 41) % 256)).toString("base64url");
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
@@ -152,7 +154,8 @@ describe("seats", () => {
     expect(started.status).toBe(424);
     expect(started.body.error).toContain("can't make a seat's VM");
     for (const code of [FAKE_SETUP_TOKEN, FAKE_SIGNED, "two words"]) expect((await admin("answerSeatSignIn", { id: seat.id, attempt, code })).status).toBe(400);
-    expect((await admin("answerSeatSignIn", { id: seat.id, attempt, code: "FAKEcode0000#FAKE-state-0000" })).status).toBe(404);
+    // A code of the shape Claude Code's page shows is taken (the re-check's R5): none is waited for here, so 404.
+    expect((await admin("answerSeatSignIn", { id: seat.id, attempt, code: `FAKEcode0000#${CLAUDE_STATE}` })).status).toBe(404);
     expect((await admin("cancelSeatSignIn", { id: seat.id, attempt })).status).toBe(404);
     expect((await admin("removeSeat", { id: seat.id })).status).toBe(200);
   });
