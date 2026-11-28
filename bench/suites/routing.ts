@@ -32,11 +32,14 @@ export const suite: Suite = {
     "routing.memory.on.usd-per-done",
     "routing.rule.memory-misroutes",
     "routing.memory.replay.differs",
+    "routing.notice.minutes",
+    "routing.rule.notice-lost",
+    "routing.rule.notice-left",
     "routing.pace.on.served",
     "routing.pace.on.refused",
     "routing.replay.differs",
   ],
-  held: { "routing.rule.pinned-moved": 0, "routing.rule.climbs": 0, "routing.rule.same-rung": 0, "routing.rule.memory-misroutes": 0, "routing.memory.replay.differs": 0, "routing.pace.on.refused": 0, "routing.replay.differs": 0 },
+  held: { "routing.rule.pinned-moved": 0, "routing.rule.climbs": 0, "routing.rule.same-rung": 0, "routing.rule.memory-misroutes": 0, "routing.memory.replay.differs": 0, "routing.rule.notice-lost": 0, "routing.rule.notice-left": 0, "routing.pace.on.refused": 0, "routing.replay.differs": 0 },
   async run(ctx) {
     const tasks = simTasks(ctx.seed, TASKS);
     const kinds = (["gate", "review", "stall"] as const).map((kind) => `${tasks.filter((t) => t.kind === kind).length} ${kind}`).join(", ");
@@ -64,6 +67,20 @@ export const suite: Suite = {
     for (const [why, words] of [["gate", "the same gate failed twice in a row"], ["review", "the reviewer sent it back twice in a row"], ["stall", "two audits in a row steered it"], ["rereads", "it read the same files again and again"]] as const) {
       ctx.quality(`routing.routed.escalations.${why}`, routed.tasks.filter((t) => t.escalations.some((line) => line.includes(words))).length, "tasks", "lower", { note: `routed tasks whose work moved up because ${words}` });
     }
+    // Work going round on both tiers (run.ts round): you are told at once, with a notice, and the work goes on until you
+    // stop it or its budget ends it (your word, 19 November 2026). How soon, against when it ended; and that it changes
+    // nothing of the work: the same tasks without it, held equal.
+    const told = routed.tasks.filter((t) => t.noticed);
+    const mean = (f: (t: PolicyResult["tasks"][number]) => number) => told.reduce((sum, t) => sum + f(t), 0) / Math.max(1, told.length);
+    ctx.quality("routing.notice.told", told.length, "tasks", "higher", { note: `of ${TASKS}, routed tasks that went round on both tiers and were told to you as they went on` });
+    ctx.quality("routing.notice.minutes", mean((t) => t.noticed!.minutes), "min", "lower", { note: "virtual minutes from such a task's start to its notice" });
+    ctx.quality("routing.notice.ended-minutes", mean((t) => t.minutes), "min", "lower", { note: "virtual minutes the same tasks ran in all: when you would have heard without the notice" });
+    ctx.quality("routing.notice.false", told.filter((t) => t.verified).length, "tasks", "lower", { note: "tasks told as going round on both tiers that then ended verified" });
+    ctx.quality("routing.rule.notice-left", told.filter((t) => !t.noticed!.cleared).length, "tasks", "lower", { note: "notices left standing after their task ended (never)" });
+    const unnoticed = await runPolicy("routed", tasks, { notice: false });
+    ctx.pulse();
+    ctx.quality("routing.rule.notice-lost", unnoticed.tasks.filter((t, i) => t.verified && !routed.tasks[i]!.verified).length, "tasks", "lower", { note: "tasks verified without the notice that weren't with it (never: it tells you, and stops nothing)" });
+    ctx.log(`the notice: ${told.length} told, at ${mean((t) => t.noticed!.minutes).toFixed(2)} min, where they ran ${mean((t) => t.minutes).toFixed(2)} min in all; ${told.filter((t) => t.verified).length} of them verified after all`);
     ctx.quality("routing.rule.pinned-moved", results.get("pinned")!.tasks.reduce((sum, t) => sum + t.movedOffPins, 0), "turns", "lower", { note: "turns of a pinned agent's work answered by a model other than its own (the rule: never)" });
     ctx.quality("routing.rule.climbs", [...results.values()].flatMap((r) => r.tasks).filter((t) => t.escalations.length > 1).length, "tasks", "lower", { note: "tasks whose work moved up more than once: the ladder has one rung (never)" });
     ctx.quality("routing.rule.same-rung", results.get("strong")!.tasks.reduce((sum, t) => sum + t.escalations.length, 0), "", "lower", { note: "work said to move up onto the model it was on: with the planner's model the work's own there is no rung (never)" });

@@ -76,6 +76,19 @@ describe("the routing suite's stand-ins", () => {
     expect(again.tasks.map((t) => [t.began, t.routed, t.verified, t.usd])).toEqual(on.tasks.map((t) => [t.began, t.routed, t.verified, t.usd]));
   });
 
+  test("work going round on both tiers is told as it goes on, and cleared as it ends; nothing else is told, and nothing stops", async () => {
+    const r = await runPolicy("routed", EVERY);
+    const told = r.tasks.filter((t) => t.noticed);
+    // Only work nothing can do that reads forever (a stall too hard for the lead as well), told long before its budget ends it.
+    expect(told.map((t) => `${t.task.kind}${t.task.level}`)).toEqual(["stall4"]);
+    expect(told[0]!.noticed!.minutes).toBeLessThan(told[0]!.minutes / 2);
+    expect([told[0]!.noticed!.cleared, told[0]!.verified]).toEqual([true, false]);
+    // Without it, the same outcomes, costs and times: it tells you, and stops nothing.
+    const quiet = await runPolicy("routed", EVERY, { notice: false });
+    expect(quiet.tasks.some((t) => t.noticed)).toBe(false);
+    expect(quiet.tasks.map((t) => [t.verified, t.usd, t.minutes])).toEqual(r.tasks.map((t) => [t.verified, t.usd, t.minutes]));
+  });
+
   test("the same tasks give the same outcomes, costs and times when run again", async () => {
     const once = await runPolicy("routed", EVERY);
     const again = await runPolicy("routed", EVERY);

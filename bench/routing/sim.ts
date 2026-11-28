@@ -133,6 +133,11 @@ export interface TaskResult {
   began?: "engineer" | "planner";
   /** Its kind as its record kept it (core's routing.ts), and why it began where it did. */
   routed?: { kind?: string; because?: string };
+  /**
+   * When you were told it went round on both tiers (TeamRuntimeDeps.roundNotice), in virtual minutes from its start, and
+   * whether its notice was cleared as it ended. Absent: never told.
+   */
+  noticed?: { minutes: number; cleared: boolean };
 }
 
 export interface PolicyResult {
@@ -178,9 +183,10 @@ const AGENT: Agent = { id: "sim", name: "Sim", instructions: "Fix what each task
 
 /**
  * One policy over a seed's tasks, each run by the team runtime as the node runs an agent's task, in order. `memory`: each
- * agent's tasks so far are its (TeamRuntimeDeps.work, the latest first), as a node's are; off, none are.
+ * agent's tasks so far are its (TeamRuntimeDeps.work, the latest first), as a node's are; off, none are. A task going
+ * round on both tiers is told as a node tells it (TeamRuntimeDeps.roundNotice); `notice: false` leaves that out.
  */
-export async function runPolicy(policy: Policy, tasks: readonly SimTask[], options: { memory?: boolean } = {}): Promise<PolicyResult> {
+export async function runPolicy(policy: Policy, tasks: readonly SimTask[], options: { memory?: boolean; notice?: boolean } = {}): Promise<PolicyResult> {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
   try {
@@ -202,6 +208,10 @@ export async function runPolicy(policy: Policy, tasks: readonly SimTask[], optio
     /** Each tier's last prompt in this task: what its cache holds. */
     let lastPrompt = new Map<Tier, string>();
     let movedOffPins = 0;
+    /** When the task now running was told to have gone round on both tiers (roundNotice). */
+    let noticed: { minutes: number; cleared: boolean } | undefined;
+    /** Virtual seconds the task now running has taken: its calls, commands and gate runs at their stand-in seconds. */
+    const elapsed = () => (Object.keys(TIERS) as Tier[]).reduce((sum, tier) => sum + calls[tier] * TIERS[tier].callSeconds, 0) + state.commands * COMMAND_SECONDS + state.gates * GATE_SECONDS;
 
     /** A stand-in model's answer to one call: from the task's truth and what it has said in this conversation. */
     const answer = (tier: Tier, messages: { role: string; content: unknown }[]): string => {
@@ -277,6 +287,15 @@ export async function runPolicy(policy: Policy, tasks: readonly SimTask[], optio
       dependencies: () => [],
       stopWorker: async () => {},
       prices: () => PRICES,
+      // (Told as a node tells you: when, in the task's virtual minutes, and whether it was cleared as the task ended.)
+      ...(options.notice === false
+        ? {}
+        : {
+            roundNotice: {
+              raise: () => void (noticed = { minutes: elapsed() / 60, cleared: false }),
+              clear: () => void (noticed && (noticed.cleared = true)),
+            },
+          }),
     };
     const runtime = teamRuntime(deps);
 
@@ -288,6 +307,7 @@ export async function runPolicy(policy: Policy, tasks: readonly SimTask[], optio
       calls = { worker: 0, lead: 0, judge: 0 };
       lastPrompt = new Map();
       movedOffPins = 0;
+      noticed = undefined;
       const trail: string[] = [];
       const given: TeamTask = { id: each.id, room: "work", assignee: agent.id, title: `A ${each.kind} task at level ${each.level}`, goal: "Fix the total of the new orders, and verify it.", dependsOn: [], gates: ["bun test required-check"], budgetUsd: BUDGET_USD, status: "running", verified: false, progress: "", output: "", error: null, chainId: `chain-${each.id}`, createdAt: 1, updatedAt: 1, ...(each.fix ? { fix: SIM_FIX } : {}) };
       const context: TeamRunContext = {
@@ -301,8 +321,10 @@ export async function runPolicy(policy: Policy, tasks: readonly SimTask[], optio
       };
       const outcome = await runtime.executeTask(agent, given, context);
       const usd = costOf(outcome.record.spent, PRICES).usd;
-      const seconds = (Object.keys(TIERS) as Tier[]).reduce((sum, tier) => sum + calls[tier] * TIERS[tier].callSeconds, 0) + state.commands * COMMAND_SECONDS + state.gates * GATE_SECONDS;
-      results.push({ task: each, verified: outcome.verified, usd, minutes: seconds / 60, escalations: trail.filter((line) => line.startsWith("Escalated ·")).map((line) => line.split("\n")[0]!), movedOffPins, calls: { ...calls }, tokens: tokensOf(outcome.record.spent), ...(outcome.record.routing ? { began: outcome.record.routing.began, routed: { kind: outcome.record.routing.kind, because: outcome.record.routing.because } } : {}) });
+      const seconds = elapsed();
+      // (Set by the runtime's call, which the narrowing above can't see.)
+      const toldAt = noticed as TaskResult["noticed"];
+      results.push({ task: each, verified: outcome.verified, usd, minutes: seconds / 60, escalations: trail.filter((line) => line.startsWith("Escalated ·")).map((line) => line.split("\n")[0]!), movedOffPins, calls: { ...calls }, tokens: tokensOf(outcome.record.spent), ...(outcome.record.routing ? { began: outcome.record.routing.began, routed: { kind: outcome.record.routing.kind, because: outcome.record.routing.because } } : {}), ...(toldAt ? { noticed: { ...toldAt } } : {}) });
       history.set(agent.id, [{ ...given, status: outcome.verified ? "done" : "failed", verified: outcome.verified, record: outcome.record }, ...(history.get(agent.id) ?? [])]);
     }
     const verified = results.filter((r) => r.verified).length;
