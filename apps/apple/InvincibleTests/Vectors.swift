@@ -166,6 +166,19 @@ struct Vectors: Decodable {
         let devices: [Device]
     }
 
+    /// When a chat went on (lib/chats.ts timeMarks: which messages are marked; lib/time.ts timeMark: the mark's words), at
+    /// the list's now and zone. `ats`: a chat's messages' times, nil for one whose time isn't known (your agent's answers),
+    /// never marked; the words for a phone in British English and one in Danish.
+    struct ChatMarks: Decodable {
+        struct Case: Decodable { let at: Double; let words: String }
+        struct Device: Decodable { let device: String; let cases: [Case] }
+        let now: Double
+        let zone: String
+        let ats: [Double?]
+        let marked: [Int]
+        let devices: [Device]
+    }
+
     /// Your agent's line in the list that is home (lib/roster.ts homePrimaryLine), never what waits on you: what it is doing
     /// (`answering`: writing an answer this app watches, at `step`), an answer unread, else your chat's latest words or its
     /// title.
@@ -491,6 +504,7 @@ struct Vectors: Decodable {
     let unread: Unread
     let rooms: Rooms
     let listTimes: ListTimes
+    let chatMarks: ChatMarks
     let homePrimary: [HomePrimary]
     let agentForms: AgentForms
     let keys: KeyCases

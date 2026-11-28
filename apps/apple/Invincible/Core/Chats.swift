@@ -94,20 +94,22 @@ enum Chats {
         return out
     }
 
-    /// When, as a chat's mark says it: "Today 9:41", "Yesterday 18:20", the weekday and the time within the week, else
-    /// the date and the time (in the calendar's time zone).
+    /// When, as a chat's mark says it (lib/time.ts timeMark, held to the vectors' chatMarks): "Today 09:41", "Yesterday
+    /// 18:20", the weekday within the week ("Tuesday 10:00"), else the date with its month's short name ("21 Nov 2026
+    /// 09:00"). In the calendar's time zone, in English with the device's region as the list's times are (ListTime): a
+    /// phone in Danish says "Tuesday 10.00". The day and its time are joined by a space, never Apple's "at".
     static func timeMark(_ ms: Double, now: Date = .now, calendar: Calendar = .current, locale: Locale = .current) -> String {
         let date = Date(timeIntervalSince1970: ms / 1000)
-        let style = { (day: Date.FormatStyle.DateStyle, time: Date.FormatStyle.TimeStyle) in
-            Date.FormatStyle(date: day, time: time, locale: locale, calendar: calendar, timeZone: calendar.timeZone)
-        }
-        let time = date.formatted(style(.omitted, .shortened))
-        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day ?? 0
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
+        let style = Date.FormatStyle(locale: ListTime.speaking(locale), calendar: gregorian, timeZone: calendar.timeZone)
+        let clock = date.formatted(style.hour().minute())
+        let days = gregorian.dateComponents([.day], from: gregorian.startOfDay(for: date), to: gregorian.startOfDay(for: now)).day ?? 0
         switch days {
-        case 0: return "Today \(time)"
-        case 1: return "Yesterday \(time)"
-        case 2..<7: return "\(date.formatted(style(.omitted, .omitted).weekday(.wide))) \(time)"
-        default: return date.formatted(style(.abbreviated, .shortened))
+        case 0: return "Today \(clock)"
+        case 1: return "Yesterday \(clock)"
+        case 2..<7: return "\(date.formatted(style.weekday(.wide))) \(clock)"
+        default: return "\(date.formatted(style.year().month(.abbreviated).day())) \(clock)"
         }
     }
 

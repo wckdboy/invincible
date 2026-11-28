@@ -92,4 +92,22 @@ struct ChatTimeMarkTests {
         let october = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 2, hour: 10)))
         #expect(Chats.timeMark(ms(october), now: now, calendar: calendar, locale: locale).contains("Oct"))
     }
+
+    /// A chat's marks as every app makes them (lib/chats.ts timeMarks and lib/time.ts timeMark, by the vectors' chatMarks):
+    /// which of its messages are marked, an answer's unknown time never counting, and the mark's words for a phone in
+    /// British English and one in Danish, in the app's English with the phone's region.
+    @Test func aChatsMarksAreTheOnesEveryAppMakes() throws {
+        let marks = Vectors.shared.chatMarks
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: marks.zone))
+        let turns = marks.ats.enumerated().map { turn($0.offset, $0.element == nil ? .assistant : .user, at: $0.element) }
+        #expect(Chats.timeMarks(turns, calendar: calendar).keys.sorted() == marks.marked)
+        #expect(marks.devices.count == 2)
+        let now = Date(timeIntervalSince1970: marks.now / 1000)
+        for device in marks.devices {
+            for item in device.cases {
+                #expect(Chats.timeMark(item.at, now: now, calendar: calendar, locale: Locale(identifier: device.device)) == item.words, "\(device.device) \(item.at)")
+            }
+        }
+    }
 }
