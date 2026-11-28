@@ -59,18 +59,27 @@ export interface AgentConsidered {
 export const repositoryKey = (url: string): string =>
   url.trim().toLowerCase().replace(/^[a-z+]+:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "").replace(/\.git$/, "").replace(/\/+$/, "");
 
-/** A task that speaks of a browser or a screen: a desktop is likely to help, though it is not required. */
-const SCREEN = /https?:\/\/|\b(browser|website|web ?page|web site|screen|screenshot|click|desktop|sign in|log ?in|captcha)\b/i;
+/** An address on the web. */
+const ADDRESS = /https?:\/\//i;
+/** Words that speak of a browser or a screen. */
+const SCREEN_WORDS = /\b(browser|website|web ?page|web site|screen|screenshot|click|desktop|sign in|log ?in|captcha)\b/i;
+/** A task that speaks of a browser or a screen, or gives an address: a desktop is likely to help, though it is not required. */
+const SCREEN = new RegExp(`${ADDRESS.source}|${SCREEN_WORDS.source}`, "i");
+/** What is done with an address on a screen: opened, visited, browsed, clicked, looked at, signed in to. */
+const SCREEN_VERB = /\b(open(s|ed|ing)?|visit(s|ed|ing)?|brows(e|es|ed|ing)|click(s|ed|ing)?|look(s|ed|ing)?|sign(s|ed|ing)? in)\b/i;
 
 /** A gate that runs the desktop's own command (an agent's VM with a screen has it, and so does an eval's of the desktop image). */
 export const looksAtADesktop = (gate: string): boolean => /(^|[;&|(]\s*|\$\(\s*)desktop\s/.test(gate);
 
 /**
- * A desktop task: its goal speaks of a browser or a screen (SCREEN, the words that give it to an agent with a desktop),
- * or one of its gates runs the desktop's command. Its agent's desktop starts as its work begins (team-runtime), so the
+ * A desktop task: its goal speaks of a browser or a screen (SCREEN's words, which give it to an agent with a desktop),
+ * or gives an address beside what is done with one on a screen (open, visit, browse, click, look, sign in); or one of
+ * its gates runs the desktop's command. An address alone isn't one: a coding task's issue link would grow its VM to
+ * 4 GB and hold a desktop for ten minutes. Its agent's desktop starts as its work begins (team-runtime), so the
  * desktop's cold start is behind the work's first model call; every other task's starts on its first use.
  */
-export const looksToNeedAScreen = (task: { goal: string; gates: readonly string[] }): boolean => SCREEN.test(task.goal) || task.gates.some(looksAtADesktop);
+export const looksToNeedAScreen = (task: { goal: string; gates: readonly string[] }): boolean =>
+  SCREEN_WORDS.test(task.goal) || (ADDRESS.test(task.goal) && SCREEN_VERB.test(task.goal)) || task.gates.some(looksAtADesktop);
 
 /** Words that say nothing of what a task is about. */
 const STOP = new Set(

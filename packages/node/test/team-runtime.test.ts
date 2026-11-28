@@ -2398,6 +2398,9 @@ test("light by default holds for every other task: no desktop starts for one tha
   // A gate that runs the desktop's command makes it a desktop task too, whatever its goal says.
   expect(await starts(true, { ...task, gates: ["desktop text | grep -q Sent"] })).toBe(1);
   expect(await starts(true, task)).toBe(0);
+  // An address alone isn't one: a coding task's issue link grows no VM to 4 GB for ten minutes. Beside a screen's verb it is.
+  expect(await starts(true, { ...task, goal: "Fix the crash reported in https://github.com/example/app/issues/12, and verify the fix." })).toBe(0);
+  expect(await starts(true, { ...task, goal: "Open https://example.test/status and find the build's number." })).toBe(1);
   expect(await starts(false, { ...task, goal: DESKTOP_GOAL })).toBe(0);
   // (Another node's task's commands all run under the handed helper, bounded with it: nothing of it starts outside them.)
   expect(await starts(true, { ...handedTask, goal: DESKTOP_GOAL }, true)).toBe(0);

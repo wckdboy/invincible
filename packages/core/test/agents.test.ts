@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chooseAgent, type AgentFacts } from "../src/agents.ts";
+import { chooseAgent, looksToNeedAScreen, type AgentFacts } from "../src/agents.ts";
 
 /*
  * The agent best suited to a task takes it, and evidence decides, never rank.
@@ -98,5 +98,24 @@ describe("who takes a task", () => {
 
   test("no agents at all: nobody, and nothing considered", () => {
     expect(chooseAgent("Fix the importer.", {}, [])).toEqual({ choice: null, considered: [] });
+  });
+});
+
+describe("a desktop task, whose agent's desktop starts as its work begins", () => {
+  const is = (goal: string, gates: string[] = []) => looksToNeedAScreen({ goal, gates });
+
+  test("its goal speaks of a browser or a screen, or of an address beside what is done on a screen; or a gate runs the desktop", () => {
+    expect(is("Sign in to the dashboard and download the report.")).toBe(true);
+    expect(is("Take a screenshot of the settings page.")).toBe(true);
+    expect(is("Open https://example.test/status and find the build's number.")).toBe(true);
+    expect(is("Visit http://203.0.113.7:8000/ and read its version.")).toBe(true);
+    expect(is("Look at https://example.test/form and say which fields it asks for.")).toBe(true);
+    expect(is("Build the release.", ["desktop text | grep -q Released"])).toBe(true);
+  });
+
+  test("an address alone isn't one: a coding task's issue link starts no desktop", () => {
+    expect(is("Fix the crash reported in https://github.com/example/app/issues/12, and verify the fix.")).toBe(false);
+    expect(is("Update the changelog with https://example.test/releases/4.2 and run the tests.")).toBe(false);
+    expect(is("Build and verify the change.", ["bun test"])).toBe(false);
   });
 });

@@ -103,8 +103,10 @@ C1 step 10. An agent whose desktop isn't used costs what an agent without one do
   script that calls `desktop`) starts the desktop without the growing: the VM grows at the next command where the node
   sees a desktop verb.
 - **A desktop task's starts as its work begins.** A task whose goal speaks of a browser or a screen (core's
-  `looksToNeedAScreen`, the words that give it to an agent with a desktop), or one of whose gates runs `desktop`, has
-  its VM run its own `desktop start` as the work begins, beside its first model call, never waited for. Its cold start
+  `looksToNeedAScreen`, the words that give it to an agent with a desktop), or gives an address beside what is done
+  with one on a screen (open, visit, browse, click, look, sign in), or one of whose gates runs `desktop`, has its VM
+  run its own `desktop start` as the work begins, beside its first model call, never waited for. An address alone
+  isn't one: a coding task's issue link would grow its VM to 4 GB and hold a desktop for ten minutes. Its cold start
   (deskd, its memory, the display, the browser's start) is then behind that call. From the work's start to its first
   page shown, with a first call of 2.6 s (a model call's median), it went from 4.8 to 2.9 s on Kata and from 3.7 to
   2.8 s on runc; with a first call that answers at once, 2.6 to 2.1 s and 1.1 to 1.2 s, within the spread (Ultra, 28
