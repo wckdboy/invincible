@@ -1997,16 +1997,24 @@ export function createApp(ctx: AppContext) {
     if (mindCounts.take(events, rebuilt)) liveChanges.poke();
   });
   // What moves in the background says so as it moves, as the mind's events do: a turn as it begins and ends, a run as it
-  // reports (and an agent's work, each step and each end, through the team service's onChange below). The look is the net
-  // under them, for what only the clock or another node moves.
-  const stopTurns = ctx.turns.onChange(() => liveChanges.poke());
-  const stopRuns = ctx.runs.onChange(() => liveChanges.poke());
+  // reports (and an agent's work, each step and each end, through the team service's onChange below), whatever the node
+  // writes of your chats, your notifications, its drafts, its agents' requests and its servers' questions, and a peer as
+  // it comes or goes. A deadline wakes the stream itself (live.ts). The look is the net under them.
+  const stopWatching = [
+    ctx.turns.onChange(() => liveChanges.poke()),
+    ctx.runs.onChange(() => liveChanges.poke()),
+    ctx.chats.onChange(() => liveChanges.poke()),
+    ctx.notify.onChange(() => liveChanges.poke()),
+    ctx.loopDrafts.onChange(() => liveChanges.poke()),
+    ctx.connectorRequests.onChange(() => liveChanges.poke()),
+    ctx.questions?.onChange(() => liveChanges.poke()) ?? (() => {}),
+    ctx.sync.onChange(() => liveChanges.poke()),
+  ];
   ctx.shutdown?.addEventListener(
     "abort",
     () => {
       stopLedger();
-      stopTurns();
-      stopRuns();
+      for (const stop of stopWatching) stop();
       liveChanges.close();
     },
     { once: true },

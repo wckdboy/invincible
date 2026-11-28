@@ -12,9 +12,10 @@ import { freePort } from "./ports.ts";
 
 /*
  * What moves in the background reaches your devices' live streams as it moves (speed, 28 November 2026): a turn that
- * ends while nobody asks anything is told within a few milliseconds, not at the stream's next look. Before, only the
- * mind's events and requests poked the stream, and it looked every LOOK_MS (250 ms) for the rest: a task's change reached
- * a client 144 ms after it at the median (Ultra), a uniform wait of up to a look.
+ * ends while nobody asks anything, a chat the node keeps by itself, where a device said it is, each told within a few
+ * milliseconds, not at the stream's next look. Before, only the mind's events and requests poked the stream, and it
+ * looked every 250 ms for the rest: a task's change reached a client 144 ms after it at the median (Ultra), a uniform
+ * wait of up to a look. Now the look (LOOK_MS) is only the net under what tells.
  */
 
 const caps: Capabilities = {
@@ -111,8 +112,11 @@ describe("the live stream's look", () => {
       let devicesRead = 0;
       daemon.store.devices = () => (devicesRead++, read());
       try {
-        // Four looks and more, with nothing else here that reads the devices (sync's ticks and the notifications' are off).
-        await Bun.sleep(LOOK_MS * 4 + 100);
+        // Four looks, each a chat kept's (nothing else here reads the devices: sync's ticks and the notifications' are off).
+        for (let i = 0; i < 4; i++) {
+          daemon.chats.create({ title: `A look's (${i})`, project: null, role: "planner" });
+          await Bun.sleep(40);
+        }
         expect(devicesRead).toBe(0);
       } finally {
         daemon.store.devices = read;
@@ -135,8 +139,8 @@ describe("the live stream, as the background moves", () => {
         // The turn's answer, to its end: then the turn has ended, and nothing more is asked of the node.
         await asked.text();
         const ended = performance.now();
-        // Its end, as the stream tells it: the last word of `turns` within the next look (none comes but its own).
-        await Bun.sleep(LOOK_MS + 100);
+        // Its end, as the stream tells it: the last word of `turns`, after it, within a look at most (none comes but its own).
+        await until(() => told.some((m) => m.type === "changed" && m.topics.includes("turns") && m.at >= ended), LOOK_MS + 100);
         const last = told.filter((m) => m.type === "changed" && m.topics.includes("turns")).at(-1);
         expect(last).toBeDefined();
         after.push(last!.at - ended);
@@ -148,4 +152,38 @@ describe("the live stream, as the background moves", () => {
       stop.abort();
     }
   }, 30_000);
+
+  test("what the node writes of its own, with no request, is told within a few milliseconds: a chat it keeps, where a device is", async () => {
+    const stop = new AbortController();
+    const told = await listen(stop.signal);
+    try {
+      const after: [string, number][] = [];
+      const writes: [string, (i: number) => void][] = [
+        ["turns", (i) => void daemon.chats.create({ title: `Kept by itself (${i})`, project: null, role: "planner" })],
+        // (A device it never saw, in a zone: what Settings shows of where you are moves.)
+        ["notify", (i) => daemon.notify.seen(`c_live-told-${i}`, "Europe/Paris")],
+      ];
+      for (const [topic, write] of writes) {
+        for (let i = 0; i < 3; i++) {
+          const wrote = performance.now();
+          write(i);
+          const heard = () => told.find((m) => m.type === "changed" && m.topics.includes(topic) && m.at >= wrote);
+          await until(() => heard() !== undefined, LOOK_MS + 100);
+          expect([topic, heard() !== undefined]).toEqual([topic, true]);
+          after.push([topic, heard()!.at - wrote]);
+        }
+      }
+      // (Told by the store's own word, within SOON_MS and a little. By the look alone, under 100 ms is two chances in
+      // five each: six in six, one in 244.)
+      for (const [topic, ms] of after) expect([topic, ms < 100]).toEqual([topic, true]);
+    } finally {
+      stop.abort();
+    }
+  }, 30_000);
 });
+
+/** Until `done`, or `ms` have passed. */
+async function until(done: () => boolean, ms: number): Promise<void> {
+  const deadline = performance.now() + ms;
+  while (!done() && performance.now() < deadline) await Bun.sleep(2);
+}

@@ -3,11 +3,12 @@ import { LIVE_TOPICS, type LiveTopic } from "@invincible/core";
 
 /*
  * What changed on this node, for the live stream (core's live.ts). Each topic has a stamp: a short string that changes
- * whenever its route would answer otherwise, cheap enough to read four times a second. The stamps are read again
- * soon after anything is written (`poke`: the mind took events, a request was answered, an agent's work moved, a turn
- * began or ended, a run reported) and every LOOK_MS while anyone listens, for what changes by itself (a deadline
- * passing, a peer coming or going). Whoever listens is told the topics whose stamps moved, together, and nothing more.
- * While nobody listens nothing is read.
+ * whenever its route would answer otherwise, cheap to read. The stamps are read again soon after anything is written
+ * (`poke`: the mind took events, a request was answered, an agent's work moved, a turn began or ended, a run reported,
+ * the node wrote a chat, a notification's state, a draft, a request or a question of its own, a peer came or went), and
+ * as the next deadline a stamp names comes (`due`: an ask that lapses). Every LOOK_MS while anyone listens they are read
+ * anyway: the net under the pokes, for what nothing tells (another process's write). Whoever listens is told the topics
+ * whose stamps moved, together, and nothing more. While nobody listens nothing is read.
  *
  * Where things stand is a count of the times anything moved since this began, each topic keeping the count at which it
  * last moved. A reader's cursor is the latest count among the topics it may read, sealed (Seal): it moves only with
@@ -18,13 +19,20 @@ import { LIVE_TOPICS, type LiveTopic } from "@invincible/core";
  * again: another key), one past where its reader stands, or one that isn't ours is one it can't answer for.
  */
 
-/** While anyone listens, the stamps are read this often: for what nothing pokes (a deadline passing, a peer). */
+/**
+ * While anyone listens, the stamps are read this often whatever pokes them: the net for what nothing tells. What moves
+ * on this node pokes, and a deadline wakes it, so this is not how soon anything is told.
+ */
 export const LOOK_MS = 250;
 /** A poke is read this soon after it, so a burst of writes (a decision and its ledger line) is told once. */
 export const SOON_MS = 15;
+/** The longest a timer waits (setTimeout's own bound); a deadline further off is looked at again then. */
+const LONGEST_WAIT_MS = 2 ** 31 - 1;
 
+/** A topic's stamp, and, for one that also moves with the clock, how many ms until it next does (Infinity: never). */
+export type Stamp = (() => string) & { due?: () => number };
 /** Each topic's stamp, as this node reads it. */
-export type Stamps = Record<LiveTopic, () => string>;
+export type Stamps = Record<LiveTopic, Stamp>;
 
 /**
  * A count, sealed: one AES block holding it beside eight zero bytes, under a key made for this tracker alone. Opaque to
@@ -62,6 +70,8 @@ export class LiveChanges {
   private kept: Record<LiveTopic, string> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private soon: ReturnType<typeof setTimeout> | null = null;
+  /** The look at the next deadline a stamp named, while anyone listens. */
+  private wake: ReturnType<typeof setTimeout> | null = null;
   /** Topics whose stamp failed, said once each until it reads again. */
   private readonly failing = new Set<LiveTopic>();
   /** How each cursor it gives is sealed: one of another tracker (the node started again) never opens. */
@@ -169,8 +179,10 @@ export class LiveChanges {
   private idle(): void {
     if (this.timer) clearInterval(this.timer);
     if (this.soon) clearTimeout(this.soon);
+    if (this.wake) clearTimeout(this.wake);
     this.timer = null;
     this.soon = null;
+    this.wake = null;
     // (Kept, for what moves before anyone listens again: a write's poke now finds nobody, and nothing is read.)
     if (this.last) this.kept = this.last;
     this.last = null;
@@ -190,7 +202,30 @@ export class LiveChanges {
         this.failing.add(topic);
       }
     }
+    this.wakeAtNextDeadline();
     return out;
+  }
+
+  /** A look when the soonest deadline any stamp names comes (a moment after, so it has passed when read). */
+  private wakeAtNextDeadline(): void {
+    if (this.wake) clearTimeout(this.wake);
+    this.wake = null;
+    let soonest = Infinity;
+    for (const topic of LIVE_TOPICS) {
+      try {
+        soonest = Math.min(soonest, this.stamps[topic].due?.() ?? Infinity);
+      } catch {
+        /* read as none: the look's net still reads it */
+      }
+    }
+    if (!Number.isFinite(soonest)) return;
+    this.wake = setTimeout(
+      () => {
+        this.wake = null;
+        this.look();
+      },
+      Math.min(Math.max(0, soonest) + 1, LONGEST_WAIT_MS),
+    );
   }
 }
 
@@ -233,13 +268,14 @@ export class LedgerCounts {
 /**
  * The stamp of a list the mind holds whose items' states also move with the clock (an ask that lapses, an approval no
  * longer sent): read again only when the mind changed it (`version`) or the next of its deadlines came (`due`, from what
- * was read), so a deadline passing is told as a write is.
+ * was read), so a deadline passing is told as a write is. It says how long until that next deadline (Stamp's `due`), so
+ * the stream looks then.
  */
-export function timedStamp<T>(version: () => number, read: (now: number) => readonly T[], due: (item: T) => number | null, now: () => number = Date.now): () => string {
+export function timedStamp<T>(version: () => number, read: (now: number) => readonly T[], due: (item: T) => number | null, now: () => number = Date.now): Stamp {
   let seen: number | null = null;
   let next = Infinity;
   let passed = 0;
-  return () => {
+  const stamp = () => {
     const v = version();
     const at = now();
     if (v === seen && at < next) return `${v}.${passed}`;
@@ -252,4 +288,5 @@ export function timedStamp<T>(version: () => number, read: (now: number) => read
     }
     return `${v}.${passed}`;
   };
+  return Object.assign(stamp, { due: () => (Number.isFinite(next) ? next - now() : Infinity) });
 }

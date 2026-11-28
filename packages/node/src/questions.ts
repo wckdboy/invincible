@@ -31,11 +31,30 @@ interface Waiting {
 
 export class Questions {
   private readonly waiting = new Map<string, Waiting>();
+  /** Who is told as a question begins to wait and as it ends (the live stream's `questions`). */
+  private readonly changes = new Set<() => void>();
 
   constructor(private readonly o: { now?: () => number; waitMs?: number; log?: (line: string) => void; changed?: () => void } = {}) {}
 
   private now(): number {
     return this.o.now?.() ?? Date.now();
+  }
+
+  /** Told as a question begins to wait and as it ends, until what this returns is called. */
+  onChange(fn: () => void): () => void {
+    this.changes.add(fn);
+    return () => void this.changes.delete(fn);
+  }
+
+  private changed(): void {
+    this.o.changed?.();
+    for (const fn of [...this.changes]) {
+      try {
+        fn();
+      } catch {
+        /* one watcher's trouble is its own */
+      }
+    }
   }
 
   /** What waits for you, oldest first. */
@@ -66,7 +85,7 @@ export class Questions {
         clearTimeout(was.timer);
         this.waiting.delete(id);
         signal?.removeEventListener("abort", stopped);
-        this.o.changed?.();
+        this.changed();
         resolve(result);
       };
       // (The call stopped first: its question goes with it.)
@@ -74,7 +93,7 @@ export class Questions {
       signal?.addEventListener("abort", stopped, { once: true });
       const timer = setTimeout(() => finish({ action: "cancel" }), this.o.waitMs ?? QUESTION_WAIT_MS);
       this.waiting.set(id, { view, done: finish, timer });
-      this.o.changed?.();
+      this.changed();
     });
   }
 

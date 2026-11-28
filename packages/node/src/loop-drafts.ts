@@ -31,8 +31,17 @@ export interface LoopDraft {
 }
 
 export class LoopDrafts {
+  /** Who is told after each write (the live stream reads what waits). */
+  private readonly changes = new Set<() => void>();
+
   constructor(private readonly db: Database) {
     db.exec("CREATE TABLE IF NOT EXISTS loop_drafts (id TEXT PRIMARY KEY, at INTEGER NOT NULL, expires INTEGER NOT NULL, data TEXT NOT NULL)");
+  }
+
+  /** Told after each write, until what this returns is called. */
+  onChange(fn: () => void): () => void {
+    this.changes.add(fn);
+    return () => void this.changes.delete(fn);
   }
 
   /** Keeps a new draft (a draft of a loop with the same name replaces the older one) and gives it its id. */
@@ -43,6 +52,7 @@ export class LoopDrafts {
     this.db.query("INSERT INTO loop_drafts (id, at, expires, data) VALUES (?, ?, ?, ?)").run(kept.id, kept.at, kept.expires, JSON.stringify(kept));
     const extra = this.list(now).length - MOST_DRAFTS;
     if (extra > 0) for (const old of this.list(now).slice(-extra)) this.remove(old.id);
+    this.changed();
     return kept;
   }
 
@@ -60,7 +70,19 @@ export class LoopDrafts {
 
   /** Gone: added as a loop, or dismissed. Whether there was one. */
   remove(id: string): boolean {
-    return this.db.query("DELETE FROM loop_drafts WHERE id = ?").run(id).changes > 0;
+    const removed = this.db.query("DELETE FROM loop_drafts WHERE id = ?").run(id).changes > 0;
+    if (removed) this.changed();
+    return removed;
+  }
+
+  private changed(): void {
+    for (const fn of [...this.changes]) {
+      try {
+        fn();
+      } catch {
+        /* one watcher's trouble is its own */
+      }
+    }
   }
 
   private sweep(now: number): void {

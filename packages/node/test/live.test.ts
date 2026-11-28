@@ -3,8 +3,9 @@ import { LIVE_TOPICS, type LiveTopic, routes, SCOPES } from "@invincible/core";
 import { LiveChanges, LedgerCounts, mindTopics, type Stamps, timedStamp } from "../src/live.ts";
 
 /*
- * What changed on a node, for the live stream (live.ts): each topic's stamp read again soon after a write and four times
- * a second while anyone listens, and only the topics whose stamps moved told; nothing read while nobody listens.
+ * What changed on a node, for the live stream (live.ts): each topic's stamp read again soon after a write, as a deadline
+ * it names comes, and every LOOK_MS while anyone listens, and only the topics whose stamps moved told; nothing read while
+ * nobody listens.
  */
 
 /** Stamps held in hand: `set` one, and count how often each was read. */
@@ -274,6 +275,36 @@ describe("the mind's part", () => {
     expect([counts.of("actions"), counts.of("notices"), counts.of("team")]).toEqual([2, 1, 0]);
     expect(counts.take([], true)).toBe(true);
     expect(LIVE_TOPICS.every((topic) => counts.of(topic) >= 1)).toBe(true);
+  });
+});
+
+describe("a deadline a stamp names", () => {
+  test("wakes the stream as it comes: told then, with no poke, long before the look", async () => {
+    const s = stamps();
+    const due = Date.now() + 60;
+    const table: Stamps = { ...s.table, actions: timedStamp(() => 0, () => [{ due }], (item) => item.due) };
+    const live = new LiveChanges(table, { everyMs: 60_000, soonMs: 1 });
+    const start = Date.now();
+    const told: { topics: LiveTopic[]; after: number }[] = [];
+    const stop = live.subscribe((topics) => told.push({ topics, after: Date.now() - start }));
+    await Bun.sleep(250);
+    stop();
+    expect(told.map((t) => t.topics)).toEqual([["actions"]]);
+    // Not before its time, and soon after it.
+    expect(told[0]!.after).toBeGreaterThanOrEqual(due - start);
+    expect(told[0]!.after).toBeLessThan(due - start + 100);
+  });
+
+  test("leaves nothing waiting once nobody listens: its time comes and nothing is read", async () => {
+    const s = stamps();
+    const due = Date.now() + 40;
+    let reads = 0;
+    const table: Stamps = { ...s.table, actions: timedStamp(() => 0, () => (reads++, [{ due }]), (item) => item.due) };
+    const live = new LiveChanges(table, { everyMs: 60_000, soonMs: 1 });
+    live.subscribe(() => {})();
+    const after = reads;
+    await Bun.sleep(120);
+    expect(reads).toBe(after);
   });
 });
 

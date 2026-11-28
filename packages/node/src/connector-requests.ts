@@ -25,8 +25,17 @@ export interface ConnectorRequest {
 }
 
 export class ConnectorRequests {
+  /** Who is told after each write (the live stream reads what waits). */
+  private readonly changes = new Set<() => void>();
+
   constructor(private readonly db: Database) {
     db.exec("CREATE TABLE IF NOT EXISTS connector_requests (id TEXT PRIMARY KEY, at INTEGER NOT NULL, expires INTEGER NOT NULL, data TEXT NOT NULL)");
+  }
+
+  /** Told after each write, until what this returns is called. */
+  onChange(fn: () => void): () => void {
+    this.changes.add(fn);
+    return () => void this.changes.delete(fn);
   }
 
   /**
@@ -40,6 +49,7 @@ export class ConnectorRequests {
     this.db.query("INSERT INTO connector_requests (id, at, expires, data) VALUES (?, ?, ?, ?)").run(kept.id, kept.at, kept.expires, JSON.stringify(kept));
     const extra = this.list(now).length - MOST_REQUESTS;
     if (extra > 0) for (const old of this.list(now).slice(-extra)) this.remove(old.id);
+    this.changed();
     return kept;
   }
 
@@ -53,7 +63,9 @@ export class ConnectorRequests {
 
   /** Dismissed. Whether there was one. */
   remove(id: string): boolean {
-    return this.db.query("DELETE FROM connector_requests WHERE id = ?").run(id).changes > 0;
+    const removed = this.db.query("DELETE FROM connector_requests WHERE id = ?").run(id).changes > 0;
+    if (removed) this.changed();
+    return removed;
   }
 
   /** Answered: the connector was installed. How many requests for it went. */
@@ -64,6 +76,16 @@ export class ConnectorRequests {
   /** Answered: the agent may use the connector now. */
   resolveAccess(connector: string, agent: string, now = Date.now()): number {
     return this.list(now).filter((r) => r.connector === connector && r.access && r.by === agent && this.remove(r.id)).length;
+  }
+
+  private changed(): void {
+    for (const fn of [...this.changes]) {
+      try {
+        fn();
+      } catch {
+        /* one watcher's trouble is its own */
+      }
+    }
   }
 
   private sweep(now: number): void {

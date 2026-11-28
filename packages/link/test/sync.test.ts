@@ -76,6 +76,24 @@ describe("which peers are online, as the live stream reads it", () => {
     for (let i = 0; i < 100; i++) engine.onlineStamp();
     expect(devicesRead).toBe(0);
   });
+
+  test("tells its watchers as a peer comes online and as it goes, once each, and nothing for a pull that finds it as it was", async () => {
+    const { a, b, storeA, storeB } = fleet();
+    let up = true;
+    const engine = new SyncEngine(storeB, b, { fetch: async (url, init) => (up ? today(storeA, { bodies: [], largest: 0 })(url, init) : new Response("stopping", { status: 503 })) });
+    let tells = 0;
+    const stop = engine.onChange(() => void tells++);
+    const told = async (isUp: boolean): Promise<number> => {
+      up = isUp;
+      const before = tells;
+      await engine.pullFrom(peer(a)).catch(() => {});
+      return tells - before;
+    };
+    // Never reached, found offline: nothing moved. Then on, on again, off, off again, on.
+    expect([await told(false), await told(true), await told(true), await told(false), await told(false), await told(true)]).toEqual([0, 1, 0, 1, 0, 1]);
+    stop();
+    expect(await told(false)).toBe(0);
+  });
 });
 
 describe("the sync engine", () => {

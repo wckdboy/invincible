@@ -224,6 +224,8 @@ export class ChatStore {
   private readonly db: Database;
   /** When this node opened it: with the rows written since, which writing of the chats a device saw. */
   private readonly opened: string;
+  /** Who is told after each write (the live stream's `turns`, whose stamp is version()). */
+  private readonly changes = new Set<() => void>();
 
   constructor(
     path: string,
@@ -308,7 +310,7 @@ export class ChatStore {
     story?: { text: string; through: number; updatedAt: number },
   ): KeptSummary {
     const id = ConversationId.parse(conversation.id);
-    return this.db.transaction(() => {
+    const adopted = this.db.transaction(() => {
       if (this.summary(id)) throw new Error(`a chat ${id} is here already`);
       this.db
         .query("INSERT INTO conversations (id, title, project, role, pinned, created_at, updated_at, answered_at, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -326,13 +328,22 @@ export class ChatStore {
       if (story && through !== undefined) this.db.query("INSERT INTO stories (conversation, text, through, updated_at) VALUES (?, ?, ?, ?)").run(id, story.text, through, story.updatedAt);
       return this.summary(id)!;
     })();
+    this.changed();
+    return adopted;
   }
 
   create(input: { title: string; project: string | null; role: string }): KeptSummary {
     const id = `cv_${randomId(16)}`;
     const at = this.now();
     this.db.query("INSERT INTO conversations (id, title, project, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, input.title, input.project, input.role, at, at);
+    this.changed();
     return this.summary(id)!;
+  }
+
+  /** Told after each write here, until what this returns is called. */
+  onChange(fn: () => void): () => void {
+    this.changes.add(fn);
+    return () => void this.changes.delete(fn);
   }
 
   /**
@@ -398,6 +409,7 @@ export class ChatStore {
   /** Its older messages, through `through`, folded into its story. */
   keepStory(id: string, text: string, through: number): void {
     this.db.query("INSERT INTO stories (conversation, text, through, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(conversation) DO UPDATE SET text = excluded.text, through = excluded.through, updated_at = excluded.updated_at").run(id, text, through, this.now());
+    this.changed();
   }
 
   /** What the model sees of it: every question, and every answer that has words in it. */
@@ -431,12 +443,15 @@ export class ChatStore {
       .get(id, content, attachments?.length ? JSON.stringify(attachments) : null, at, at, look?.set ?? null, look?.note ?? null)!;
     this.db.query("UPDATE conversations SET waiting = NULL WHERE id = ?").run(id);
     this.touch(id);
+    this.changed();
     return row.id;
   }
 
   /** An answer begins: it's kept even if nothing comes of it (an error, a stop). */
   startAnswer(id: string): number {
-    return this.db.query<{ id: number }, [string, number]>("INSERT INTO messages (conversation, role, content, status, created_at) VALUES (?, 'assistant', '', 'streaming', ?) RETURNING id").get(id, this.now())!.id;
+    const started = this.db.query<{ id: number }, [string, number]>("INSERT INTO messages (conversation, role, content, status, created_at) VALUES (?, 'assistant', '', 'streaming', ?) RETURNING id").get(id, this.now())!.id;
+    this.changed();
+    return started;
   }
 
   /** Its answer, ended. `read`: a device was watching it to its end, so it was read there; otherwise it's new to you. */
@@ -448,11 +463,14 @@ export class ChatStore {
     this.db.query("UPDATE conversations SET answered_at = ? WHERE id = ?").run(at, conversation);
     if (read) this.see(conversation);
     this.touch(conversation);
+    this.changed();
   }
 
   /** You read it: what it has answered in it so far is no longer new. True when that changed anything. */
   see(id: string): boolean {
-    return this.db.query("UPDATE conversations SET seen_at = answered_at WHERE id = ? AND answered_at > COALESCE(seen_at, 0)").run(id).changes > 0;
+    const seen = this.db.query("UPDATE conversations SET seen_at = answered_at WHERE id = ? AND answered_at > COALESCE(seen_at, 0)").run(id).changes > 0;
+    if (seen) this.changed();
+    return seen;
   }
 
   /** The chats with an answer you haven't read, the newest answer first. */
@@ -466,18 +484,21 @@ export class ChatStore {
   /** An answer that never came to anything (you steered before it'd said or done a thing): it isn't kept. */
   dropAnswer(conversation: string, message: number): void {
     this.db.query("DELETE FROM messages WHERE id = ? AND conversation = ? AND role = 'assistant'").run(message, conversation);
+    this.changed();
   }
 
   /** What a turn left waiting on you (null: nothing). */
   setWaits(conversation: string, waits: Waits | null): void {
     const empty = !waits || (!waits.actions.length && !waits.secrets.length && !waits.question);
     this.db.query("UPDATE conversations SET waiting = ? WHERE id = ?").run(empty ? null : JSON.stringify(waits), conversation);
+    this.changed();
   }
 
   update(id: string, change: { title?: string; project?: string | null; pinned?: boolean }): KeptSummary | null {
     if (change.title !== undefined) this.db.query("UPDATE conversations SET title = ? WHERE id = ?").run(change.title, id);
     if (change.project !== undefined) this.db.query("UPDATE conversations SET project = ? WHERE id = ?").run(change.project, id);
     if (change.pinned !== undefined) this.db.query("UPDATE conversations SET pinned = ? WHERE id = ?").run(change.pinned ? 1 : 0, id);
+    this.changed();
     return this.summary(id);
   }
 
@@ -488,16 +509,20 @@ export class ChatStore {
   dropLastExchange(id: string, question: string): void {
     const last = this.db.query<{ id: number; content: string }, [string]>("SELECT id, content FROM messages WHERE conversation = ? AND role = 'user' ORDER BY id DESC LIMIT 1").get(id);
     if (last && last.content === question) this.db.query("DELETE FROM messages WHERE conversation = ? AND id >= ?").run(id, last.id);
+    this.changed();
   }
 
   /** Gone for good: secure_delete overwrites its pages in the file (what was queued behind it goes with it). */
   delete(id: string): boolean {
-    return this.db.query("DELETE FROM conversations WHERE id = ?").run(id).changes > 0;
+    const deleted = this.db.query("DELETE FROM conversations WHERE id = ?").run(id).changes > 0;
+    if (deleted) this.changed();
+    return deleted;
   }
 
   /** A project that's gone leaves its chats where they were, outside any project. */
   projectRemoved(project: string): void {
     this.db.query("UPDATE conversations SET project = NULL WHERE project = ?").run(project);
+    this.changed();
   }
 
   /* ---------- the queue: your messages waiting for their turn ---------- */
@@ -510,6 +535,7 @@ export class ChatStore {
     this.db
       .query("INSERT INTO looks (id, conversation, at, note, set_at, zone, by_kind, by_device, held, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .run(id, look.conversation, look.at, look.note, look.set ?? this.now(), look.zone, look.by.kind, look.by.device, look.held ? JSON.stringify(look.held) : null, look.origin ?? null);
+    this.changed();
     return this.look(id)!;
   }
 
@@ -538,7 +564,9 @@ export class ChatStore {
 
   /** A look ended: taken (done), called off, or failed, and why. Only one that still waits. */
   lookEnd(id: string, state: "done" | "cancelled" | "failed", why: string | null): boolean {
-    return this.db.query("UPDATE looks SET state = ?, why = ?, ended_at = ? WHERE id = ? AND state = 'waiting'").run(state, why, this.now(), id).changes > 0;
+    const ended = this.db.query("UPDATE looks SET state = ?, why = ?, ended_at = ? WHERE id = ? AND state = 'waiting'").run(state, why, this.now(), id).changes > 0;
+    if (ended) this.changed();
+    return ended;
   }
 
   /** An agent's task it gave from a chat (its row above that chat's message box while it's under way), and whose turn
@@ -548,6 +576,7 @@ export class ChatStore {
     this.db
       .query("INSERT OR IGNORE INTO handoffs (conversation, task, at, by_kind, by_device, zone) VALUES (?, ?, ?, ?, ?, ?)")
       .run(conversation, task, this.now(), from?.by.kind ?? null, from?.by.device ?? null, from?.zone ?? null);
+    this.changed();
   }
 
   /**
@@ -566,12 +595,13 @@ export class ChatStore {
 
   /** Lets go of the hand-offs given before `before` whose end it may still tell: never told, never read again ("gone"). */
   handoffsLetGo(before: number): void {
-    this.db.query("UPDATE handoffs SET told = 'gone' WHERE by_device IS NOT NULL AND (told IS NULL OR told = 'interrupted') AND at <= ?").run(before);
+    if (this.db.query("UPDATE handoffs SET told = 'gone' WHERE by_device IS NOT NULL AND (told IS NULL OR told = 'interrupted') AND at <= ?").run(before).changes > 0) this.changed();
   }
 
   /** How it told of a task's end (its status then), or that it never will ("gone"). */
   handoffTold(conversation: string, task: string, told: string): void {
     this.db.query("UPDATE handoffs SET told = ? WHERE conversation = ? AND task = ?").run(told, conversation, task);
+    this.changed();
   }
 
   /** The tasks it gave from a chat, newest first. */
@@ -590,12 +620,15 @@ export class ChatStore {
     const row = this.db
       .query<QueueRow, [string, number, string, string | null, string, string, number]>("INSERT INTO queue (conversation, ord, content, role, by_kind, by_device, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *")
       .get(conversation, ord, message.text, message.role, message.by.kind, message.by.device, this.now())!;
+    this.changed();
     return queuedOf(row);
   }
 
   /** Change a queued message's words. It becomes its editor's: when its turn comes it runs as them, with what they may do then. */
   queueEdit(conversation: string, id: number, text: string, by: QueuedBy): boolean {
-    return this.db.query("UPDATE queue SET content = ?, by_kind = ?, by_device = ? WHERE id = ? AND conversation = ?").run(text, by.kind, by.device, id, conversation).changes > 0;
+    const edited = this.db.query("UPDATE queue SET content = ?, by_kind = ?, by_device = ? WHERE id = ? AND conversation = ?").run(text, by.kind, by.device, id, conversation).changes > 0;
+    if (edited) this.changed();
+    return edited;
   }
 
   /** Take a queued message out (the first, or the one named): its turn has come, or you removed it. An emptied queue holds nothing. */
@@ -607,6 +640,7 @@ export class ChatStore {
     if (!row) return null;
     this.db.query("DELETE FROM queue WHERE id = ?").run(row.id);
     this.releaseIfEmpty(conversation);
+    this.changed();
     return queuedOf(row);
   }
 
@@ -614,6 +648,7 @@ export class ChatStore {
   queueClear(conversation: string): number {
     const removed = this.db.query("DELETE FROM queue WHERE conversation = ?").run(conversation).changes;
     this.releaseIfEmpty(conversation);
+    this.changed();
     return removed;
   }
 
@@ -626,6 +661,7 @@ export class ChatStore {
   hold(conversation: string, why: QueueHold | null): void {
     this.db.query("UPDATE conversations SET queue_held = ? WHERE id = ?").run(why, conversation);
     if (why) this.releaseIfEmpty(conversation);
+    this.changed();
   }
 
   /** The chats with messages queued, the one whose next message has waited longest first. */
@@ -638,6 +674,16 @@ export class ChatStore {
 
   close(): void {
     this.db.close();
+  }
+
+  private changed(): void {
+    for (const fn of [...this.changes]) {
+      try {
+        fn();
+      } catch {
+        /* one watcher's trouble is its own */
+      }
+    }
   }
 
   private releaseIfEmpty(conversation: string): void {

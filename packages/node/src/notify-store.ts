@@ -110,6 +110,8 @@ export class NotifyStore {
   private readonly db: Database;
   /** How many were kept for devices that collect since this began (each a sending): what tells them to collect. */
   private keptCount = 0;
+  /** Who is told after each write that may move stamp() (the live stream's `notify`). */
+  private readonly changes = new Set<() => void>();
 
   constructor(
     path: string,
@@ -142,6 +144,22 @@ export class NotifyStore {
     this.db.close();
   }
 
+  /** Told after each write that may move stamp(), until what this returns is called. */
+  onChange(fn: () => void): () => void {
+    this.changes.add(fn);
+    return () => void this.changes.delete(fn);
+  }
+
+  private changed(): void {
+    for (const fn of [...this.changes]) {
+      try {
+        fn();
+      } catch {
+        /* one watcher's trouble is its own */
+      }
+    }
+  }
+
   /* ---------- the iPhone's Live Activities (core's live-activity.ts) ---------- */
 
   /** One of a device's Live Activities, for its task: kept (anew, said nothing yet), replacing that task's last. */
@@ -150,10 +168,12 @@ export class NotifyStore {
       .query(`INSERT INTO activities (device, task, token, environment, at, said) VALUES (?, ?, ?, ?, ?, NULL)
               ON CONFLICT (device, task) DO UPDATE SET token = excluded.token, environment = excluded.environment, at = excluded.at, said = NULL`)
       .run(device, task, token, environment, this.now());
+    this.changed();
   }
 
   dropActivity(device: string, task: string): void {
     this.db.query("DELETE FROM activities WHERE device = ? AND task = ?").run(device, task);
+    this.changed();
   }
 
   /** What it last told an activity (its state without its time), so it says nothing while that doesn't change. */
@@ -199,6 +219,7 @@ export class NotifyStore {
         .run(device, sub.endpoint, sub.p256dh, sub.auth, sub.service, at, at);
       this.db.query("DELETE FROM lost WHERE device = ?").run(device);
     })();
+    this.changed();
     return this.subscription(device)!;
   }
 
@@ -206,6 +227,7 @@ export class NotifyStore {
    * there from now on. */
   move(device: string, endpoint: string, service: string): void {
     this.db.query("UPDATE subscriptions SET endpoint = ?, service = ?, updated_at = ? WHERE device = ?").run(endpoint, service, this.now(), device);
+    this.changed();
   }
 
   /** This device's subscription goes, and with it what was kept for it, what waited to be caught up, and any record that
@@ -215,7 +237,9 @@ export class NotifyStore {
     this.db.query("DELETE FROM collectors WHERE device = ?").run(device);
     this.forgetLost(device);
     this.caughtUp(device);
-    return this.db.query("DELETE FROM subscriptions WHERE device = ?").run(device).changes > 0;
+    const had = this.db.query("DELETE FROM subscriptions WHERE device = ?").run(device).changes > 0;
+    this.changed();
+    return had;
   }
 
   /** This device's app collects its notifications (the Android app): what its push service refuses is kept for it. */
@@ -234,6 +258,7 @@ export class NotifyStore {
     this.db
       .query("INSERT INTO presence (device, at, zone) VALUES (?, ?, ?) ON CONFLICT (device) DO UPDATE SET at = excluded.at, zone = COALESCE(excluded.zone, presence.zone)")
       .run(device, this.now(), zone && isTimeZone(zone) ? zone.slice(0, 64) : null);
+    this.changed();
   }
 
   /** When each device last asked the node anything, the most recent first. */
@@ -248,6 +273,7 @@ export class NotifyStore {
 
   forgetPresence(device: string): void {
     this.db.query("DELETE FROM presence WHERE device = ?").run(device);
+    this.changed();
   }
 
   /* ---------- asks that were told, and their reminders ---------- */
@@ -311,6 +337,7 @@ export class NotifyStore {
   withdraw(tag: string): void {
     this.db.query("INSERT INTO withdrawn (tag, at) VALUES (?, ?) ON CONFLICT (tag) DO UPDATE SET at = excluded.at").run(tag, this.now());
     this.db.query("DELETE FROM withdrawn WHERE at < ?").run(this.now() - WITHDRAWN_KEEP_MS);
+    this.changed();
   }
 
   /** The tags withdrawn in the last two days, the most recent first. */
@@ -321,6 +348,7 @@ export class NotifyStore {
   /** A notification told again (a reminder, a finding come back) is up again: not withdrawn. */
   unwithdraw(tag: string): void {
     this.db.query("DELETE FROM withdrawn WHERE tag = ?").run(tag);
+    this.changed();
   }
 
   /* ---------- devices that came back after nobody could be reached ---------- */
@@ -346,6 +374,7 @@ export class NotifyStore {
     this.db
       .query("INSERT INTO lost (device, at, service, why) VALUES (?, ?, ?, ?) ON CONFLICT (device) DO UPDATE SET at = excluded.at, service = excluded.service, why = excluded.why")
       .run(device, this.now(), lost.service.slice(0, 80), lost.why.slice(0, 200));
+    this.changed();
   }
 
   /** The devices whose subscriptions were lost, the most recent first. */
@@ -355,12 +384,14 @@ export class NotifyStore {
 
   forgetLost(device: string): void {
     this.db.query("DELETE FROM lost WHERE device = ?").run(device);
+    this.changed();
   }
 
   /** How a send to a device went. */
   mark(device: string, outcome: { ok: true } | { ok: false; error: string }): void {
     if (outcome.ok) this.db.query("UPDATE subscriptions SET last_ok = ?, last_error = NULL, failures = 0 WHERE device = ?").run(this.now(), device);
     else this.db.query("UPDATE subscriptions SET last_error = ?, failures = failures + 1 WHERE device = ?").run(outcome.error.slice(0, 200), device);
+    this.changed();
   }
 
   /* ---------- kept for a device that collects ---------- */
@@ -376,6 +407,7 @@ export class NotifyStore {
       this.db.query("DELETE FROM collect WHERE device = ? AND rowid NOT IN (SELECT rowid FROM collect WHERE device = ? ORDER BY at DESC, rowid DESC LIMIT ?)").run(device, device, COLLECT_KEPT);
     })();
     this.keptCount += 1;
+    this.changed();
   }
 
   /**
@@ -429,6 +461,7 @@ export class NotifyStore {
 
   setPrefs(prefs: NotifyPrefs): void {
     this.db.query("INSERT INTO settings (k, v) VALUES ('prefs', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v").run(JSON.stringify(prefs));
+    this.changed();
   }
 
   /** A setting of the node's own, by name (null: never set). */
@@ -438,6 +471,7 @@ export class NotifyStore {
 
   setSetting(key: string, value: string): void {
     this.db.query("INSERT INTO settings (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v").run(key, value);
+    if (key === "prefs") this.changed();
   }
 
   /* ---------- what was told ---------- */
@@ -495,6 +529,7 @@ export class NotifyStore {
     const at = this.now();
     this.db.query("INSERT INTO sent (at, day, kind, devices, ok) VALUES (?, ?, ?, ?, ?)").run(at, day, kind, JSON.stringify(devices), ok ? 1 : 0);
     this.db.query("DELETE FROM sent WHERE at < ?").run(at - KEEP_SENT_MS);
+    this.changed();
   }
 
   sentOn(day: string): SentRow[] {

@@ -104,12 +104,30 @@ export class SyncEngine {
   /** Peers that said they compare set hashes (SyncPage.sets); the others get our frontier only. */
   private readonly comparesSets = new Set<string>();
   private timer: ReturnType<typeof setInterval> | null = null;
+  /** Who is told as a peer comes online or goes offline (onlineStamp moves). */
+  private readonly changes = new Set<() => void>();
 
   constructor(
     private readonly store: LedgerStore,
     private readonly identity: NodeIdentity,
     private readonly opts: SyncOptions = {},
   ) {}
+
+  /** Told as a peer comes online or goes offline, until what this returns is called. */
+  onChange(fn: () => void): () => void {
+    this.changes.add(fn);
+    return () => void this.changes.delete(fn);
+  }
+
+  private changed(): void {
+    for (const fn of [...this.changes]) {
+      try {
+        fn();
+      } catch {
+        /* one watcher's trouble is its own */
+      }
+    }
+  }
 
   peers(): Device[] {
     return this.store
@@ -160,6 +178,7 @@ export class SyncEngine {
         added += taken.added;
         if (!taken.more) break;
       }
+      const wasOnline = this.statuses.get(peer.id)?.online === true;
       this.statuses.set(peer.id, {
         device: peer.id,
         online: true,
@@ -169,6 +188,7 @@ export class SyncEngine {
         presence,
         ...this.pathOf(peer.id, path),
       });
+      if (!wasOnline) this.changed();
     } catch (error) {
       // It may be an older node again: start without set hashes next time, and learn anew.
       this.comparesSets.delete(peer.id);
@@ -181,6 +201,7 @@ export class SyncEngine {
         error: String((error as Error).message ?? error).slice(0, 200),
         ...this.pathOf(peer.id, path),
       });
+      if (previous?.online) this.changed();
     }
     return added;
   }

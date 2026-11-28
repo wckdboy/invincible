@@ -866,6 +866,11 @@ export class NotifyService {
     return this.o.db.stamp();
   }
 
+  /** Told as what stamp() reads is written, until what this returns is called. */
+  onChange(fn: () => void): () => void {
+    return this.o.db.onChange(fn);
+  }
+
   /** The zone your day is read in: the one your devices last said, else quiet hours' (the node's own until you set one). */
   zone(): string {
     return this.ownerZone();
