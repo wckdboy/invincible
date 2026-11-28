@@ -256,11 +256,39 @@ describe("deskd's held session (the node's): toolset actions in, answers out", (
     const [, settled] = await session(calm, [{ id: 1, name: "left_click", input: { coordinate: [1, 1] } }, { id: 2, name: "settle", input: {} }]);
     expect(settled).toMatchObject({ ok: true, settled: true });
     expect(settled.settled_ms).toBeGreaterThanOrEqual(100);
-    expect(settled.settled_ms).toBeLessThan(400);
     const busy = await deskd({ DESKD_BUSY: "1" });
     const [restless] = await session(busy, [{ id: 1, name: "settle", input: { cap: 0.5 } }]);
     expect(restless).toMatchObject({ ok: true, settled: false });
     expect(restless.settled_ms).toBeGreaterThanOrEqual(500);
+    // And no longer than that, on a clock of the test's own that a busy machine can't stretch: the settle ends as the
+    // screen has been quiet for 150 ms, having waited just that, and on a screen that never stops it ends at its cap.
+    // (Read on the real clock, "under 400 ms" got 1,020 and 920 ms at 10 % of a core, 28 November 2026.)
+    const clocked = py(`
+import threading
+clock = [50.0]
+waited = []
+def sleep(s):
+    waited.append(s)
+    clock[0] += max(s, 1e-6)  # (a real sleep takes some time, however short it is asked to be)
+class Watch:
+    lock = threading.Lock()
+    def __init__(self, drawing): self.drawing = drawing
+    @property
+    def last_change(self): return clock[0] if self.drawing else 50.0 - 0.005
+def settled(drawing, cap):
+    clock[0] = 50.0
+    del waited[:]
+    desk = d.Desk(pieces=object(), watch=Watch(drawing), now=lambda: clock[0], sleep=sleep)
+    desk.ready = lambda: None
+    return dict(desk.settle(cap=cap), waited_ms=sum(waited) * 1000)
+print(json.dumps({"calm": settled(False, 3.0), "busy": settled(True, 0.5)}))`) as { calm: { settled: boolean; settled_ms: number; waited_ms: number }; busy: { settled: boolean; settled_ms: number } };
+    // (Drawn on 5 ms before the settle began: 145 ms more of quiet.)
+    expect(clocked.calm.settled).toBe(true);
+    expect(clocked.calm.settled_ms).toBeCloseTo(145, 0);
+    expect(clocked.calm.waited_ms).toBeCloseTo(145, 0);
+    expect(clocked.busy.settled).toBe(false);
+    expect(clocked.busy.settled_ms).toBeGreaterThanOrEqual(500);
+    expect(clocked.busy.settled_ms).toBeLessThanOrEqual(510);
   });
 });
 
