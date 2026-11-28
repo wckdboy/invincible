@@ -98,7 +98,11 @@ describe("a colour you pick, snapped to the eight", () => {
     }
     expect(counts).toEqual([2536993, 2958905, 2378096, 1123922, 966719, 1920373, 1640919, 3251289]);
     expect(digest.toString(16)).toBe("907c090c");
-  }, 30_000);
+    // (Its limit is the time a loaded machine may take, never what it checks. It is one synchronous loop, so it can't be
+    // stopped at its limit, only failed after it: 3.6 s on the Mac mini at a load of 79 on 18 cores, 47.6 s in a full
+    // run at 72 to 151 on 12 (27 November 2026, failed against 30 s), 167.7 s with 2 % of a core, what each of about 585
+    // runnable tasks gets of 12. Whole, as the one check that every colour still snaps as recorded.)
+  }, 300_000);
 });
 
 describe("the order agents joined in", () => {
