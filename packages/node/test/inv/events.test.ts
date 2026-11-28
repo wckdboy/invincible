@@ -12,6 +12,18 @@ import { action, GATE, gated, judged, reviewed, snapshot, T0, task, trail, worke
  */
 
 describe("the events a task's trail makes", () => {
+  test("work going round on both tiers: its line, in the runner's own words, is a note said whole, as any line inv doesn't know by its mark", () => {
+    const tracker = new Tracker("task-a1b2c3d4e5f6", [GATE], T0);
+    const events = tracker.trail(trail([{ type: "round", on: "planner", rereads: 8, files: ["src/a.ts", "src/b.ts"] }]));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: "step.completed",
+      kind: "note",
+      text: "Going round · it has read the same files again 8 times on the planner's models too, nothing changed: you were told, and it goes on until you stop it or its budget ends it",
+      exit: null,
+    });
+  });
+
   test("each step started and completed, each gate before and after the work, the review, the cost: in order, each a line of JSON", () => {
     const tracker = new Tracker("task-a1b2c3d4e5f6", [GATE], T0);
     const events = tracker.trail(trail([...worked([1]), { type: "budget", spentUsd: 1.62, budgetUsd: 2, out: false }, ...gated([0]), ...reviewed("pass")]));

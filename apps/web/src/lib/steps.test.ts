@@ -279,6 +279,11 @@ describe("a steer, as its trail says it", () => {
     "Review · pass\nBoth taken up.",
   );
 
+  test("work going round on both tiers: a line this app doesn't know by its mark is a plain note, said whole, in the neutral tone", () => {
+    const line = "Going round · it has read the same files again 8 times on the planner's models too, nothing changed: you were told, and it goes on until you stop it or its budget ends it";
+    expect(readTrailLine(line)).toEqual({ kind: "note", text: line, tone: "neutral" });
+  });
+
   test("read by its mark: whose words they were and what they said; any other speaker is a note, as before", () => {
     expect(readTrailLine("Steered · You: Use the new schema.")).toEqual({ kind: "steer", by: "owner", text: "Use the new schema." });
     expect(readTrailLine("Steered · Your agent: Keep the old reader.\nIt still has users.")).toEqual({ kind: "steer", by: "primary", text: "Keep the old reader.\nIt still has users." });

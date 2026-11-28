@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
-import type { LoopDraftView, RouteName } from "@invincible/core";
-import { describeTask, loopCommand, parseWake } from "../src/loop-cli.ts";
+import { type LoopDraftView, type NoticeView, ROUND_SOURCE, roundKey, roundNotice, type RouteName } from "@invincible/core";
+import { describeTask, loopCommand, noticeCommand, parseWake } from "../src/loop-cli.ts";
 
 /* `invincible loop drafts`, `loop add --draft` and `loop dismiss` at a terminal, against what the node would answer. */
 
@@ -150,4 +150,17 @@ test("a reminder once: --at a time in your zone (this terminal's unless --tz), o
   expect(asked.at(-1)!.input).toMatchObject({ schedule: "at 2026-11-24 20:53", tz: "UTC" });
   await expect(loopCommand(api, "add", ["two"], { at: "2026-11-25 17:30", every: "1h", tell: true })).rejects.toThrow(/one of --every, --cron, --at or --in/);
   await expect(loopCommand(api, "add", ["bad"], { in: "soon", tell: true })).rejects.toThrow(/--in takes minutes, hours or days/);
+});
+
+test("`invincible notices`: work going round on both tiers is a notice as any other, its mark, title, key and words", async () => {
+  const words = roundNotice({ agent: "Ada", task: "Sync survives a dropped connection", id: "task-a1b2c3d4e5f6", rereads: 8, files: ["src/sync.ts"] });
+  const notice: NoticeView = { key: roundKey("task-a1b2c3d4e5f6"), severity: "warn", source: ROUND_SOURCE, node: null, at: 1, dismissed: false, ...words };
+  const api = {
+    async call<T>(name: RouteName): Promise<T> {
+      if (name === "notices") return { notices: [notice] } as T;
+      throw new Error(`unexpected ${name}`);
+    },
+  };
+  const said = (await printed(() => noticeCommand(api, undefined, [], {}))).join("\n");
+  for (const part of ["△", words.title, "went-round:task-a1b2c3d4e5f6", "invincible agents stop task task-a1b2c3d4e5f6"]) expect(said).toContain(part);
 });
