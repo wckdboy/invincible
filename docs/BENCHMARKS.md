@@ -105,6 +105,22 @@ third of those turns. Routed is then cheaper and faster per verified task than a
 verified. The stand-in that goes round reads its three files in turn, so it is caught as soon as the count allows. How
 soon a real agent going round is caught is what its threshold is checked against: the first real outcome's trail.
 
+**The memory, by kind of task.** Three agents' tasks run in turn, 12 each, routed as a node does:
+- `ada`'s are all ones its worker can do;
+- `bo`'s all need the lead;
+- `cy`'s are any level.
+
+Each agent's tasks so far are its memory's, as on a node (`TeamRuntimeDeps.work`), and the same tasks run without it
+(`off`). On 28 November 2026:
+
+| The memory | Verified | $ per verified | Minutes per verified | Moved up | Begun on the lead |
+|---|---|---|---|---|---|
+| off | 35 of 36 | 0.186 | 2.10 | 14 | 0 |
+| on | 35 of 36 | 0.125 | 1.85 | 7 | 7 |
+
+`bo`'s tasks begin on the lead after two that had to move up, and try the worker every third. `ada`'s never begin on the
+lead (`routing.rule.memory-misroutes`, held at 0).
+
 ### desktop: an agent's desktop, fast and stable
 
 An agent's VM made from the desktop image, with the node's own run arguments (Kata, a read-only root, no

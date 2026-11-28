@@ -31,6 +31,8 @@ export interface SimTask {
   kind: Kind;
   /** How hard it is: a model does it when this is at most its capability (1 to 4; nothing does a 4). */
   level: number;
+  /** The agent it is given to (absent: the one stand-in agent). Its tasks before it are its memory's (team-runtime beginOf). */
+  agent?: string;
 }
 
 /** The stand-ins: what each can do, what it costs (stand-in $ per million tokens) and how long a call takes. */
@@ -61,6 +63,24 @@ export const PRICES: Prices = Object.fromEntries(Object.entries(TIERS).map(([tie
 export type Policy = "routed" | "pinned" | "strong";
 export const POLICIES: readonly Policy[] = ["routed", "pinned", "strong"];
 
+/**
+ * Three agents' tasks, in turn, for the memory (team-runtime beginOf): `ada`'s are all ones its worker can do (levels 1
+ * and 2), `bo`'s all need the lead (level 3), `cy`'s any level; each kind in turn, the levels drawn from the seed.
+ */
+export function memoryTasks(seed: number, each = 12): SimTask[] {
+  const random = rng(subSeed(seed, "routing.memory"));
+  const kinds: readonly Kind[] = ["gate", "review", "stall"];
+  const agents = [
+    { agent: "ada", level: () => 1 + intBelow(random, 2) },
+    { agent: "bo", level: () => 3 },
+    { agent: "cy", level: () => 1 + intBelow(random, 4) },
+  ];
+  return Array.from({ length: each * agents.length }, (_, i) => {
+    const who = agents[i % agents.length]!;
+    return { id: `task-m${String(i).padStart(11, "0")}`, kind: kinds[Math.floor(i / agents.length) % kinds.length]!, level: who.level(), agent: who.agent };
+  });
+}
+
 /** The tasks of a seed: as many of each kind, each at a level drawn from the seed. */
 export function simTasks(seed: number, n = 24): SimTask[] {
   const random = rng(subSeed(seed, "routing.tasks"));
@@ -81,6 +101,8 @@ export interface TaskResult {
   movedOffPins: number;
   /** Model calls, by tier. */
   calls: Record<Tier, number>;
+  /** Whose models its work began on, as its record kept it (absent: not kept, its work held to models). */
+  began?: "engineer" | "planner";
 }
 
 export interface PolicyResult {
@@ -108,8 +130,11 @@ const AUDIT = "You audit work that is still going on";
 
 const AGENT: Agent = { id: "sim", name: "Sim", instructions: "Fix what each task asks, and verify it.", role: "engineer", harness: "native", enabled: true, dailyTurns: 1_000, turnsToday: 0, repository: null, workspaceNode: "host", workspace: { node: "host", id: "0123456789" }, memory: "", createdAt: 1, updatedAt: 1 };
 
-/** One policy over a seed's tasks, each run by the team runtime as the node runs an agent's task. */
-export async function runPolicy(policy: Policy, tasks: readonly SimTask[]): Promise<PolicyResult> {
+/**
+ * One policy over a seed's tasks, each run by the team runtime as the node runs an agent's task, in order. `memory`: each
+ * agent's tasks so far are its (TeamRuntimeDeps.work, the latest first), as a node's are; off, none are.
+ */
+export async function runPolicy(policy: Policy, tasks: readonly SimTask[], options: { memory?: boolean } = {}): Promise<PolicyResult> {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
   try {
@@ -119,7 +144,11 @@ export async function runPolicy(policy: Policy, tasks: readonly SimTask[]): Prom
     store.emit(identity, "provider.set", { id: "sim", kind: "openai", baseUrl: "http://127.0.0.1:9/v1" });
     const roster: Record<string, string[]> = { planner: ["sim/lead"], engineer: [policy === "strong" ? "sim/lead" : "sim/worker"], reviewer: ["sim/judge"] };
     for (const [role, models] of Object.entries(roster)) store.emit(identity, "roster.set", { role, models });
-    const agent: Agent = policy === "pinned" ? { ...AGENT, models: ["sim/worker"] } : AGENT;
+    /** The agent a task is given to, as you set it up: pinned to the worker when `pinned`. */
+    const agentOf = (id: string): Agent => ({ ...AGENT, id, ...(policy === "pinned" ? { models: ["sim/worker"] } : {}) });
+    let agent: Agent = agentOf(tasks[0]?.agent ?? AGENT.id);
+    /** Each agent's tasks so far, the latest first, with their records: its memory's. */
+    const history = new Map<string, TeamTask[]>();
 
     let task: SimTask = tasks[0]!;
     let state = { solved: false, touched: false, changedSinceAudit: false, commands: 0, gates: 0 };
@@ -190,7 +219,8 @@ export async function runPolicy(policy: Policy, tasks: readonly SimTask[]): Prom
       tools: () => ({ specs: [], describe: () => ({ title: "unused", input: "" }), run: async () => ({ content: "", isError: true, summary: "no tools here" }) }),
       models: () => [],
       memories: () => "",
-      agent: () => agent,
+      agent: (id) => agentOf(id),
+      ...(options.memory ? { work: (id: string) => history.get(id) ?? [] } : {}),
       dependencies: () => [],
       stopWorker: async () => {},
       prices: () => PRICES,
@@ -200,6 +230,7 @@ export async function runPolicy(policy: Policy, tasks: readonly SimTask[]): Prom
     const results: TaskResult[] = [];
     for (const each of tasks) {
       task = each;
+      agent = agentOf(each.agent ?? AGENT.id);
       state = { solved: false, touched: false, changedSinceAudit: false, commands: 0, gates: 0 };
       calls = { worker: 0, lead: 0, judge: 0 };
       movedOffPins = 0;
@@ -217,7 +248,8 @@ export async function runPolicy(policy: Policy, tasks: readonly SimTask[]): Prom
       const outcome = await runtime.executeTask(agent, given, context);
       const usd = costOf(outcome.record.spent, PRICES).usd;
       const seconds = (Object.keys(TIERS) as Tier[]).reduce((sum, tier) => sum + calls[tier] * TIERS[tier].callSeconds, 0) + state.commands * COMMAND_SECONDS + state.gates * GATE_SECONDS;
-      results.push({ task: each, verified: outcome.verified, usd, minutes: seconds / 60, escalations: trail.filter((line) => line.startsWith("Escalated ·")).map((line) => line.split("\n")[0]!), movedOffPins, calls: { ...calls } });
+      results.push({ task: each, verified: outcome.verified, usd, minutes: seconds / 60, escalations: trail.filter((line) => line.startsWith("Escalated ·")).map((line) => line.split("\n")[0]!), movedOffPins, calls: { ...calls }, ...(outcome.record.routing ? { began: outcome.record.routing.began } : {}) });
+      history.set(agent.id, [{ ...given, status: outcome.verified ? "done" : "failed", verified: outcome.verified, record: outcome.record }, ...(history.get(agent.id) ?? [])]);
     }
     const verified = results.filter((r) => r.verified).length;
     return { policy, tasks: results, verified, interventions: results.length - verified, usd: results.reduce((sum, r) => sum + r.usd, 0), minutes: results.reduce((sum, r) => sum + r.minutes, 0) };

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { runPolicy, type SimTask, simTasks } from "./sim.ts";
+import { memoryTasks, runPolicy, type SimTask, simTasks } from "./sim.ts";
 
 /*
  * The routing suite's stand-in world (sim.ts): its tasks are the seed's, and what each way of routing does with a task
@@ -47,6 +47,22 @@ describe("the routing suite's stand-ins", () => {
     // The lead's work costs more than the worker's, task for task, where both do it.
     const routed = await runPolicy("routed", EVERY);
     expect(r.tasks[0]!.usd).toBeGreaterThan(routed.tasks[0]!.usd);
+  });
+
+  test("the memory: an agent whose tasks all need the lead begins on it after two that had to move up, and tries the worker every third; one whose tasks the worker does never does", async () => {
+    const tasks = memoryTasks(7, 6);
+    expect(["ada", "bo", "cy"].map((agent) => tasks.filter((t) => t.agent === agent).length)).toEqual([6, 6, 6]);
+    expect(tasks.filter((t) => t.agent === "bo").every((t) => t.level === 3)).toBe(true);
+    expect(tasks.filter((t) => t.agent === "ada").every((t) => t.level <= 2)).toBe(true);
+    const on = await runPolicy("routed", tasks, { memory: true });
+    const began = (agent: string) => on.tasks.filter((t) => t.task.agent === agent).map((t) => t.began);
+    expect(began("bo")).toEqual(["engineer", "engineer", "planner", "planner", "engineer", "planner"]);
+    expect(began("ada").every((b) => b === "engineer")).toBe(true);
+    // Without it, every one of bo's begins on the worker and moves up.
+    const off = await runPolicy("routed", tasks);
+    expect(off.tasks.filter((t) => t.task.agent === "bo").every((t) => t.began === "engineer" && t.escalations.length === 1)).toBe(true);
+    expect(on.usd).toBeLessThan(off.usd);
+    expect(on.verified).toBe(off.verified);
   });
 
   test("the same tasks give the same outcomes, costs and times when run again", async () => {

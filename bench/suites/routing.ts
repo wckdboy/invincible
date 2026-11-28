@@ -1,5 +1,5 @@
 import type { Suite } from "../lib.ts";
-import { BUDGET_USD, type PolicyResult, POLICIES, runPolicy, simTasks, TIERS } from "../routing/sim.ts";
+import { BUDGET_USD, memoryTasks, type PolicyResult, POLICIES, runPolicy, simTasks, TIERS } from "../routing/sim.ts";
 
 /*
  * Smart routing (bench/routing/sim.ts): a seeded set of an agent's tasks run as the node runs them, the real team
@@ -27,9 +27,11 @@ export const suite: Suite = {
     "routing.rule.pinned-moved",
     "routing.rule.climbs",
     "routing.rule.same-rung",
+    "routing.memory.on.usd-per-done",
+    "routing.rule.memory-misroutes",
     "routing.replay.differs",
   ],
-  held: { "routing.rule.pinned-moved": 0, "routing.rule.climbs": 0, "routing.rule.same-rung": 0, "routing.replay.differs": 0 },
+  held: { "routing.rule.pinned-moved": 0, "routing.rule.climbs": 0, "routing.rule.same-rung": 0, "routing.rule.memory-misroutes": 0, "routing.replay.differs": 0 },
   async run(ctx) {
     const tasks = simTasks(ctx.seed, TASKS);
     const kinds = (["gate", "review", "stall"] as const).map((kind) => `${tasks.filter((t) => t.kind === kind).length} ${kind}`).join(", ");
@@ -60,6 +62,27 @@ export const suite: Suite = {
     ctx.quality("routing.rule.pinned-moved", results.get("pinned")!.tasks.reduce((sum, t) => sum + t.movedOffPins, 0), "turns", "lower", { note: "turns of a pinned agent's work answered by a model other than its own (the rule: never)" });
     ctx.quality("routing.rule.climbs", [...results.values()].flatMap((r) => r.tasks).filter((t) => t.escalations.length > 1).length, "tasks", "lower", { note: "tasks whose work moved up more than once: the ladder has one rung (never)" });
     ctx.quality("routing.rule.same-rung", results.get("strong")!.tasks.reduce((sum, t) => sum + t.escalations.length, 0), "", "lower", { note: "work said to move up onto the model it was on: with the planner's model the work's own there is no rung (never)" });
+    // The memory, by kind of task (team-runtime beginOf): three agents' tasks in turn, `ada`'s all the worker's to do,
+    // `bo`'s all the lead's, `cy`'s any; routed as a node does, with each agent's tasks so far its memory's, and without.
+    const remembered = memoryTasks(ctx.seed);
+    for (const memory of [false, true]) {
+      const r = await runPolicy("routed", remembered, { memory });
+      ctx.pulse();
+      if (!r.verified) throw new Error("no task of the memory's ended verified: the stand-ins or the runtime are broken");
+      const name = memory ? "on" : "off";
+      const per = (n: number) => n / r.verified;
+      const said = memory ? "each agent's tasks so far its memory's, as a node's are" : "no agent's tasks so far seen";
+      ctx.quality(`routing.memory.${name}.verified`, r.verified, "tasks", "higher", { note: `of ${remembered.length}, three agents' tasks in turn, routed, ${said}` });
+      ctx.quality(`routing.memory.${name}.usd-per-done`, per(r.usd), "$", "lower", { note: `stand-in dollars per verified task, ${said}` });
+      ctx.quality(`routing.memory.${name}.minutes-per-done`, per(r.minutes), "min", "lower", { note: `virtual minutes per verified task, ${said}` });
+      ctx.quality(`routing.memory.${name}.escalations`, r.tasks.flatMap((t) => t.escalations).length, "", "lower", { note: `times work moved up, ${said}` });
+      if (memory) {
+        ctx.quality("routing.memory.on.began-on-lead", r.tasks.filter((t) => t.began === "planner").length, "tasks", "higher", { note: "tasks that began on the lead by what their agent's last tasks needed" });
+        // (ada's tasks are all the worker's to do: never one begun on the lead, whatever its memory.)
+        ctx.quality("routing.rule.memory-misroutes", r.tasks.filter((t) => t.task.agent === "ada" && t.began === "planner").length, "tasks", "lower", { note: "tasks of an agent whose every task the worker does, begun on the lead (never)" });
+      }
+      ctx.log(`the memory ${name}: ${r.verified} of ${remembered.length} verified, $${r.usd.toFixed(2)} and ${r.minutes.toFixed(0)} min in all, moved up ${r.tasks.flatMap((t) => t.escalations).length} times, ${r.tasks.filter((t) => t.began === "planner").length} begun on the lead`);
+    }
     // The same tasks again, task by task: the same outcome, cost and time.
     const again = await runPolicy("routed", tasks);
     const key = (t: PolicyResult["tasks"][number]) => JSON.stringify([t.verified, t.usd, t.minutes, t.escalations, t.calls]);
