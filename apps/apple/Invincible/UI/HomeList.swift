@@ -168,7 +168,8 @@ struct HomeList: View {
         case .primary:
             PrimaryOrb(size: Self.face, tone: session.primaryTone, mood: session.primaryMood)
         case .agent:
-            AgentFace(id: row.id, profile: session.drawn(row.id)?.avatar, size: Self.face, mood: Orb.Mood(row.standing))
+            // (Waiting on you, its glass knocks three times as something new waits on it, then rests: Session.knocks.)
+            AgentFace(id: row.id, profile: session.drawn(row.id)?.avatar, size: Self.face, mood: Orb.Mood(row.standing), knock: session.knocks[row.id])
         case .room:
             Image(systemName: "number")
                 .font(.title3.weight(.medium))
