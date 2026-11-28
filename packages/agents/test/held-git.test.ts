@@ -356,10 +356,12 @@ describe("the lease's fetch, against a smart-HTTP server", () => {
     }
   });
 
-  // The re-check of 28 November 2026, R9: a repository whose clone names no default branch (earlier work in the VM may
-  // leave it so) starts from the clone's own HEAD, whatever that holds; it says so (local), so a plan that works only on
-  // your own repositories can refuse it.
-  test("says where it started: the default branch as fetched (fetched), or, when the clone names none, its own HEAD (local)", async () => {
+  // The re-checks of 28 November 2026 (R9, then N4): the clone's origin/HEAD is the VM's, which earlier work may point
+  // anywhere (at none, or at a local branch of its own), and the fetch never rewrites it. So a start reads the
+  // repository's own HEAD as it fetches it, kept where no earlier work names it: one that says fetched is that branch,
+  // whatever the clone says. Only a repository whose HEAD can't be fetched (it names no branch) starts from the clone's
+  // own HEAD, and says so (local), so a plan that works only on your own repositories can refuse it.
+  test("says where it started: the repository's default branch as fetched, whatever earlier work left the clone's origin/HEAD naming; else its own HEAD (local)", async () => {
     const v = vm();
     const served = temp("held-served-");
     const gate = smartHttp(served);
@@ -367,16 +369,24 @@ describe("the lease's fetch, against a smart-HTTP server", () => {
       spawnSync("git", ["-C", served, "init", "-q", "--bare", "repo.git"]);
       v.git("push", "-q", join(served, "repo.git"), "HEAD:refs/heads/main");
       spawnSync("git", ["-C", served, "--git-dir=repo.git", "symbolic-ref", "HEAD", "refs/heads/main"]);
+      const main = v.git("rev-parse", "HEAD").stdout.trim();
       v.lease(`${gate.url}/repo.git`);
-      expect((await v.start("task-head")).stdout.trim()).toMatch(/^[0-9a-f]{40} fetched$/);
-      // What earlier work left: no default branch named, and a HEAD of its own.
-      v.git("symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
+      expect((await v.start("task-head")).stdout.trim()).toBe(`${main} fetched`);
+      // What earlier work left: a branch of its own, checked out, and origin/HEAD pointed at it; then at none.
       v.git("checkout", "-q", "-b", "earlier-work");
       writeFileSync(join(v.repo, "left.txt"), "what earlier work left\n");
       v.git("add", ".");
       v.git("commit", "-q", "-m", "earlier work");
-      const ran = await v.start("task-local");
-      expect([ran.status, ran.stdout.trim()]).toEqual([0, `${v.git("rev-parse", "HEAD").stdout.trim()} local`]);
+      v.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/heads/earlier-work");
+      const pointed = await v.start("task-pointed");
+      expect([pointed.status, pointed.stdout.trim(), existsSync(join(v.work, "tasks/task-pointed/left.txt"))]).toEqual([0, `${main} fetched`, false]);
+      v.git("symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
+      const none = await v.start("task-none");
+      expect([none.status, none.stdout.trim(), existsSync(join(v.work, "tasks/task-none/left.txt"))]).toEqual([0, `${main} fetched`, false]);
+      // A repository whose HEAD names no branch can't say its default: the clone's own HEAD, said as such.
+      spawnSync("git", ["-C", served, "--git-dir=repo.git", "symbolic-ref", "HEAD", "refs/heads/nowhere"]);
+      const local = await v.start("task-local");
+      expect([local.status, local.stdout.trim()]).toEqual([0, `${v.git("rev-parse", "HEAD").stdout.trim()} local`]);
     } finally {
       gate.stop();
     }

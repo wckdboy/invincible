@@ -316,8 +316,9 @@ export const withGateway = (command: string, lease?: string): string => {
  * Where a task in a repository starts, run in the agent's VM as `python3 -I -c SCRIPT <worktree> <kept>`: the
  * repository as it is now, fetched through the read-only gateway with the lease that is in the VM (never a token
  * in a command), in a worktree of the task's own. The commit it started from is written down, with whether the
- * fetch came through (`fetched`), the clone had to do as it was (`stale`), or the fetch came through but the clone
- * names no default branch, so its own HEAD, as earlier work left it, is the start (`local`), and printed. A task taken up again
+ * fetch came through (`fetched`: the repository's own HEAD as fetched, never the clone's origin/HEAD, which earlier work in
+ * the VM may point anywhere), the clone had to do as it was (`stale`), or the fetch came through but the repository's HEAD
+ * couldn't be (it names no branch), so the clone's own start, as earlier work left it, is used (`local`), and printed. A task taken up again
  * finds its worktree and what was written; one from before this was written says `unknown`. A fix to a pull
  * request (`<branch>`, a third argument) starts on that branch as fetched, or not at all. Its git holds the
  * repository's own configuration off (held-git.ts: the fourth fabric review's R4-4, and the fifth's R5-6), so nothing
@@ -353,12 +354,20 @@ elif not os.path.isdir(root):
     else:
         try:
             d = json.load(open(os.path.join(os.path.expanduser('~'), '${LEASE_FILE}')))
-            got = git(repo,'-c','http.extraHeader=Authorization: Bearer '+d['INVINCIBLE_TOKEN'],'fetch','--quiet','--prune',d['INVINCIBLE_REPO_URL'],'+refs/heads/*:refs/remotes/origin/*',timeout=300)
+            auth = 'http.extraHeader=Authorization: Bearer '+d['INVINCIBLE_TOKEN']
+            got = git(repo,'-c',auth,'fetch','--quiet','--prune',d['INVINCIBLE_REPO_URL'],'+refs/heads/*:refs/remotes/origin/*',timeout=300)
             if got.returncode: how = 'stale'
+            # And the repository's own HEAD, its default branch, kept where no earlier work names it: the clone's
+            # origin/HEAD is the VM's, which earlier work may point anywhere, and no fetch rewrites it.
+            elif git(repo,'-c',auth,'fetch','--quiet',d['INVINCIBLE_REPO_URL'],'+HEAD:refs/invincible/fetched-head',timeout=300).returncode:
+                git(repo,'update-ref','-d','refs/invincible/fetched-head')
         except Exception:
             how = 'stale'
-    start = 'origin/HEAD' if git(repo,'rev-parse','--verify','--quiet','origin/HEAD').returncode == 0 else 'HEAD'
-    if start == 'HEAD' and how == 'fetched' and not branch: how = 'local'
+    if how == 'fetched' and git(repo,'rev-parse','--verify','--quiet','refs/invincible/fetched-head^{commit}').returncode == 0:
+        start = 'refs/invincible/fetched-head'
+    else:
+        start = 'origin/HEAD' if git(repo,'rev-parse','--verify','--quiet','origin/HEAD').returncode == 0 else 'HEAD'
+        if how == 'fetched' and not branch: how = 'local'
     if branch:
         start = 'refs/remotes/origin/'+branch
         if git(repo,'rev-parse','--verify','--quiet',start+'^{commit}').returncode: sys.exit('the branch '+branch+' is not in the repository'+(' (it could not be fetched)' if how == 'stale' else ''))
