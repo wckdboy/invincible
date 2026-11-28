@@ -3,6 +3,7 @@ import { desktopArgv, desktopBriefing, hardwareBriefing, LOOKING } from "./deskt
 import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, looksToNeedAScreen, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
+import { seatVmClearCommand } from "./agent-process.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
 import { apartMatches, chat, choreRole, roleModels, sameModel, workRole, type ModelsContext, type ChatTools, type ToolImage, type ToolSpec } from "@invincible/models";
 import { commandsRun, DESKTOP_EVIDENCE, escalatedWhy, runLoop, stepsNamed, type RunEvent, type RunSteer } from "./run.ts";
@@ -1103,7 +1104,17 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       };
       const execOn = (seat: SeatRun) => (command: string, timeout = 120) => seat.exec(inTask(command), Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
       // (Its stop's word goes on a signal of its own: the task's has ended by the time it is said.)
-      const harnessOn = (seat: SeatRun) => ({ exec: execOn(seat), ...(seat.follow ? { follow: (offset: number) => seat.follow!(offset, ctx.signal) } : {}), stopAgent: () => seat.stop(), tellStop: (command: string, timeout: number) => seat.exec(command, timeout, new AbortController().signal) });
+      // For a tool whose every run is a new one (Antigravity's), each start is in its seat's VM cleared of what an earlier
+      // run of the task left there (seatVmClearCommand): a run's stop ends its own process group alone, and a process it
+      // started in a session of its own could put a swapped sign-in back after the next start copied the sealed one in
+      // (the fourth re-check of 28 November 2026, L1). One that couldn't be cleared starts nothing; any ended is said.
+      const readyOn = (seat: SeatRun) => async () => {
+        const cleared = await seat.exec(seatVmClearCommand(), 60, ctx.signal);
+        if (cleared.exitCode !== 0) throw new Error(`its seat's VM couldn't be cleared of what an earlier run left (${redact(cleared.stderr || cleared.stdout).trim().split("\n").at(-1)?.slice(0, 200) || `exit ${cleared.exitCode}`})`);
+        const ended = Number(cleared.stdout.trim().split("\n").at(-1));
+        if (ended > 0) ctx.emit(`Seat · ${ended} process${ended === 1 ? "" : "es"} an earlier run of this task left in its VM ended before this run`);
+      };
+      const harnessOn = (seat: SeatRun, driver?: AgentDriver) => ({ exec: execOn(seat), ...(seat.follow ? { follow: (offset: number) => seat.follow!(offset, ctx.signal) } : {}), stopAgent: () => seat.stop(), tellStop: (command: string, timeout: number) => seat.exec(command, timeout, new AbortController().signal), ...(driver?.capabilities.steer === "anew" ? { ready: readyOn(seat) } : {}) });
       const inherited = data("Verified predecessor results (file paths belong to their original VM)", deps.dependencies(task));
       // Fenced once for the task: every turn of its planner and engineer is then sent the same beginning, which a
       // provider reads from its cache (a new fence on each call made each turn's beginning a new one).
@@ -1366,7 +1377,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         // Its coding agent's run followed as it goes, where its VM's node can keep a command open: else looked at.
         ...(own ? (own.vm.follow ? { follow: (offset: number) => own.vm.follow!(offset, ctx.signal) } : {}) : deps.follow ? { follow: (offset: number) => deps.follow!(agent, offset, ctx.signal) } : {}),
         // On a seat: its coding tool's own commands, its follow and its stop are in the seat's VM; everything else stays here.
-        ...(onSeat ? { harness: harnessOn(onSeat) } : {}),
+        ...(onSeat ? { harness: harnessOn(onSeat, coding?.driver) } : {}),
         // What you and your agent said to it as it ran, taken at its safe points.
         ...(ctx.steers ? { steers: (step: number) => ctx.steers!(step) } : {}),
         agentSession: async (id) => {

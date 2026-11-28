@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { AGENT_PROCESS_PY, agentCleanupCommand } from "../src/agent-process.ts";
+import { AGENT_PROCESS_PY, agentCleanupCommand, SEAT_VM_CLEAR_PY, seatVmClearCommand } from "../src/agent-process.ts";
 
 test("worker cleanup verifies process start and boot identity, keeps another run's marker, and kills an ignoring child", () => {
   // Exercise the actual Python helper against temporary procfs-shaped fixtures;
@@ -197,3 +197,77 @@ with tempfile.TemporaryDirectory(prefix="invincible-process-record-") as root:
   const result = Bun.spawnSync(["python3", "-B", "-c", script], { timeout: 15000 });
   expect({ exit: result.exitCode, stderr: result.stderr.toString() }).toEqual({ exit: 0, stderr: "" });
 });
+
+/*
+ * A seat's VM made ready for a run of a tool whose every run is a new one (Antigravity's: the fourth re-check of 28
+ * November 2026, L1). A run's stop ends its own process group alone, so a process a run started in a session of its own
+ * lived on into the task's later runs, and put a swapped sign-in back after a start copied the sealed one in. Before each
+ * start, everything in the VM ends but its init, its container's own command and the script's own line. Against
+ * procfs-shaped fixtures, its signals intercepted: no real process is signalled by this test.
+ */
+test("a seat's VM is cleared before each start: all but its init, its container's sleep and the script's own line end, a process forked meanwhile too", () => {
+  const scenario = String.raw`
+import tempfile
+with tempfile.TemporaryDirectory(prefix="invincible-seat-vm-") as root:
+    PROC = Path(root)
+    me = os.getpid()
+    def process(pid, parent, start, argv, state="S"):
+        path = PROC / str(pid)
+        path.mkdir(exist_ok=True)
+        # Fields 3 through 22: its state, its parent, and its start last; its name may hold a parenthesis.
+        fields = [state, str(parent)] + ["0"] * 17 + [str(start)]
+        (path / "stat").write_text(str(pid) + " (a (name)) " + " ".join(fields))
+        (path / "cmdline").write_bytes(b"".join(a + b"\0" for a in argv))
+    signals, forks, stubborn = [], {}, set()
+    def kill(pid, sig):
+        signals.append((pid, sig))
+        if pid in stubborn:
+            return
+        # (Killed: a zombie until init reaps it; one forks a child as it goes.)
+        process(pid, 1, 9, [b"gone"], state="Z")
+        if pid in forks:
+            process(*forks.pop(pid))
+    os.kill = kill
+    time.sleep = lambda _: None
+    process(1, 0, 1, [b"/sbin/docker-init", b"--", b"sleep", b"infinity"])
+    process(7, 1, 2, [b"sleep", b"infinity"])
+    # The node's exec it runs under, and itself.
+    process(40, 0, 50, [b"bash", b"-lc", b"clear"])
+    process(me, 40, 51, [b"python3", b"-I", b"-c", b"..."])
+    # What an earlier run left: one in a session of its own, under init now; its child; one that says it is the
+    # container's sleep, younger than it; a zombie, which is done.
+    process(55, 1, 30, [b"python3", b"swap.py"])
+    process(56, 55, 31, [b"sh"])
+    process(58, 1, 32, [b"sleep", b"infinity"])
+    process(60, 1, 33, [b"old"], state="Z")
+    forks[55] = (57, 1, 34, [b"forked"])
+    assert clear(PROC) == 4, signals
+    assert sorted(pid for pid, _ in signals) == [55, 56, 57, 58], signals
+    assert all(sig == signal.SIGKILL for _, sig in signals)
+    # Nothing left: a second look ends nothing.
+    signals.clear()
+    assert clear(PROC) == 0 and signals == []
+    # One that never ends, or can't be signalled, is said, and no run starts.
+    process(61, 1, 35, [b"stubborn"])
+    stubborn.add(61)
+    try: clear(PROC, passes=3)
+    except RuntimeError as error: assert "still runs" in str(error)
+    else: raise AssertionError("a VM that couldn't be cleared must refuse the start")
+    def refuse(pid, sig):
+        signals.append((pid, sig))
+        raise PermissionError(1, "Operation not permitted")
+    os.kill = refuse
+    try: clear(PROC, passes=3)
+    except RuntimeError as error: assert "still runs" in str(error)
+    else: raise AssertionError("one it may not signal must refuse the start")
+    os.kill = kill
+    # With no sleep as init's oldest child (it isn't ours), nothing of init's is kept but init.
+    stubborn.clear(); signals.clear()
+    process(7, 1, 2, [b"python3", b"pretends"])
+    assert clear(PROC) == 2 and sorted(pid for pid, _ in signals) == [7, 61]
+`;
+  const result = Bun.spawnSync(["python3", "-B", "-c", `${SEAT_VM_CLEAR_PY}\n${scenario}`]);
+  expect({ exit: result.exitCode, stderr: result.stderr.toString() }).toEqual({ exit: 0, stderr: "" });
+  expect(Bun.spawnSync(["bash", "-n", "-c", seatVmClearCommand()]).exitCode).toBe(0);
+});
+

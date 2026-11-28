@@ -272,6 +272,22 @@ describe("running an agent", () => {
     expect(seen.filter((e) => e.type === "tool")).toHaveLength(2);
   });
 
+  // The fourth re-check of 28 November 2026, L1: a seat's VM is made ready before each start of a tool whose every run is
+  // a new one (team-runtime gives `ready`: the VM cleared of what an earlier run left). It comes first, and one that
+  // can't be made ready starts nothing.
+  test("its VM is made ready before it starts, when its host says how: first, and a VM that couldn't be starts nothing", async () => {
+    const box = sandbox([[LINES.start, LINES.shell], [LINES.edit, LINES.finish], [LINES.text]]);
+    const order: string[] = [];
+    const exec = (command: string) => (order.push(command.split(" ")[0]!), box.exec(command));
+    const run = await runAgent(OPENCODE, { model, prompt: "x", session: null, deadline: Date.now() + 60_000, workdir: "/work" }, { exec, sleep: noSleep, ready: async () => void order.push("ready") });
+    expect(run.status).toBe("finished");
+    expect(order.indexOf("ready")).toBeLessThan(order.indexOf("mkdir"));
+    const refused = sandbox([[LINES.start]]);
+    const said = await runAgent(OPENCODE, { model, prompt: "x", session: null, deadline: Date.now() + 60_000, workdir: "/work" }, { exec: refused.exec, sleep: noSleep, ready: async () => { throw new Error("the seat's VM still runs what an earlier run left"); } });
+    expect(said).toMatchObject({ status: "failed", error: "couldn't make its VM ready: the seat's VM still runs what an earlier run left" });
+    expect(refused.commands.some((c) => c.startsWith("mkdir -p"))).toBe(false);
+  });
+
   test("every command it sends the sandbox is valid shell (seen live: `… & && echo $!` broke the launch)", async () => {
     const box = sandbox([[LINES.start], [LINES.shell]], null, { forever: true });
     let t = 0;

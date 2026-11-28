@@ -1680,6 +1680,56 @@ function seatTask(harness: "claude" | "codex", options: { own: Told; seat?: Told
 const signedOut = status({ installed: true, signedIn: false });
 const signedIn = (method = "claude.ai") => status({ installed: true, signedIn: true, method });
 
+// The fourth re-check of 28 November 2026, L1: within one task every run shares the seat's VM, and a run's stop ends its
+// own process group alone, so a process a run started in a session of its own lived on, and put a swapped sign-in back
+// after the next start copied the sealed one in. A Gemini seat's every start is in its VM cleared of what an earlier run
+// left (seatVmClearCommand), first; what it ended is said. A Claude or Codex seat's isn't asked to be.
+test("a Gemini seat's every run starts in its VM cleared of what an earlier run of the task left, after the clear; Claude's seat isn't asked", async () => {
+  const inSeat: string[] = [];
+  const said: string[] = [];
+  const gemini = { ...member, harness: "antigravity" as const, repository: "https://github.com/example/app" };
+  const seatRun = (): SeatRun => ({
+    seat: { id: SEAT, kind: "google-antigravity", label: "Gemini" },
+    exec: async (command) => {
+      inSeat.push(command);
+      if (command.includes("print(clear())")) return result({ stdout: "2\n" });
+      if (command.includes("--check")) return result({ stdout: '{"type": "status", "signedIn": true, "version": "1.5.18"}\n' });
+      if (command.includes('"next": nxt')) return result({ stdout: JSON.stringify({ alive: false, exit: 0, next: 42, lines: [JSON.stringify({ type: "text", text: "Built and checked." })] }) });
+      return result({ stdout: "0" });
+    },
+    stop: async () => {},
+    release: async () => {},
+  });
+  const f = fixture([say("1. Build and verify."), say("REVISE\nThe gate's output isn't in the summary."), say("PASS\nThe gate passed.")], {
+    agent: () => gemini,
+    exec: async (_m, command) => (command.includes("from_commit") ? result({ stdout: `${BASE} fetched\n` }) : result({ stdout: "0" })),
+    prepare: async () => {},
+    seat: async () => ({ run: seatRun() }),
+  });
+  expect((await f.runtime.executeTask(gemini, task, { ...f.context, emit: (line) => void said.push(line) })).verified).toBe(true);
+  const kinds = inSeat.flatMap((c) => (c.includes("print(clear())") ? ["clear"] : c.includes("setsid") ? ["launch"] : []));
+  expect(kinds).toEqual(["clear", "launch", "clear", "launch"]);
+  expect(said.filter((line) => line.startsWith("Seat · 2 processes"))).toEqual(Array(2).fill("Seat · 2 processes an earlier run of this task left in its VM ended before this run"));
+  const claude = seatTask("claude", { own: { stdout: signedOut }, roster: [opus] });
+  expect((await claude.go()).verified).toBe(true);
+  expect(claude.inSeat.some((c) => c.includes("print(clear())"))).toBe(false);
+});
+
+test("a Gemini seat's VM that couldn't be cleared starts no run there: the run says why", async () => {
+  const inSeat: string[] = [];
+  const gemini = { ...member, harness: "antigravity" as const, repository: "https://github.com/example/app" };
+  const f = fixture([say("1. Build and verify.")], {
+    agent: () => gemini,
+    exec: async (_m, command) => (command.includes("from_commit") ? result({ stdout: `${BASE} fetched\n` }) : result({ stdout: "0" })),
+    prepare: async () => {},
+    seat: async () => ({ run: { seat: { id: SEAT, kind: "google-antigravity", label: "Gemini" }, exec: async (command: string) => (inSeat.push(command), command.includes("print(clear())") ? result({ exitCode: 1, stdout: "", stderr: "RuntimeError: the seat's VM still runs what an earlier run left" }) : command.includes("--check") ? result({ stdout: '{"type": "status", "signedIn": true}\n' }) : result({ stdout: "0" })), stop: async () => {}, release: async () => {} } }),
+  });
+  const ended = await f.runtime.executeTask(gemini, task, f.context);
+  expect(ended.verified).toBe(false);
+  expect(inSeat.some((c) => c.includes("setsid"))).toBe(false);
+  expect(JSON.stringify(ended)).toContain("couldn't make its VM ready: its seat's VM couldn't be cleared of what an earlier run left (RuntimeError: the seat's VM still runs what an earlier run left)");
+});
+
 test("a run on a seat of yours: its tool's check, launch and follow are in the seat's VM, its gates and session's record in the agent's; the seat is let go as it ends, and its account kept", async () => {
   for (const harness of ["claude", "codex"] as const) {
     const t = seatTask(harness, { own: { stdout: signedOut }, roster: [opus] });

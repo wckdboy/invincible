@@ -249,6 +249,11 @@ export interface AgentRunDeps {
   tellStop?(command: string, timeoutSec: number): Promise<ExecResult>;
   /** Persist a newly observed harness session before following more events. */
   session?(id: string): Promise<void>;
+  /**
+   * What makes its VM ready before each start, where its host says (a seat's VM, for a tool whose every run is a new one:
+   * cleared of what an earlier run of the task left, team-runtime). One that throws starts nothing.
+   */
+  ready?(): Promise<void>;
   /** Each event as it arrives. */
   event?(event: AgentEvent): void;
   signal?: AbortSignal;
@@ -466,6 +471,13 @@ export async function runAgent(
   };
   try {
     if (deps.signal?.aborted) return { ...run, status: "stopped" };
+    if (deps.ready) {
+      try {
+        await deps.ready();
+      } catch (error) {
+        return { ...run, status: "failed", error: redact(`couldn't make its VM ready: ${String((error as Error)?.message ?? error)}`).slice(0, 2000) };
+      }
+    }
     // Read the previous end before spawning: a fast agent can write its entire run
     // before the launch command returns. The per-workspace caller serializes runs.
     const offsetCmd = `stat -c %s ${AGENT_DIR}/events.jsonl 2>/dev/null || echo 0`;
