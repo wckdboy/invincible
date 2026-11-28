@@ -259,7 +259,11 @@ class FakeBrowser:
     def evaluate(self, expression, bound=deskd.CDP_BOUND):
         trace(call="evaluate", expression=expression[:60])
         if expression == deskd.FOCUS_PROBE:
-            return {"field": [True, True, "INPUT"], "body": [True, False, "BODY"]}.get(FOCUS, [False, False, None])
+            # (What the page says has its focus, as DESKD_FOCUS has it; and where another app had the keyboard as deskd
+            # began and the browser's window has it now, its text field, as a page whose field takes the focus on load.)
+            now = desk._display.focused if desk._display is not None else ""
+            focus = "field" if FOCUS in ("xterm", "mousepad") and now == "0x400001" else FOCUS
+            return {"field": [True, True, "INPUT"], "body": [True, False, "BODY"]}.get(focus, [False, False, None])
         if expression == deskd.FIELD_VALUE:
             return FakeBrowser.typed
         if expression == "document.readyState":

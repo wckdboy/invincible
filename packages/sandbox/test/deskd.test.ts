@@ -842,6 +842,28 @@ describe("text that arrives exactly (step 4): typed by what has the focus, never
     for (const run of [r, none]) expect(run.trace().filter((t) => ["key", "xdotool", "own"].includes(String(t.call)) || (t.call === "cdp" && t.method === "Input.insertText"))).toEqual([]);
   });
 
+  test("desktop open brings the browser forward with the focus: after an app the agent opened, the page it opens is where its typing goes", async () => {
+    if (!built) return;
+    // (On Ultra, 28 November 2026, a page opened while the editor had the focus loaded behind it, and the agent's next
+    // typing would have gone to the editor.) The editor has the keyboard, as after `desktop app editor`.
+    const r = await deskd({ DESKD_FOCUS: "mousepad" });
+    expect(desktop(r, ["open", "http://127.0.0.1:8000/type.html"]).code).toBe(0);
+    expect(calls(r.trace(), "activate").map((c) => c.window)).toEqual(["0x400001"]);
+    // (And the keyboard in the page, not the browser's own bar: its tab brought to the front, its contents focused, before
+    // it navigates. Brought forward alone, on Ultra, the browser kept the keyboard in its bar, 5 of 5.)
+    const methods = calls(r.trace(), "cdp").map((c) => c.method);
+    expect(methods.filter((m) => m === "Page.bringToFront" || m === "Page.navigate")).toEqual(["Page.bringToFront", "Page.navigate"]);
+    expect(desktop(r, ["windows"]).out).toMatch(/^\* Chromium "about:blank - Chromium"/m);
+    const typed = desktop(r, ["type", "into the page"]);
+    expect([typed.code, typed.err]).toEqual([0, ""]);
+    expect(typed.out).toContain("typed 13 characters into the page");
+    expect(calls(r.trace(), "cdp").filter((c) => c.method === "Input.insertText")).toEqual([{ call: "cdp", method: "Input.insertText", params: { text: "into the page" } }]);
+    // A browser that has the keyboard already is left as it is: nothing activated.
+    const browsing = await deskd({ DESKD_FOCUS: "field" });
+    expect(desktop(browsing, ["open", "http://127.0.0.1:8000/type.html"]).code).toBe(0);
+    expect(calls(browsing.trace(), "activate")).toEqual([]);
+  });
+
   test("into a terminal, text the keyboard has no keys for is pasted from a selection deskd holds, PRIMARY, with shift+Insert; into another app, CLIPBOARD, with ctrl+v", async () => {
     const term = await deskd({ DESKD_FOCUS: "xterm" });
     await session(term, [{ id: 1, name: "type", input: { text: TEST_STRING } }]);
@@ -1034,7 +1056,13 @@ class P:
 class Settled:
     def take(self): return []
     def since(self, t): return 0
-desk = d.Desk(pieces=P(), display=object(), watch=Settled(), browser=b)
+class Browsing:
+    """The display as an open asks it which window has the keyboard: the browser's, so it is brought forward no more."""
+    def active(self): return 1
+    def clients(self): return [1]
+    def window(self, w): return {"id": hex(w), "title": "alert - Chromium", "app": "Chromium", "dialog": False, "box": [0, 0, 1280, 800]}
+    def activate(self, w): raise AssertionError("the browser has the keyboard already")
+desk = d.Desk(pieces=P(), display=Browsing(), watch=Settled(), browser=b)
 desk.settle = lambda cap=None, since=None: None
 `;
 

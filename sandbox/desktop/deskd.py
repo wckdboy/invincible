@@ -1625,6 +1625,22 @@ class Desk:
             while self.d.active() != w and self.now() < deadline:
                 self.sleep(0.005)
 
+    def browser_forward(self):
+        """The browser's window brought forward with the keyboard's focus where another window has it, once the window
+        manager has done it (half a second at most, as bring waits): its newest, as the window manager lists them. A
+        page the agent opens is then the one it sees and acts on (C1, 28 November 2026: one opened while the editor had
+        the focus loaded behind it, and the agent's typing would have gone to the editor)."""
+        d = self.d
+        active = d.active()
+        mine = [w for w in d.clients() if d.window(w)["app"] == BROWSER_CLASS]
+        if not mine or active in mine:
+            return
+        w = mine[-1]
+        d.activate(w)
+        deadline = self.now() + 0.5
+        while d.active() != w and self.now() < deadline:
+            self.sleep(0.005)
+
     def browser_title(self):
         """The title of the browser's window: the active one when it is the browser's, else its first."""
         d = self._display
@@ -2067,7 +2083,8 @@ class Desk:
 HELP = """desktop start                      bring up the display, the window manager and the browser
 desktop stream                     the screen as H.264 on stdout while it runs (the node's watching: desktop-stream)
 desktop status | desktop stop       (an unused desktop stops by itself after 10 minutes; the next command starts it)
-desktop open <address>             open an address in the browser (http, https, file or about)
+desktop open <address>             open an address in the browser (http, https, file or about), the browser brought
+                                   forward with the keyboard in its page
 desktop text                       the page in front, as text: its title, its address, what it says
 desktop dialog accept [text] | dismiss   answer a JavaScript dialog on the page (alert, confirm, prompt)
 desktop app <terminal|editor>      start a terminal (xterm) or an editor (mousepad) on the screen
@@ -2365,10 +2382,16 @@ def cli(desk, argv, cwd="/work", env=None):
 
 
 def open_address(desk, address):
-    """`address` in the page in front, once it has loaded: its title and address."""
+    """`address` in the page in front, once it has loaded: its title and address. The browser is brought forward with
+    the keyboard's focus first, where another app's window has it (browser_forward), and the keyboard put in the page."""
     with desk.lock:
         browser = desk.browser_ready()
+        desk.browser_forward()
         target, page = browser.front()
+        # (And the keyboard in its page, not in the browser's own bar, as a person's Return in the address bar leaves it:
+        # Chromium's bringToFront puts the tab in front and focuses its contents. Brought forward alone, the browser kept
+        # the keyboard in its bar, and the agent's next typing went there, 5 of 5 on Ultra.)
+        browser.call("Page.bringToFront", {}, page["session"])
         went = browser.call("Page.navigate", {"url": address}, page["session"], bound=30)
         if went.get("errorText"):
             raise Failed("the browser could not open that address (%s)" % went["errorText"])
