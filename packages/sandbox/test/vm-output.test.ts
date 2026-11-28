@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { type DockerRunner, SandboxHost } from "../src/index.ts";
 
 /*
  * What a VM's process writes, as the node reads it (the review's F3, 27 November 2026): never into memory without
@@ -30,7 +31,22 @@ describe("what a VM's process writes, read within bounds", () => {
     expect(session!.lines).toEqual([]);
     expect(session!.why).toMatch(/more than 16 MB/);
     expect(probe!.running).toBe(false);
+    // (Its probe is given a long deadline, not the node's 8 s: this case is about reading 100 MB, see vm-output-case.ts.)
     expect(docker!.available).toBe(true);
     expect(stream!.lines).toBe(0);
   }, 60_000);
+});
+
+describe("the engine's answer to whether it is there", () => {
+  test("is waited for 8 s, as the node waits for it, or as long as the host is given", async () => {
+    const asked: (number | undefined)[] = [];
+    const runner: DockerRunner = async (args, timeoutMs) => {
+      if (args[0] === "info") asked.push(timeoutMs);
+      return { code: 0, stdout: "29.0.0", stderr: "" };
+    };
+    const host = (more: object = {}) => new SandboxHost({ node: "test", maxCpus: 8, maxMemoryGb: 16, runner, tokens: { mint: () => ({ token: "t", info: { hash: "h" } }), revoke: () => true }, ledger: () => {}, ...more } as never);
+    expect(await host().available()).toBe(true);
+    expect(await host({ availableMs: 600_000 }).available()).toBe(true);
+    expect(asked).toEqual([8000, 600_000]);
+  });
 });

@@ -26,8 +26,12 @@ function engine(): string {
   chmodSync(path, 0o755);
   return path;
 }
+// Its probe of the engine is given 10 minutes, not the node's 8 s (availableMs). This case's subject is the memory bound
+// of reading 100 MB, not the probe's deadline: on a starved machine (2 % of a core, what each of ~585 runnable tasks gets
+// of 12 cores) reading the flood took longer than 8 s, and the probe said the engine was down (28 November 2026). The
+// node's own deadline is unchanged, and the assertion that the engine answers stands: no gate is loosened here.
 const host = (docker: string) =>
-  new SandboxHost({ node: "test", maxCpus: 8, maxMemoryGb: 16, docker, tokens: { mint: () => ({ token: "t", info: { hash: "h" } }), revoke: () => true }, ledger: () => {} } as never);
+  new SandboxHost({ node: "test", maxCpus: 8, maxMemoryGb: 16, docker, availableMs: 600_000, tokens: { mint: () => ({ token: "t", info: { hash: "h" } }), revoke: () => true }, ledger: () => {} } as never);
 
 const cases: Record<string, () => Promise<Record<string, unknown>>> = {
   // A collect whose VM says 100 MB on its stderr before it writes its tar (a real one, of a small folder).

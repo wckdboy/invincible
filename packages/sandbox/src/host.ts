@@ -187,6 +187,11 @@ export interface SandboxHostOptions {
   disk?: () => { totalBytes: number; freeBytes: number };
   /** The engine's binary (default: docker, or container). */
   docker?: string;
+  /**
+   * How long the engine is given to answer whether it is there (available): 8 s, as the node waits, unless given. A
+   * test whose engine floods its answer on purpose gives it longer, its subject being the reading, not the deadline.
+   */
+  availableMs?: number;
   /** How the engine is run (tests pass a stand-in that answers its commands; nothing is spawned then). */
   runner?: DockerRunner;
   /** How a terminal's process is started (tests pass one that starts a local shell instead of `docker exec`). */
@@ -690,10 +695,10 @@ export class SandboxHost {
     if (!this.opts.runner && !Bun.which(this.bin)) return false;
     if (this.apple) {
       // Its service answers when the API server's row is there; a major release this driver doesn't speak is no host.
-      const version = parseContainerVersion((await this.docker(containerVersionArgs(), 8000)).stdout);
+      const version = parseContainerVersion((await this.docker(containerVersionArgs(), this.opts.availableMs ?? 8000)).stdout);
       return !!version?.running && version.major === CONTAINER_MAJOR;
     }
-    return (await this.docker(["info", "--format", "{{.ServerVersion}}"], 8000)).code === 0;
+    return (await this.docker(["info", "--format", "{{.ServerVersion}}"], this.opts.availableMs ?? 8000)).code === 0;
   }
 
   async status() {
