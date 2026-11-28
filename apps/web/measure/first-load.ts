@@ -69,7 +69,7 @@
  * trust a difference only when the ranges don't overlap. Bytes, requests and nodes don't move.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { loadavg, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { freePort } from "../../../packages/node/test/ports.ts";
@@ -123,6 +123,8 @@ class Chrome {
   private constructor(
     private readonly ws: WebSocket,
     private readonly proc: ReturnType<typeof Bun.spawn>,
+    /** What it has said on stderr: its last few thousand characters, and how many it has said in all. */
+    private readonly heard: { said: string; total: number },
   ) {
     ws.addEventListener("message", (message) => {
       const m = JSON.parse(String(message.data));
@@ -168,10 +170,14 @@ class Chrome {
     );
     // What it says is kept only while it runs (its last few thousand characters), and read all along, so a full pipe
     // never stalls it: if it doesn't start, its last lines say why.
-    let said = "";
+    const heard = { said: "", total: 0 };
     void (async () => {
       const text = new TextDecoder();
-      for await (const chunk of proc.stderr as ReadableStream<Uint8Array>) said = (said + text.decode(chunk, { stream: true })).slice(-4000);
+      for await (const chunk of proc.stderr as ReadableStream<Uint8Array>) {
+        const words = text.decode(chunk, { stream: true });
+        heard.said = (heard.said + words).slice(-4000);
+        heard.total += words.length;
+      }
     })().catch(() => {});
     const ended = { code: null as number | null };
     void proc.exited.then((code) => (ended.code = code));
@@ -181,7 +187,7 @@ class Chrome {
     for (let i = 0; i < 600 && !existsSync(portFile) && ended.code === null; i++) await sleep(100);
     if (!existsSync(portFile)) {
       proc.kill();
-      const last = said.trim().split("\n").slice(-6).join("\n");
+      const last = heard.said.trim().split("\n").slice(-6).join("\n");
       throw new Error(`${ended.code === null ? "Chrome never wrote down its DevTools port in a minute" : `Chrome exited (${ended.code}) before it wrote down its DevTools port`}${last ? `:\n${last}` : ""}`);
     }
     const [port, path] = readFileSync(portFile, "utf8").trim().split("\n");
@@ -190,7 +196,7 @@ class Chrome {
       ws.addEventListener("open", () => done(), { once: true });
       ws.addEventListener("error", () => fail(new Error("no DevTools connection")), { once: true });
     });
-    return new Chrome(ws, proc);
+    return new Chrome(ws, proc, heard);
   }
   /**
    * One call to Chrome. Nothing waits on it silently: a call it hasn't answered in a minute is said, every minute until it
@@ -215,6 +221,15 @@ class Chrome {
       signal?.addEventListener("abort", () => (end(), reject(signal.reason)), { once: true });
       this.ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
+  }
+  /** Where its words on stderr have got to, to ask later what it said since (`saidSince`). */
+  mark(): number {
+    return this.heard.total;
+  }
+  /** What it said on stderr since `mark`: its last 300 characters at most, on one line. */
+  saidSince(mark: number): string {
+    const since = Math.min(this.heard.total - mark, this.heard.said.length, 300);
+    return since > 0 ? this.heard.said.slice(-since).replace(/\s+/g, " ").trim() : "";
   }
   on(listener: (event: CdpEvent) => void): void {
     this.listeners.add(listener);
@@ -712,19 +727,31 @@ try {
     if (!response.ok) throw new Error(`${name}: ${response.status} ${JSON.stringify(body)}`);
     return body;
   };
-  const until = async (what: string, probe: () => unknown | Promise<unknown>, timeoutMs = 20_000): Promise<void> => {
+  /**
+   * Until `probe` holds, for `timeoutMs` at most. A wait on the page says, when it gives up, what the page showed
+   * (`shown`): "waited 45 s for #/sandboxes to be usable" (the bench, at a loaded machine, 28 November 2026) said nothing
+   * of whether its answer never came, or came and no frame was drawn. A probe the page doesn't answer (its frames
+   * stopped, it can't run a script) is waited for until the wait's end, never past it.
+   */
+  const until = async (what: string, probe: () => unknown | Promise<unknown>, timeoutMs = 20_000, shown?: () => Promise<string>): Promise<void> => {
     const end = Date.now() + timeoutMs;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const over = new Promise<false>((done) => (timer = setTimeout(() => done(false), timeoutMs)));
     let trouble = "";
-    while (Date.now() < end) {
-      try {
-        if (await probe()) return;
-      } catch (error) {
-        // A page between two documents can't be asked: asked again.
-        trouble = `: ${(error as Error).message}`;
+    try {
+      while (Date.now() < end) {
+        try {
+          if (await Promise.race([probe(), over])) return;
+        } catch (error) {
+          // A page between two documents can't be asked: asked again.
+          trouble = `: ${(error as Error).message}`;
+        }
+        await sleep(50);
       }
-      await sleep(50);
+    } finally {
+      clearTimeout(timer);
     }
-    throw new Error(`waited ${timeoutMs / 1000} s for ${what}${trouble}`);
+    throw new Error(`waited ${timeoutMs / 1000} s for ${what}${trouble}${shown ? `; ${await shown()}` : ""}`);
   };
 
   // ---------- stand-in models, and what the pages show ----------
@@ -924,6 +951,10 @@ try {
   const { sessionId: page } = await browser.send("Target.attachToTarget", { targetId: targetInfos.find((t: { type: string }) => t.type === "page").targetId, flatten: true });
   const wire = new Map<string, Wire & { done: boolean }>();
   const workers = new Set<string>();
+  /** When each request of the page's was asked, until it is answered; and when each service worker began to wait to be
+   * let run, until it is: what a wait that gives up says is still outstanding. */
+  const askedAt = new Map<string, number>();
+  const starting = new Map<string, number>();
   let profile: Profile = "laptop";
   let lastTraffic = Date.now();
   const line = (name: Profile) => ({ offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1, ...(PROFILES[name].network ?? {}) });
@@ -931,20 +962,26 @@ try {
     if (method === "Target.attachedToTarget" && params.targetInfo.type === "service_worker") {
       // A service worker waits for us at its start, so none of its requests are missed, and it is on the same line as the page.
       workers.add(params.sessionId);
+      starting.set(params.sessionId, Date.now());
       void browser
         .send("Network.enable", {}, params.sessionId)
         .then(() => browser.send("Network.emulateNetworkConditions", line(profile), params.sessionId))
         .then(() => browser.send("Runtime.runIfWaitingForDebugger", {}, params.sessionId))
+        .then(() => void starting.delete(params.sessionId))
         .catch(() => {});
       return;
     }
-    if (method === "Target.detachedFromTarget") workers.delete(params.sessionId);
+    if (method === "Target.detachedFromTarget") {
+      workers.delete(params.sessionId);
+      starting.delete(params.sessionId);
+    }
     if (!method.startsWith("Network.") || (sessionId !== page && !workers.has(sessionId ?? ""))) return;
     const key = `${sessionId}:${params.requestId}`;
     // (What comes on a stream the page keeps open is not the page loading.)
     if (!(method === "Network.dataReceived" && wire.get(key)?.stream)) lastTraffic = Date.now();
     if (method === "Network.requestWillBeSent" && params.request.url.startsWith(origin)) {
       wire.set(key, { path: new URL(params.request.url).pathname, status: 0, bytes: 0, encoding: "", by: sessionId === page ? "page" : "service worker", from: "network", done: false });
+      askedAt.set(key, Date.now());
     } else if (method === "Network.responseReceived" && wire.has(key)) {
       const entry = wire.get(key)!;
       entry.status = params.response.status;
@@ -953,6 +990,7 @@ try {
       if (params.response.mimeType === "text/event-stream") entry.stream = true;
     } else if ((method === "Network.loadingFinished" || method === "Network.loadingFailed") && wire.has(key)) {
       Object.assign(wire.get(key)!, { bytes: params.encodedDataLength ?? 0, done: true });
+      askedAt.delete(key);
     }
   });
   await browser.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true, filter: [{ type: "service_worker" }] });
@@ -1005,7 +1043,46 @@ try {
     await browser.send("Storage.clearDataForOrigin", { origin, storageTypes: "service_workers,cache_storage" }, page);
     await sleep(200);
   };
-  const usable = (hash: string) => until(`${hash} to be usable`, () => evaluate(`window.__measure?.usable != null && performance.getEntriesByName("first-contentful-paint").length > 0`), 45_000);
+  /**
+   * What the page showed when a wait on it gave up, and what it still waited for: the app's shell, the page's heading and
+   * its loading placeholders, whether it had painted and still drew frames, its words; every request it made that wasn't
+   * answered, and for how long; a service worker not yet let run; what Chrome said on stderr since the wait began
+   * (`since`, its mark); the machine's load. So a wait that ends tells an answer that never came from frames that
+   * stopped, a page that never started, or a machine too loaded to say. (The page is asked for 5 s at most: one that
+   * can't answer is said to be so.)
+   */
+  const showing = async (since: number): Promise<string> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const seen = await Promise.race([
+      evaluate<{ shell: boolean; heading: string | null; placeholders: number; painted: boolean; drawing: boolean; words: string }>(`(async () => {
+        const main = document.querySelector(".shell main");
+        const drawing = await new Promise((done) => { requestAnimationFrame(() => done(true)); setTimeout(() => done(false), 1000); });
+        return {
+          shell: Boolean(document.querySelector(".shell")),
+          heading: main?.querySelector(".page-head h1")?.textContent?.trim() || null,
+          placeholders: main ? main.querySelectorAll(".skeleton").length : 0,
+          painted: performance.getEntriesByName("first-contentful-paint").length > 0,
+          drawing,
+          words: ((main ?? document.body)?.innerText ?? "").replace(/\\s+/g, " ").trim().slice(0, 200),
+        };
+      })()`).catch((error: Error) => `couldn't be asked: ${error.message}`),
+      new Promise<string>((done) => (timer = setTimeout(() => done("couldn't be asked in 5 s"), 5000))),
+    ]);
+    clearTimeout(timer);
+    const now = Date.now();
+    const page =
+      typeof seen === "string"
+        ? `the page ${seen}`
+        : `the page showed ${[seen.shell ? "the app's shell" : "no shell", seen.heading ? `its heading "${seen.heading}"` : "no heading", `${seen.placeholders} loading placeholder${seen.placeholders === 1 ? "" : "s"}`, seen.painted ? "painted" : "nothing painted", seen.drawing ? "frames drawn" : "no frame drawn in 1 s"].join(", ")}${seen.words ? `, saying "${seen.words}"` : ""}`;
+    const unanswered = [...wire].filter(([, w]) => !w.done && !w.stream).map(([key, w]) => `${w.path} (${w.by}, ${((now - (askedAt.get(key) ?? now)) / 1000).toFixed(1)} s)`);
+    const paused = [...starting.values()].map((at) => `a service worker not yet let run, ${((now - at) / 1000).toFixed(1)} s`);
+    const said = browser.saidSince(since);
+    return [page, unanswered.length ? `unanswered: ${unanswered.join(", ")}` : "every request it made answered", ...paused, `Chrome said ${said ? `"${said}"` : "nothing"} meanwhile`, `the machine's load ${loadavg()[0]!.toFixed(0)}`].join("; ");
+  };
+  const usable = (hash: string) => {
+    const since = browser.mark();
+    return until(`${hash} to be usable`, () => evaluate(`window.__measure?.usable != null && performance.getEntriesByName("first-contentful-paint").length > 0`), 45_000, () => showing(since));
+  };
   const open = async (hash: string, settle: boolean): Promise<Load> => {
     await navigate("about:blank");
     await sleep(100);
@@ -1361,7 +1438,8 @@ try {
                 await sleep(350);
               }
             }
-            if (view.wait) await until(`${view.name} to show`, () => evaluate(`Boolean(document.querySelector(${JSON.stringify(view.wait)}))`), 20_000).catch((error) => console.error(`${view.name}: ${(error as Error).message}`));
+            const since = browser.mark();
+            if (view.wait) await until(`${view.name} to show`, () => evaluate(`Boolean(document.querySelector(${JSON.stringify(view.wait)}))`), 20_000, () => showing(since)).catch((error) => console.error(`${view.name}: ${(error as Error).message}`));
             // (A running task's lines, and a desktop's picture, arrive a moment after the page.)
             await sleep(view.name.includes("running") || view.name.includes("desktop") ? 2500 : 500);
             await shoot(view.name, width, theme);
