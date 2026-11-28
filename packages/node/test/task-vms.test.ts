@@ -13,8 +13,10 @@ const STARTED = Date.UTC(2026, 10, 27, 11, 0);
 const done = (stdout = ""): ExecResult => ({ exitCode: 0, stdout, stderr: "", durationMs: 1, truncated: false });
 
 /** A host as TaskVms uses it: VMs made for tasks, their commands, their streams, their removal. */
-function host(options: { left?: string[]; failRemove?: string; failTimes?: number; stays?: string; refused?: string; slow?: number } = {}) {
+function host(options: { left?: string[]; failRemove?: string; failTimes?: number; stays?: string; refused?: string; slow?: number; makes?: boolean; unlisted?: boolean } = {}) {
   const vms = new Map<string, { createdAt: number; run: string }>();
+  /** How often its engine was asked which VMs are other nodes' tasks'. */
+  let listed = 0;
   for (const id of options.left ?? []) vms.set(id, { createdAt: STARTED - 60_000, run: `handed.task-${id}` });
   const asked: unknown[] = [], ran: { vm: string; cmd: string[] }[] = [], removed: string[] = [];
   /** Each pipe between two VMs, as the host was asked for it: from which VM's command to which. */
@@ -26,7 +28,12 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
   let made = 0;
   const fake = {
     get: async (id: string) => (vms.has(id) ? ({ id, createdAt: vms.get(id)!.createdAt, run: vms.get(id)!.run } as unknown as SandboxView) : null),
-    taskVms: async () => [...vms.keys()],
+    // (Whether it makes sandboxes, as SandboxHost.makesSandboxes says: by default it does. `unlisted`: its engine can't say.)
+    makesSandboxes: async () => options.makes ?? true,
+    taskVms: async () => {
+      listed++;
+      return options.unlisted ? null : [...vms.keys()];
+    },
     createTaskVm: async (input: unknown, signal?: AbortSignal) => {
       asked.push(input);
       signals.push(signal);
@@ -66,7 +73,7 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
       return { from: done(), to: done(), bytes: 0, cut: false };
     },
   };
-  return { fake, vms, asked, ran, removed, steps, signals, piped };
+  return { fake, vms, asked, ran, removed, steps, signals, piped, listed: () => listed };
 }
 
 const ask = { vm: "agent-vm", task: "task-abcdefghijkl", providers: ["anthropic"], models: ["anthropic/claude-paid"] };
@@ -99,6 +106,26 @@ describe("another node's task's VM, on this node", () => {
     // (Swept once: the next takes none of this process's away.)
     await vms.open({ ...ask, task: "task-mnopqrstuvwx" }, new AbortController().signal);
     expect([...h.vms.keys()].sort()).toEqual(["vm-1", "vm-2"]);
+  });
+
+  test("a node that makes no sandboxes asks its engine for no task's VM, so its sweep fails for nothing; one that does, and can't list them, says so", async () => {
+    // (The Mac mini, 28 November 2026: no sandbox image and no firewall, and its doctor read the listing it couldn't
+    // make as trouble. The gateway's listener holds to the same: daemon.ts.)
+    const none = host({ makes: false, unlisted: true });
+    await new TaskVms({ host: () => none.fake as never, now: () => STARTED }).sweep();
+    expect(none.listed()).toBe(0);
+    const makes = host({ unlisted: true });
+    await expect(new TaskVms({ host: () => makes.fake as never, now: () => STARTED }).sweep()).rejects.toThrow("docker couldn't say which VMs are other nodes' tasks'");
+    expect(makes.listed()).toBe(1);
+    // Asked again by the next task: once the node makes sandboxes, what an earlier process left goes before its first.
+    const later = { makes: false, left: ["old-1"] };
+    const h = host(later);
+    const vms = new TaskVms({ host: () => h.fake as never, now: () => STARTED });
+    await vms.sweep();
+    expect([h.listed(), h.removed]).toEqual([0, []]);
+    later.makes = true;
+    await vms.open(ask, new AbortController().signal);
+    expect([h.listed(), h.removed]).toEqual([1, ["old-1"]]);
   });
 
   test("one that couldn't be removed as its task ended is removed before the next is made", async () => {

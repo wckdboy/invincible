@@ -824,6 +824,17 @@ export class SandboxHost {
     return this.apple ? (this.opts.firewall ?? (() => macFirewall()))() : null;
   }
 
+  /**
+   * Whether this host makes sandboxes: its engine answers and its image is here and, on a Mac, its sandbox firewall is
+   * on, what the doctor names when it isn't (the rule the gateway's listener holds to, daemon.ts). One that makes none
+   * has no VM to ask its engine about, so a failure to say which it has is no trouble of its. Its networks are asked
+   * nothing (status() would): a node whose sandboxes have none asks its engine of none (scratch-node.e2e.test.ts).
+   */
+  async makesSandboxes(): Promise<boolean> {
+    const [image, wall] = await Promise.all([this.available().then((up) => up && this.hasImage()).catch(() => false), this.firewallState().catch(() => null)]);
+    return image && (!this.apple || !!wall?.on);
+  }
+
   async build(contextDir: string, why?: string, image = DEFAULT_IMAGE, opts: { pull?: boolean } = {}): Promise<{ ok: boolean; output: string }> {
     // One build per image at a time: two runs that both find it missing wait for the same build.
     let pending = this.building.get(image);
@@ -2482,8 +2493,12 @@ export class SandboxHost {
     this.leased.delete(id);
   }
 
-  /** The VMs on this host made for other nodes' tasks, in any state, by their own ids: null when docker can't say. */
+  /**
+   * The VMs on this host made for other nodes' tasks, in any state, by their own ids: null when docker can't say. A Mac
+   * has none, asked nothing: it makes none (createTaskVm), and its engine, Apple's container, has no `ps` to ask.
+   */
   async taskVms(): Promise<string[] | null> {
+    if (this.apple) return [];
     const listed = await this.docker(["ps", "-a", "--filter", `label=${LABEL}=1`, "--filter", `label=${LABEL}.node=${this.opts.node}`, "--filter", `label=${LABEL}.task`, "--format", `{{.Label "${LABEL}.id"}}`]);
     return listed.code === 0 ? listed.stdout.split("\n").map((line) => line.trim()).filter(Boolean) : null;
   }

@@ -16,7 +16,7 @@ import type { SandboxHost } from "@invincible/sandbox";
 const RETRY_MS = 60_000;
 const RETRY_MAX_MS = 15 * 60_000;
 
-type Host = Pick<SandboxHost, "createTaskVm" | "exec" | "destroy" | "stream" | "taskVms" | "get" | "endLease" | "pipe">;
+type Host = Pick<SandboxHost, "createTaskVm" | "exec" | "destroy" | "stream" | "taskVms" | "get" | "endLease" | "pipe" | "makesSandboxes">;
 
 /** How long a task's VM may live: longer than any task, which removes it as it ends (a backstop, never its end). */
 export const TASK_VM_MINUTES = 2 * 24 * 60;
@@ -45,11 +45,20 @@ export class TaskVms {
     this.wait = opts.retryMs ?? RETRY_MS;
   }
 
-  /** Every task's VM an earlier process of this node left, removed: its task's run ended with that process. Asked once. */
+  /**
+   * Every task's VM an earlier process of this node left, removed: its task's run ended with that process. Asked once.
+   * A node that makes no sandboxes (no image; a Mac without its sandbox firewall) has none, and its engine is asked for
+   * no list, so it says nothing of one (the Mac mini's doctor read the listing it couldn't make as trouble, 28 November
+   * 2026); asked again by the next task, which finds them once it makes sandboxes.
+   */
   sweep(): Promise<void> {
     this.swept ??= (async () => {
       const host = this.opts.host();
       if (!host) return;
+      if (!(await host.makesSandboxes())) {
+        this.swept = null;
+        return;
+      }
       const vms = await host.taskVms();
       if (vms === null) throw new Error("docker couldn't say which VMs are other nodes' tasks'");
       for (const id of vms) {
