@@ -51,7 +51,6 @@ What the owner uses every day, built on the carried engine around the new model.
   - where agy's plugin MCP servers come from for the signed-in user (from the account, a swap within a run brings
     commands): signed in;
   - `/work/tasks/.codeium.yaml`, which agy reads above a task's workspace: settle what it holds, or refuse to start;
-  - the task's bridge file, written once per task's work: write it at each run's start;
   - an ACP command that runs agy under another name isn't held to the plan's rule;
   - R6's forms still read in pieces: `KEY=<base64>` (it can come without intent), `0x<hex>`, a JWT wrapped with its
     label, xxd's own dump;

@@ -317,7 +317,9 @@ The run loop is carried and renamed (§10), the most proven part of it:
     read (agy's own in an agent's own VM is kept as the rest goes), its client named truthfully, signed in with it before
     anything else, its updates and telemetry off, and never an agy older than 1.5.1 (`packages/agents/src/antigravity.ts`).
     Each run is a new agy session, so a steer ends a run between its calls, and a new run, told the task's briefing,
-    where the work stands and the steer, carries on (`steer: "anew"`).
+    where the work stands and the steer, carries on (`steer: "anew"`). Its command carries its bridge whole (nothing in
+    `/work` is run for it), and on a seat each start is in the seat's VM cleared of every process an earlier run of the
+    task left there but its init's (`seatVmClearCommand`).
     It speaks Gemini's API, which no provider of the gateway's does: it runs on its Google sign-in alone, never on a
     roster model. Its sign-in is a key to the owner's Google Cloud that any command agy runs can read, so it works only
     on the owner's own repositories (core's `ownWorkRefusal`, as a task starts), as does an ACP agent whose command runs

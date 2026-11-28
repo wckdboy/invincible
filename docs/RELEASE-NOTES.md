@@ -11,7 +11,8 @@ What a release has to say beyond its commits: what you must do, and by when. The
     updates off. It runs on its Google sign-in alone: no model of the gateway's speaks its API. Your agent can direct
     it, but it works only on your own repositories, never on another node's task. Its sign-in is a key to your Google
     Cloud, in its VM, readable by what it runs. It is sealed when the sign-in takes, and each run starts from that sealed
-    copy, so whatever a run does to its own copy, another account's sign-in among it, ends with that run.
+    copy, in the seat's VM cleared of what an earlier run of its task left there, so whatever a run does to its own copy,
+    another account's sign-in among it, ends with that run, within its task too.
   - **What you may see:** revoking agy's access in your Google Account ends the seat's use at its next run; sign it in
     again on its card.
   - **The risk, yours (27 November 2026):** Google's Antigravity terms call reaching it through another tool a breach
