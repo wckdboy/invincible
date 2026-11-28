@@ -1,4 +1,4 @@
-import type { FleetView, SecretView, UsageMeter } from "@invincible/core";
+import type { FleetView, LedgerView, SecretView, UsageMeter } from "@invincible/core";
 import { isUnavailable } from "../api.ts";
 import type { View } from "../context.ts";
 import { ledgerSignature } from "../lib/activity.ts";
@@ -6,7 +6,7 @@ import { greeting } from "../lib/time.ts";
 import type { LedgerEntry } from "../types.ts";
 import { button, dot, empty, linkButton, pageBody, pageHead, section, skeletonRows, skeletonStat, statTile } from "../ui/controls.ts";
 import { h, keepPlace, replace } from "../ui/dom.ts";
-import { ledgerItem } from "./activity.ts";
+import { ledgerItem, watchLedger } from "./activity.ts";
 import { inHandSection } from "./in-hand.ts";
 import { meterSlot, usageTile } from "./usage-meter.ts";
 import { doctorSection } from "./doctor-card.ts";
@@ -26,8 +26,9 @@ export const overviewView: View = (root, ctx, { scope }) => {
   let vault: { count: number; unlocked: boolean } | null = null;
   /** This period's meter; null until it answers; "none" from a node from before the meter. */
   let usage: UsageMeter | null | "none" = null;
-  let ledgerMissing = false;
   let ledgerSeen = "";
+  /** The mind's count of events as the ledger's last answer said it (null: not yet, or a node from before it said so). */
+  let mindEvents: number | null = null;
 
   function renderStats(fleet: FleetView | null): void {
     const tiles: HTMLElement[] = [];
@@ -66,7 +67,9 @@ export const overviewView: View = (root, ctx, { scope }) => {
     // place is kept while it loads, as the Vault's is: a tile put in once it answers moved the ones after it.
     if (usage && usage !== "none") tiles.push(usageTile(ctx, usage, (next) => { usage = next; renderStats(ctx.live.fleet.value); }));
     else if (usage === null && ctx.can("mind:read")) tiles.push(statTile({ label: "Usage", icon: "gauge", value: "–", note: ["loading…", meterSlot()] }));
-    if (fleet) tiles.push(statTile({ label: "Mind", icon: "memory", value: fleet.events.toLocaleString(), note: "events in the shared mind", href: "#/memory" }));
+    // (The count comes with the ledger's answer, read as a line is recorded; the fleet's, from before the node said it there.)
+    const events = mindEvents ?? fleet?.events;
+    if (events !== undefined) tiles.push(statTile({ label: "Mind", icon: "memory", value: events.toLocaleString(), note: "events in the shared mind", href: "#/memory" }));
     else if (ctx.can("mind:read")) tiles.push(waiting("Mind", "memory"));
     // The mandate's north star (#28): how often you stepped in on the agents' work, per task done and verified. Said
     // whenever the agents can be, a dash while no task has ended, so its tile is there from the start.
@@ -125,31 +128,41 @@ export const overviewView: View = (root, ctx, { scope }) => {
     );
   }
 
-  async function loadLedger(): Promise<void> {
-    if (ledgerMissing) return;
+  /** What reading the ledger came to instead: a node without it says so once, and is asked no more. */
+  function ledgerFailed(error: unknown, stop: () => void): void {
+    if (scope.disposed) return;
+    ledgerSeen = "";
+    if (isUnavailable(error)) stop();
+    replace(
+      recent,
+      empty({
+        icon: "scroll",
+        title: isUnavailable(error) ? "The ledger arrives with an upcoming update" : "Couldn't read recent activity",
+        body: isUnavailable(error) ? "The policy already gates every action; soon you'll see each one here." : String((error as Error).message ?? error),
+        compact: true,
+      }),
+    );
+  }
+
+  function ledgerSeenNow(view: LedgerView): void {
+    if (scope.disposed) return;
+    showLedger(view.entries);
+    if (view.events !== undefined && view.events !== mindEvents) {
+      mindEvents = view.events;
+      keepPlace(root, () => renderStats(ctx.live.fleet.value));
+    }
+  }
+
+  /** The latest lines and the mind's count: what it showed last time this session at once, then as the stream says. */
+  function watchRecent(): void {
     if (!ctx.can("mind:read")) {
       replace(recent, empty({ icon: "activity", title: "Activity needs the mind:read scope", compact: true }));
       return;
     }
-    try {
-      // What it showed last time this session, at once (api.peek); then the fresh answer.
-      const last = ledgerSeen ? null : ctx.api.peek<{ entries: LedgerEntry[] }>("/api/ledger");
-      if (last) showLedger(last.entries);
-      showLedger((await ctx.api.get<{ entries: LedgerEntry[] }>("/api/ledger", scope.signal)).entries);
-    } catch (error) {
-      if (scope.disposed) return;
-      ledgerSeen = "";
-      if (isUnavailable(error)) ledgerMissing = true;
-      replace(
-        recent,
-        empty({
-          icon: "scroll",
-          title: isUnavailable(error) ? "The ledger arrives with an upcoming update" : "Couldn't read recent activity",
-          body: isUnavailable(error) ? "The policy already gates every action; soon you'll see each one here." : String((error as Error).message ?? error),
-          compact: true,
-        }),
-      );
-    }
+    const last = ctx.api.peek<LedgerView>("/api/ledger");
+    if (last) ledgerSeenNow(last);
+    let stop: () => void = () => {};
+    stop = watchLedger(ctx.api, scope.signal, ctx.live.follow, { seen: ledgerSeenNow, failed: (error) => ledgerFailed(error, () => stop()), downMs: 15_000 });
   }
 
   const actions = [
@@ -207,9 +220,7 @@ export const overviewView: View = (root, ctx, { scope }) => {
   // Its numbers move as calls are made: looked at again each minute while the page is open.
   const usageTimer = setInterval(() => void loadUsage(), 60_000);
   scope.add(() => clearInterval(usageTimer));
-  void loadLedger();
-  scope.interval(() => void loadLedger(), 15_000);
-  // The mind's count of events moves with every one of them: the live stream doesn't tell of it, so it is asked for
-  // while this page shows it, as often as the app asked for the fleet before there was a stream.
-  scope.interval(() => void ctx.live.refreshFleet(), 10_000);
+  // The latest lines and the mind's count, as the live stream says a line was recorded (at most every 5 s) and every 15 s
+  // while it is down: nothing is read at rest, where this page asked for the ledger every 15 s and the fleet every 10 s.
+  watchRecent();
 };

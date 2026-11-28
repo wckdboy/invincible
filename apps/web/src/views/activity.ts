@@ -1,8 +1,9 @@
-import type { Ctx, View } from "../context.ts";
+import type { LedgerView } from "@invincible/core";
+import type { Ctx, Live, View } from "../context.ts";
 import { CLASS_LABEL, type LedgerFilter, ledgerFilterSummary, ledgerMatches, ledgerSignature, VERDICT_LABEL } from "../lib/activity.ts";
 import { shortId } from "../lib/text.ts";
 import { clockTime, dayKey, dayLabel, hlcMs, relativeTime } from "../lib/time.ts";
-import { isUnavailable } from "../api.ts";
+import { type Api, isUnavailable } from "../api.ts";
 import type { ActionClass, LedgerEntry, Verdict } from "../types.ts";
 import { badge, button, card, empty, errorState, meta, note, pageHead, section, skeletonRows, type Tone } from "../ui/controls.ts";
 import { debounce, h, keepPlace, replace } from "../ui/dom.ts";
@@ -89,6 +90,34 @@ export function autonomyCard(entries: LedgerEntry[] | null): HTMLElement {
 }
 
 const PAGE = 60;
+
+/**
+ * The ledger kept in step with the node, for the pages that show it (Activity, the Overview): read now, then when the
+ * node's live stream says `ledger` moved (a line recorded, told at most every LIVE_LEDGER_MS), and every `downMs` while
+ * that stream is down. Nothing is read at rest. Before, the Overview read it every 15 s (and the fleet every 10 s, for
+ * the mind's count) and Activity every 10 s, whatever moved. `seen`: each answer, its lines and the mind's count;
+ * `failed`: what reading it came to instead. Ends with `signal`, or with what this returns (a node without the ledger).
+ */
+export function watchLedger(api: Api, signal: AbortSignal, follow: Live["follow"], o: { seen: (view: LedgerView) => void; failed: (error: unknown) => void; downMs: number }): () => void {
+  let stopped = false;
+  const read = async (): Promise<void> => {
+    if (stopped || signal.aborted) return;
+    try {
+      const view = await api.get<LedgerView>("/api/ledger", signal);
+      if (!stopped && !signal.aborted) o.seen(view);
+    } catch (error) {
+      if (!stopped && !signal.aborted) o.failed(error);
+    }
+  };
+  const unfollow = follow(["ledger"], () => read(), o.downMs);
+  const stop = (): void => {
+    stopped = true;
+    unfollow();
+  };
+  signal.addEventListener("abort", stop, { once: true });
+  void read();
+  return stop;
+}
 
 export const activityView: View = (root, ctx, { scope }) => {
   let entries: LedgerEntry[] = [];
@@ -229,36 +258,35 @@ export const activityView: View = (root, ctx, { scope }) => {
     );
   }
 
-  async function load(): Promise<void> {
-    try {
-      const { entries: loaded } = await ctx.api.get<{ entries: LedgerEntry[] }>("/api/ledger", scope.signal);
-      if (scope.disposed) return;
-      const sorted = [...loaded].sort((a, b) => (a.hlc < b.hlc ? 1 : a.hlc > b.hlc ? -1 : 0));
-      const next = ledgerSignature(sorted);
-      // Nothing new: leave the page exactly as it is.
-      if (next === signature) return;
-      signature = next;
-      entries = sorted;
-      replace(autonomyBox, autonomyCard(entries));
-      render();
-    } catch (error) {
-      if (scope.disposed) return;
-      signature = "";
-      // What the primary may do alone is worth showing even without the ledger's counts.
-      if (!autonomyBox.firstChild) replace(autonomyBox, autonomyCard(null));
-      if (isUnavailable(error)) {
-        replace(
-          timeline,
-          empty({
-            icon: "scroll",
-            title: "The ledger isn't on this node yet",
-            body: "It arrives with an upcoming update. Until then, the policy still gates every action; it just isn't shown here.",
-          }),
-        );
-        stop();
-      } else if (!entries.length) replace(timeline, errorState("Couldn't read the ledger", error, () => void load()));
-      // With entries on screen, a failed refresh keeps them; the shell says the node can't be reached.
-    }
+  function seen({ entries: loaded }: LedgerView): void {
+    if (scope.disposed) return;
+    const sorted = [...loaded].sort((a, b) => (a.hlc < b.hlc ? 1 : a.hlc > b.hlc ? -1 : 0));
+    const next = ledgerSignature(sorted);
+    // Nothing new: leave the page exactly as it is.
+    if (next === signature) return;
+    signature = next;
+    entries = sorted;
+    replace(autonomyBox, autonomyCard(entries));
+    render();
+  }
+
+  function failed(error: unknown): void {
+    if (scope.disposed) return;
+    signature = "";
+    // What the primary may do alone is worth showing even without the ledger's counts.
+    if (!autonomyBox.firstChild) replace(autonomyBox, autonomyCard(null));
+    if (isUnavailable(error)) {
+      replace(
+        timeline,
+        empty({
+          icon: "scroll",
+          title: "The ledger isn't on this node yet",
+          body: "It arrives with an upcoming update. Until then, the policy still gates every action; it just isn't shown here.",
+        }),
+      );
+      stop();
+    } else if (!entries.length) replace(timeline, errorState("Couldn't read the ledger", error, () => void again()));
+    // With entries on screen, a failed refresh keeps them; the shell says the node can't be reached.
   }
 
   const renderSoon = debounce(() => {
@@ -281,11 +309,12 @@ export const activityView: View = (root, ctx, { scope }) => {
   );
   root.querySelector(".section-head h2")?.after(countLabel);
 
-  let timer: ReturnType<typeof setInterval> | null = setInterval(() => void load(), 10_000);
-  const stop = () => {
-    if (timer) clearInterval(timer);
-    timer = null;
+  // Read now, then as the live stream says a line was recorded, and every 10 s while it is down: nothing at rest.
+  let watching: () => void = () => {};
+  const stop = (): void => watching();
+  const again = (): void => {
+    watching();
+    watching = watchLedger(ctx.api, scope.signal, ctx.live.follow, { seen, failed, downMs: 10_000 });
   };
-  scope.add(stop);
-  void load();
+  again();
 };
