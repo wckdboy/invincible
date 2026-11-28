@@ -42,6 +42,21 @@ What the owner uses every day, built on the carried engine around the new model.
   transparent dark variant for iOS), and the apps monochrome, colour kept for the agents.
 - A Gemini API key for agents on Antigravity: dropped (the owner, 28 November 2026). They sign in with their own Google
   account and use their AI Ultra plan, and want nothing else to do; a seat of it is the product.
+- 🔜 The Gemini seat's open items, from its re-checks of 28 November 2026, each its own change:
+  - the swapped sign-in's mitigation (a sealed copy of the token, or the account checked at each start): before the
+    owner signs in;
+  - where agy's plugin MCP servers come from for the signed-in user (from the account, it makes a swap High): signed in;
+  - `/work/tasks/.codeium.yaml`, which agy reads above a task's workspace: settle what it holds, or refuse to start;
+  - the task's bridge file, written once per task's work: write it at each run's start;
+  - an ACP command that runs agy under another name isn't held to the plan's rule;
+  - R6's forms still read in pieces: `KEY=<base64>` (it can come without intent), `0x<hex>`, a JWT wrapped with its
+    label, xxd's own dump;
+  - R6's over-redaction: a URL that shows a secret is shown decoded, and a base64 lockfile is hidden whole;
+  - another node's words, once the fabric is on: a dependency's result, a refused hand-off its agent gives itself, the
+    fleet's shared memory;
+  - a `docker info` slower than 8 s skips the seats' sweep without a word;
+  - a kill between the sign-in's two renames leaves no profile (the seat reads as signed out), and on a full ext4
+    volume the rename may need a block.
 
 **Exit:**
 - a task given in plain words, in a repository the agent has never seen, ends verified and shipped as a pull request,
