@@ -1862,7 +1862,6 @@ const glass = {
   ibeam: { points: core.IBEAM_POINTS, glass: { ...core.GLASS_IBEAM, bounds: boundsOf(core.GLASS_IBEAM.d) } },
   ramps: core.GLASS_RAMPS,
   pearl: core.GLASS_PEARL,
-  pearlTile: core.GLASS_PEARL_TILE,
   paint: core.GLASS_PAINT,
   glow: core.GLASS_GLOW,
   dot: core.GLASS_DOT,

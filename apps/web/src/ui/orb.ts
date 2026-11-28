@@ -8,7 +8,7 @@ import { agentMark, markStateOfMood } from "./mark.ts";
 
 /*
  * Your agent and the app are the I-beam (orb, appMark), still: never the gold field (the owner's word, 26 November 2026:
- * the I-beam as the mark, monochrome, colour kept for the agents). Your agent's is on a tile of its own in one ink, or
+ * the I-beam as the mark, monochrome, colour kept for the agents). Your agent's is the bare I-beam in one ink, or
  * in pearl glass where this device is set so (ui/glass.ts' guardianMark, until the owner chooses); the app's is the
  * I-beam alone. Its shape has one place, scripts/mark.ts. Every agent's face is its glass (agentFace, ui/mark.ts): a
  * shape of our own in its ramp, its state a dot beside the word. Nothing in either comes from a name's meaning, a

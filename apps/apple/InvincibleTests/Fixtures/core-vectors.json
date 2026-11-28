@@ -39032,11 +39032,11 @@
       "id": "pearl",
       "name": "Pearl",
       "light": {
-        "highlight": "#f9fcff",
-        "a": "#dddcee",
-        "b": "#95afbd",
-        "accent": "#f3dba9",
-        "deep": "#343e4d"
+        "highlight": "#9a9ea9",
+        "a": "#4a4954",
+        "b": "#1e282d",
+        "accent": "#6b624f",
+        "deep": "#0b0d11"
       },
       "dark": {
         "highlight": "#f9fcff",
@@ -39045,10 +39045,6 @@
         "accent": "#f3dba9",
         "deep": "#343e4d"
       }
-    },
-    "pearlTile": {
-      "light": "#171717",
-      "dark": null
     },
     "paint": {
       "blend": {

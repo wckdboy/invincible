@@ -137,7 +137,7 @@ describe("your agent's mark", () => {
     expect(frames).toEqual([]);
   });
 
-  test("or, where this device is set so, the I-beam in pearl glass, lit as an agent's glass is: its pool from 24 and its blur from 40, and no shadow (it has its tile)", () => {
+  test("or, where this device is set so, the I-beam in pearl glass, lit as an agent's glass is: its pool from 24 and its blur from 40; on a light page inked, on nothing", () => {
     stub("localStorage", { getItem: (key: string) => (key === "invincible.guardian-mark" ? "pearl" : null), setItem() {} });
     const drawn = orb({ size: 40 }) as unknown as Node_;
     // (Its glass's own rules: the pool in the pearl's colours, and the blur's opacity and drop by page.)
@@ -146,6 +146,9 @@ describe("your agent's mark", () => {
     const uses = drawn.children[0]!.children;
     expect(uses.map((use) => [use.attrs.href, use.attrs.fill, use.attrs.filter])).toEqual([["#gs-ibeam", "url(#gp-pearl)", "url(#gl-blur)"], ["#gs-ibeam", "url(#gp-pearl)", undefined]]);
     expect((orb({ size: 20 }) as unknown as Node_).attrs.class).toBe("guardian-mark gm-pearl agent-glass orb orb-mark");
+    // No tile behind it on any page (the owner's word, 27 November 2026), and no shadow under it: core's pearl is inked on a
+    // light page (its light stops), so it reads on paper as it is.
+    expect(GLASS_CSS).not.toMatch(/\.gm-pearl[^}]*background/);
   });
 });
 

@@ -16,6 +16,7 @@ import {
   isGlassProfile,
   readGlassProfile,
 } from "../src/glass.ts";
+import * as glass from "../src/glass.ts";
 
 /*
  * The glass avatars (glass.ts): 22 shapes of our own, eight ramps on the palette's eight hues, and the node's rule for who
@@ -89,6 +90,16 @@ describe("the ramps", () => {
         expect([stops.highlight, stops.a, stops.b, stops.accent, stops.deep]).toEqual(source[theme].map(inSrgb));
       }
     }
+  });
+
+  test("your agent's pearl on a light page is the pearl inked, a darker glass at its own hues on nothing; on a dark page, the pearl", () => {
+    // The owner's word (27 November 2026): the logo is just the I-beam, so no tile anywhere, pearl's on a light page too.
+    const pearl = GLASS_RAMP_OKLCH.pearl!;
+    expect(pearl.light.map((stop) => stop[2])).toEqual(pearl.dark.map((stop) => stop[2]));
+    // Its body (a, b) reads on paper with nothing behind it, and its light still catches it.
+    for (const n of [1, 2]) expect(pearl.light[n]![0]!).toBeLessThan(0.5);
+    expect(pearl.light[0]![0]!).toBeGreaterThan(pearl.light[1]![0]!);
+    expect("GLASS_PEARL_TILE" in glass).toBe(false);
   });
 });
 

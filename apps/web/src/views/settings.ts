@@ -54,7 +54,7 @@ export const settingsView: View = (root, ctx, { scope }) => {
     { label: "Motion" },
   );
 
-  // Your agent's mark on this device: the I-beam in one ink on its tile, or in pearl glass (until the owner chooses).
+  // Your agent's mark on this device: the bare I-beam in one ink, or in pearl glass (until the owner chooses).
   const mark = segmented<GuardianStyle>(
     [
       { value: "mono", label: "Ink" },
@@ -85,7 +85,7 @@ export const settingsView: View = (root, ctx, { scope }) => {
       "div",
       { class: "page narrow" },
       pageHead("Settings", "How your agent looks on this device, and what this device may do."),
-      section("Appearance", {}, list([row("Theme", "Follows your system unless you choose.", theme.el), row("Motion", "Reduced keeps every change instant.", motion.el), row("Your agent's mark", "The I-beam on its tile, or in pearl glass: from the next page you open.", mark.el)])),
+      section("Appearance", {}, list([row("Theme", "Follows your system unless you choose.", theme.el), row("Motion", "Reduced keeps every change instant.", motion.el), row("Your agent's mark", "Its I-beam, in ink or in pearl glass: from the next page you open.", mark.el)])),
       ctx.can("chat")
         ? section(
             "Chat",

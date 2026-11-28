@@ -1,4 +1,4 @@
-import { type AgentMark, MARK_PALETTE, type MarkState, type MarkTheme, readMarkProfile, snapColor } from "./agent-mark.ts";
+import { type AgentMark, MARK_PALETTE, type MarkState, readMarkProfile, snapColor } from "./agent-mark.ts";
 import { handleSeed, isOrbProfile } from "./avatar.ts";
 
 /*
@@ -264,7 +264,7 @@ export const GLASS_RAMP_OKLCH: Readonly<Record<string, { light: readonly (readon
   aurora: { light: [[0.93, 0.07, 330], [0.7, 0.19, 330], [0.56, 0.21, 275], [0.72, 0.15, 235], [0.38, 0.15, 275]], dark: [[0.97, 0.04, 330], [0.78, 0.18, 330], [0.64, 0.2, 275], [0.78, 0.14, 235], [0.3, 0.12, 275]] },
   dusk: { light: [[0.94, 0.05, 290], [0.66, 0.16, 290], [0.66, 0.18, 25], [0.78, 0.15, 150], [0.36, 0.1, 290]], dark: [[0.96, 0.04, 290], [0.74, 0.15, 290], [0.74, 0.17, 25], [0.84, 0.15, 150], [0.3, 0.09, 290]] },
   orchid: { light: [[0.94, 0.06, 350], [0.72, 0.18, 350], [0.58, 0.2, 305], [0.74, 0.15, 25], [0.4, 0.15, 305]], dark: [[0.97, 0.04, 350], [0.8, 0.16, 350], [0.66, 0.19, 305], [0.8, 0.14, 25], [0.32, 0.12, 305]] },
-  pearl: { light: [[0.99, 0.01, 270], [0.9, 0.025, 290], [0.74, 0.035, 230], [0.9, 0.07, 85], [0.36, 0.03, 260]], dark: [[0.99, 0.01, 270], [0.9, 0.025, 290], [0.74, 0.035, 230], [0.9, 0.07, 85], [0.36, 0.03, 260]] },
+  pearl: { light: [[0.7, 0.016, 270], [0.41, 0.018, 290], [0.27, 0.017, 230], [0.5, 0.031, 85], [0.16, 0.009, 260]], dark: [[0.99, 0.01, 270], [0.9, 0.025, 290], [0.74, 0.035, 230], [0.9, 0.07, 85], [0.36, 0.03, 260]] },
 };
 
 /**
@@ -284,9 +284,12 @@ export const GLASS_RAMPS: readonly GlassRamp[] = [
   { id: "orchid", name: "Orchid", light: { highlight: "#ffdbf1", a: "#f46eb4", b: "#9751d7", accent: "#fb817a", deep: "#5b2987" }, dark: { highlight: "#ffebf9", a: "#ff90cc", b: "#ae6dee", accent: "#ff9890", deep: "#421c62" } },
 ];
 
-/** The Guardian's, when it wears glass: pearl, the same on both pages; on a light one it sits on a graphite tile. */
-export const GLASS_PEARL: GlassRamp = { id: "pearl", name: "Pearl", light: { highlight: "#f9fcff", a: "#dddcee", b: "#95afbd", accent: "#f3dba9", deep: "#343e4d" }, dark: { highlight: "#f9fcff", a: "#dddcee", b: "#95afbd", accent: "#f3dba9", deep: "#343e4d" } };
-export const GLASS_PEARL_TILE: Record<MarkTheme, string | null> = { light: "#171717", dark: null };
+/**
+ * The Guardian's, when it wears glass: pearl on a dark page, glowing on its own; on a light one the pearl inked, a darker
+ * glass at its own hues, on nothing (the owner's word of 27 November 2026: the logo is just the I-beam, so no tile
+ * anywhere, pearl's on a light page too).
+ */
+export const GLASS_PEARL: GlassRamp = { id: "pearl", name: "Pearl", light: { highlight: "#9a9ea9", a: "#4a4954", b: "#1e282d", accent: "#6b624f", deep: "#0b0d11" }, dark: { highlight: "#f9fcff", a: "#dddcee", b: "#95afbd", accent: "#f3dba9", deep: "#343e4d" } };
 
 /**
  * The paint, in the shape's 100 × 100 box, its layers in this order: `a` to `b` along the diagonal; `accent` in a pool

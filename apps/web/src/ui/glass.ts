@@ -1,4 +1,4 @@
-import { GLASS_DOT, GLASS_GLOW, GLASS_IBEAM, GLASS_PAINT, GLASS_PEARL, GLASS_PEARL_TILE, GLASS_RAMPS, GLASS_SHAPES, type GlassRamp, type GlassShape, type GlassState, type GlassStops, glassOf } from "@invincible/core/glass";
+import { GLASS_DOT, GLASS_GLOW, GLASS_IBEAM, GLASS_PAINT, GLASS_PEARL, GLASS_RAMPS, GLASS_SHAPES, type GlassRamp, type GlassShape, type GlassState, type GlassStops, glassOf } from "@invincible/core/glass";
 import { MARK_POLYGON } from "../../../../scripts/mark.ts";
 import { h, svg } from "./dom.ts";
 
@@ -13,8 +13,8 @@ import { h, svg } from "./dom.ts";
  * on the compositor; still where motion is reduced, and paused while the page is hidden.
  *
  * Your agent wears the app's I-beam, bare, in the page's ink, as the app's own mark is (the squircle round it is the app
- * icon's alone: the owner's word, 27 November 2026); or, set so on this device, the I-beam in pearl glass, on its tile
- * on a light page (guardianStyle: the owner chooses between them).
+ * icon's alone: the owner's word, 27 November 2026); or, set so on this device, the I-beam in pearl glass, on nothing on
+ * any page: core's pearl is inked on a light one (guardianStyle: the owner chooses between them).
  */
 
 const SPRITE = "glass-sprite";
@@ -43,7 +43,7 @@ function paintOf(id: string, ramp: GlassRamp): SVGElement[] {
   ];
 }
 
-/** Its styles: the glow, the dot and the breathing (GLASS_GLOW, GLASS_DOT), your agent's bare I-beam and pearl tile. */
+/** Its styles: the glow, the dot and the breathing (GLASS_GLOW, GLASS_DOT), and your agent's bare I-beam. */
 export const GLASS_CSS = `
 :root { --gl-dark: 0; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gl-dark: 1; } }
@@ -75,7 +75,6 @@ export const GLASS_CSS = `
 [data-state="failed"] > .gl-dot { --gl-dot-c: light-dark(${GLASS_DOT.colors.failed.light}, ${GLASS_DOT.colors.failed.dark}); }
 [data-state="idle"] > .gl-dot { --gl-dot-c: var(--gl-surface, var(--bg)); box-shadow: inset 0 0 0 ${GLASS_DOT.idleRing}px light-dark(${GLASS_DOT.colors.idle.light}, ${GLASS_DOT.colors.idle.dark}), 0 0 0 var(--gl-dot-cut) var(--gl-surface, var(--bg)); }
 .guardian-mark.gm-mono polygon { fill: var(--accent); }
-.guardian-mark.gm-pearl { border-radius: 28%; background: light-dark(${GLASS_PEARL_TILE.light}, transparent); }
 `;
 
 /** The page's sprite and styles, made once, the first time a glass is drawn (none where there is no page: the tests'). */
@@ -189,7 +188,7 @@ export function guardianMark(options: { size: number; label?: string; style?: Gu
   if (style === "pearl") {
     ensureSprite();
     // Lit as an agent's glass is (its rules: the pool, and the blur's opacity and drop by page), in the pearl: its pool on a
-    // dark page from 24; on a light one it sits on its graphite tile, so no shadow under it (the designer's gl-guardian).
+    // dark page from 24; on a light one the pearl inked (core's light stops), on nothing, with no shadow under it.
     const pool = size >= GLASS_GLOW.pool.minSize ? " gl-pool" : "";
     return h(
       "span",
