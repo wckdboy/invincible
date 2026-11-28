@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ConversationSummary, ProjectView } from "@invincible/core";
-import { age, chatState, threadsOf } from "./threads.ts";
+import { age, changesLine, chatState, hunksOf, threadChips, threadsOf } from "./threads.ts";
 import type { Work, WorkProject, WorkTask } from "./work.ts";
 
 /*
@@ -97,5 +97,57 @@ describe("age", () => {
     expect(age(now - 15 * 86_400_000, now)).toBe("2w");
     // (A clock a little behind the node's never says a time to come.)
     expect(age(now + 60_000, now)).toBe("now");
+  });
+});
+
+describe("threadChips", () => {
+  const base = "0123456789abcdef0123456789abcdef01234567";
+  const fix = { connector: "gh", owner: "wckdboy", repo: "invincible", branch: "fix/sync-order", pr: 42, head: "f".repeat(40) };
+
+  test("its verdict, toned as its row is: proven in green with its check, a failure in red, the rest quiet", () => {
+    const tone = (verdict: Parameters<typeof threadChips>[1]) => threadChips({}, verdict).verdict;
+    expect(tone({ word: "Proven", verdict: "proven" })).toEqual({ word: "Proven", tone: "ok", proven: true });
+    expect(tone({ word: "Reviewed, not proven", verdict: "reviewed" })).toEqual({ word: "Reviewed, not proven", tone: "neutral", proven: false });
+    for (const verdict of ["failed", "rejected", "gave-up"] as const) expect(tone({ word: "x", verdict })?.tone).toBe("failed");
+    for (const verdict of ["stopped", "unverified"] as const) expect(tone({ word: "x", verdict })?.tone).toBe("neutral");
+    // In hand: no verdict yet.
+    expect(tone(null)).toBeNull();
+  });
+
+  test("the branch its fix is on, or else the commit its work began from, kept or read from its VM", () => {
+    expect(threadChips({ fix }, null).branch).toEqual({ text: "fix/sync-order", title: "On fix/sync-order" });
+    expect(threadChips({ changes: { artifact: "art_AAAAAAAAAAAAAAAAAAAAAA", files: 2, base } }, null).branch).toEqual({ text: "from 01234567", title: `Its work began from ${base}` });
+    expect(threadChips({}, null, base).branch?.text).toBe("from 01234567");
+    expect(threadChips({}, null).branch).toBeNull();
+  });
+
+  test("its pull request: where it was shipped, or the one its fix is on", () => {
+    expect(threadChips({ shipped: { url: "https://github.com/x/y/pull/7", pr: 7 } }, null).pr).toEqual({ number: 7, url: "https://github.com/x/y/pull/7" });
+    expect(threadChips({ fix }, null).pr).toEqual({ number: 42, url: "https://github.com/wckdboy/invincible/pull/42" });
+    // Shipped with no pull request (pushed to its branch): none to name.
+    expect(threadChips({ shipped: { url: "https://github.com/x/y/tree/b", pr: null } }, null).pr).toBeNull();
+    expect(threadChips({ fix: { ...fix, pr: null } }, null).pr).toBeNull();
+    // An owner or a repository is one part of its address, never more.
+    expect(threadChips({ fix: { ...fix, owner: "a/b", repo: "c?d" } }, null).pr?.url).toBe("https://github.com/a%2Fb/c%3Fd/pull/42");
+  });
+});
+
+describe("changesLine", () => {
+  test("counts its files and their lines, a binary one none, since the commit it began from", () => {
+    const line = changesLine({ files: [{ added: 10, removed: 2 }, { added: null, removed: null }, { added: 0, removed: 5 }], base: "abcdef0123456789abcdef0123456789abcdef01" });
+    expect(line).toEqual({ files: 3, added: 10, removed: 7, from: "from abcdef01" });
+    expect(changesLine({ files: [], base: null })).toEqual({ files: 0, added: 0, removed: 0, from: "since its last commit" });
+  });
+});
+
+describe("hunksOf", () => {
+  test("a file's part from its first hunk; one with none whole", () => {
+    const part = "diff --git a/x.ts b/x.ts\nindex 1..2 100644\n--- a/x.ts\n+++ b/x.ts\n@@ -1,2 +1,2 @@\n-a\n+b\n c\n@@ -9 +9 @@\n-d\n+e\n";
+    expect(hunksOf(part)).toBe("@@ -1,2 +1,2 @@\n-a\n+b\n c\n@@ -9 +9 @@\n-d\n+e\n");
+    expect(hunksOf("@@ -1 +1 @@\n-a\n+b")).toBe("@@ -1 +1 @@\n-a\n+b");
+    const binary = "diff --git a/i.png b/i.png\nindex 1..2 100644\nGIT binary patch\nliteral 3\nabc\n";
+    expect(hunksOf(binary)).toBe(binary);
+    // (A line that only has @@ inside it isn't a hunk.)
+    expect(hunksOf("diff --git a/y b/y\n--- a/y\n+++ b/y\n x @@ y\n")).toBe("diff --git a/y b/y\n--- a/y\n+++ b/y\n x @@ y\n");
   });
 });

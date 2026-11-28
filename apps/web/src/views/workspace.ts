@@ -20,7 +20,7 @@ type Page = { kind: "folder"; path: string } | { kind: "file"; path: string } | 
 const nameOf = (path: string) => path.split("/").filter(Boolean).at(-1) ?? "/work";
 
 /** Each `diff --git a/… b/…` part of a diff, by the path it is about (the Apple apps' DiffParts). */
-function diffParts(diff: string): Map<string, string> {
+export function diffParts(diff: string): Map<string, string> {
   const parts = new Map<string, string>();
   let path: string | null = null;
   let lines: string[] = [];

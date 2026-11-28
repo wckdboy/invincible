@@ -9,21 +9,22 @@ import { isWaiting } from "../live.ts";
 import { hashOf } from "../lib/nav.ts";
 import { orbMoodOfState } from "../lib/orb-motion.ts";
 import { agentOfCaller } from "../lib/roster.ts";
-import { costWords, factsOfProof, factsOfRecord, type GateRow, judgedWith, liveStep, type Proof, proofOf, proofSeal, saidBesideProof, type StepGroup, stepGroups, summaryWords, workedLine, workSummary } from "../lib/steps.ts";
+import { costWords, factsOfProof, factsOfRecord, type GateRow, judgedWith, liveStep, type Proof, proofOf, proofSeal, saidBesideProof, type StepGroup, stepGroups, summaryWords, verdictOf, workedLine, workSummary } from "../lib/steps.ts";
 import { judgedLine, neverReached, STEER_WORDS, steerAction, steerHint, steersWaiting } from "../lib/steer.ts";
 import { handedFrom, sensitiveLine, steppedLine, taskActions, taskEnd } from "../lib/task-card.ts";
 import { teamSpeaker } from "../lib/team.ts";
+import { changesLine, hunksOf, type ThreadChips, threadChips } from "../lib/threads.ts";
 import { giveAgain } from "../lib/timeline.ts";
 import { duration, relativeTime } from "../lib/time.ts";
 import { emptyTrail, takeTrail, type Trail, trailNext, type TrailPage } from "../lib/trail.ts";
 import { byAttention, projectsOfAgents, seenOnOpen, shortSpan, taskState } from "../lib/work.ts";
 import { chatEnter, setTaskDetailsShown, taskDetailsShown } from "../prefs.ts";
-import { button, callout, dot, empty, errorState, skeletonBlock } from "../ui/controls.ts";
+import { badge, button, callout, dot, empty, errorState, skeletonBlock } from "../ui/controls.ts";
 import { composerBox } from "../ui/composer.ts";
 import { openSheet } from "../ui/dialog.ts";
 import { cx, h, keepPlace, replace, type Child } from "../ui/dom.ts";
 import { icon, type IconName } from "../ui/icons.ts";
-import { renderMarkdown } from "../ui/markdown.ts";
+import { codeBlock, renderMarkdown } from "../ui/markdown.ts";
 import { markStateOfAgent } from "../ui/mark.ts";
 import { agentFace, orb } from "../ui/orb.ts";
 import { toast } from "../ui/toast.ts";
@@ -31,7 +32,7 @@ import { askItem } from "./needs.ts";
 import { controlTeam, giveTask, shipTask } from "./team-forms.ts";
 import { openTerminal } from "./terminal.ts";
 import { askProjects, projectNames, projectTile, workNow } from "./work-rows.ts";
-import { openWorkspace } from "./workspace.ts";
+import { diffParts, openWorkspace } from "./workspace.ts";
 import { rosterBack } from "./sidebar.ts";
 
 /*
@@ -85,10 +86,45 @@ const clock = (ms: number): string => {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 };
 
+/** A desk's panel's tabs (views/task.ts deskPanel), and the words on them. */
+type PanelTab = "changes" | "proof" | "details";
+const PANEL_WORDS: Record<PanelTab, string> = { changes: "Changes", proof: "Proof", details: "Details" };
+const PANEL_KEY = "invincible:task-panel";
+function panelTabKept(): PanelTab {
+  try {
+    const kept = localStorage.getItem(PANEL_KEY);
+    return kept === "proof" || kept === "details" ? kept : "changes";
+  } catch {
+    return "changes";
+  }
+}
+function keepPanelTab(tab: PanelTab): void {
+  try {
+    localStorage.setItem(PANEL_KEY, tab);
+  } catch {
+    /* refused: this session's only */
+  }
+}
+
+/** A desk's thread header's chips (shown from 1024 px; lib/threads.ts threadChips says what they are). */
+function headChips(chips: ThreadChips): HTMLElement {
+  return h(
+    "span",
+    { class: "thread-chips" },
+    chips.verdict ? badge(chips.verdict.word, chips.verdict.tone, chips.verdict.proven ? "check" : undefined) : null,
+    chips.branch ? h("span", { class: "thread-chip mono", title: chips.branch.title }, icon("code", { size: 12 }), h("span", { class: "ellipsis" }, chips.branch.text)) : null,
+    chips.pr ? h("a", { class: "thread-chip", href: chips.pr.url, target: "_blank", rel: "noopener noreferrer", title: "Its pull request" }, icon("external", { size: 12 }), `#${chips.pr.number}`) : null,
+  );
+}
+
 export const taskView: View = (root, ctx, { scope, opts }) => {
   askProjects(ctx);
   const canAct = ctx.can("fleet:admin") && ctx.can("chat");
   const wide = matchMedia("(min-width: 768px)");
+  // A desk's (from 1024 px): T3 Code's thread, its header naming its branch, its pull request and its proof, and its
+  // details a panel docked beside it (⌘D) in three tabs: what it changed, its diff opening in place; its proof; the rest.
+  const desk = matchMedia("(min-width: 1024px)");
+  let panelTab: PanelTab = panelTabKept();
   let id: string | null = opts.task ?? null;
   let trail: Trail = emptyTrail();
   /** The whole trail has been read once (until then, the work isn't drawn: it would arrive in pieces). */
@@ -105,6 +141,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   /** What the task changed (null: not asked, or this device can't look into a VM), and the status it was asked at. */
   let changes: TeamChangesView | null = null;
   let changesAt = "";
+  let changesUnread = false;
   let marked = "";
   let shownDetails = taskDetailsShown();
   /** Whether its proof is open (its one line, opened: kept as the thread is drawn again). */
@@ -243,17 +280,23 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   }
 
   function readChanges(n: Now): void {
-    // Looking into a VM is a sandbox device's; asked once, and again when the work has moved on (ended, or kept).
+    // Looking into a VM is a sandbox device's; asked once, and again when the work has moved on (ended, or kept). A task
+    // that kept its changes worked in a repository, whatever its agent's is now (as its Workspace's Changes asks).
     const at = `${n.task.status}/${n.task.changes?.artifact ?? ""}`;
-    if (!ctx.can("sandbox") || !n.agent?.repository || changesAt === at || n.task.status === "proposed" || n.task.status === "queued") return;
+    if (!ctx.can("sandbox") || !(n.agent?.repository || n.task.changes) || changesAt === at || n.task.status === "proposed" || n.task.status === "queued") return;
     changesAt = at;
+    changesUnread = false;
     ctx.api.post<TeamChangesView>("/api/team/changes", { id: n.task.assignee, task: n.task.id }, scope.signal).then(
       (answer) => {
         changes = answer;
         drawDetails(true);
         drawThread(true);
       },
-      () => {},
+      () => {
+        // (Its VM gone or asleep: a desk's Changes says where what it kept is instead.)
+        changesUnread = true;
+        drawDetails(true);
+      },
     );
   }
 
@@ -329,7 +372,8 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   function drawHead(n: Now, force = false): void {
     const working = n.task.status === "running";
     const state = taskState(n.task);
-    const version = JSON.stringify([n.task.title, n.project, n.name, n.agent?.avatar, working, state, shownDetails, wide.matches]);
+    const chips = threadChips(n.task, verdictOf(n.task, factsOfRecord(n.task.record) ?? (trailRead ? factsOfProof(proofOf(n.task, trail.entries)) : null)), changes?.base ?? null);
+    const version = JSON.stringify([n.task.title, n.project, n.name, n.agent?.avatar, working, state, shownDetails, wide.matches, chips]);
     if (version === headVersion && !force) return;
     headVersion = version;
     const direct = directRoom(n.snapshot, n.task.assignee);
@@ -348,6 +392,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
           h("h1", { class: "thread-title ellipsis", title: n.task.title }, n.task.title),
           h("p", { class: "thread-sub ellipsis" }, `${n.project.name} · ${n.name}`),
         ),
+        headChips(chips),
         h(
           "div",
           { class: "actions thread-head-acts" },
@@ -588,6 +633,12 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   /** The details: the agent's VM, where its work began, its changes, its gates as they run, the reviewer, its cost, what
    * waits on it. Beside the thread on a wide screen; a sheet on a phone. */
   function detailsBody(n: Now): HTMLElement {
+    return h("div", { class: "td" }, ...detailParts(n));
+  }
+
+  /** The details' three parts: where its work is (its VM, its base, its changes), its proof (its gates and its reviewer),
+   * and the task itself (its cost, what waits on it, where it ships). */
+  function detailParts(n: Now): [HTMLElement, HTMLElement, HTMLElement] {
     const task = n.task;
     const proof = proofOf(task, trail.entries);
     const vm = n.agent?.workspace ?? null;
@@ -601,9 +652,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
       h("div", { class: "td-row", "aria-label": label ?? null }, h("span", { class: "td-icon", "aria-hidden": "true" }, typeof iconName === "string" ? icon(iconName, { size: 14 }) : iconName), h("span", { class: "td-value ellipsis" }, value), end ? h("span", { class: "td-end" }, end) : null);
     const reviewerWords = { passed: "passed it", "sent back": "sent it back", reading: "is reading it", waits: "waits for the gates", none: "not reached" }[proof.reviewer];
     const shipWords = task.shipped ? (task.shipped.pr ? `Pull request #${task.shipped.pr}` : "Shipped") : task.status === "done" && task.verified && task.changes && !task.fix ? "Ready to ship" : task.fix ? `Onto ${task.fix.branch} when verified` : task.changes || n.agent?.repository ? "Ship it when verified" : "Nothing to ship: no repository";
-    return h(
-      "div",
-      { class: "td" },
+    return [
       h(
         "div",
         { class: "td-sec" },
@@ -652,6 +701,75 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
         ...dependents.map((other) => kv(agentFace({ id: other.assignee, profile: n.snapshot.agents.find((person) => person.id === other.assignee)?.avatar, size: 16 }), `“${other.title}” waits on it`, other.status, `“${other.title}” waits on it`)),
         kv("external", shipWords, task.shipped ? h("a", { href: task.shipped.url, target: "_blank", rel: "noopener noreferrer" }, "Open") : null),
       ),
+    ];
+  }
+
+  /** A desk's panel (from 1024 px): its tabs, and the one chosen (kept on this device). */
+  function deskPanel(n: Now): HTMLElement {
+    const [where, proof, rest] = detailParts(n);
+    const tabs = (["changes", "proof", "details"] as const).map((tab) =>
+      h(
+        "button",
+        {
+          type: "button",
+          class: "dp-tab",
+          role: "tab",
+          "aria-selected": String(tab === panelTab),
+          onclick: () => {
+            panelTab = tab;
+            keepPanelTab(tab);
+            drawDetails(true);
+          },
+        },
+        PANEL_WORDS[tab],
+      ),
+    );
+    const body = panelTab === "changes" ? changesPane(n) : panelTab === "proof" ? h("div", { class: "td" }, proof) : h("div", { class: "td" }, where, rest);
+    return h("div", { class: "dp" }, h("div", { class: "dp-tabs", role: "tablist", "aria-label": "The task's details" }, ...tabs), h("div", { class: "dp-body", role: "tabpanel" }, body));
+  }
+
+  /** What it changed, as T3 Code's diff panel shows it: each file with its lines added and taken away, its part of the
+   * diff opening in place (drawn only once opened: a long diff costs nothing until you look). */
+  function changesPane(n: Now): HTMLElement {
+    const task = n.task;
+    if (!changes) {
+      const kept = task.changes;
+      // What it kept, where its VM can't be looked into (this device, or its VM gone): its files, among what is kept.
+      if (kept && (!ctx.can("sandbox") || changesUnread)) {
+        const open = ctx.can("mind:read") ? h("button", { type: "button", class: "link-button", onclick: () => ctx.navigate("artifacts", { intent: kept.artifact }) }, "Open what it kept") : null;
+        return h("p", { class: "dp-note" }, `It kept ${kept.files} changed file${kept.files === 1 ? "" : "s"}, from ${kept.base.slice(0, 8)}.`, open ? " " : null, open);
+      }
+      const said = !ctx.can("sandbox") ? "This device can't look into its VM." : !n.agent?.repository && !kept ? "It works in no repository." : task.status === "proposed" || task.status === "queued" ? "Nothing yet: it hasn't started." : changesUnread ? "Its VM can't be looked into just now." : "Reading what it changed…";
+      return h("p", { class: "dp-note" }, said);
+    }
+    const view = changes;
+    const parts = diffParts(view.diff);
+    const line = changesLine(view);
+    const files = view.files.map((file) => {
+      const part = parts.get(file.path);
+      const summary = h(
+        "summary",
+        { class: "dp-file-line" },
+        h("span", { class: "dp-status mono" }, file.status),
+        h("span", { class: "dp-path mono ellipsis", title: file.path }, file.path),
+        file.added === null ? h("span", { class: "dp-lines subtle" }, "binary") : h("span", { class: "dp-lines tnum" }, file.added ? h("span", { class: "tok-added-text" }, `+${file.added}`) : null, file.added && file.removed ? " " : null, file.removed ? h("span", { class: "tok-removed-text" }, `−${file.removed}`) : null),
+      );
+      // (A file the diff has no part for, one binary or past where it is cut, is its line alone.)
+      if (!part) return h("div", { class: "dp-file" }, h("div", { class: "dp-file-line" }, ...summary.childNodes));
+      const el = h("details", { class: "dp-file" }, summary);
+      el.addEventListener("toggle", () => {
+        if (el.open && el.childElementCount === 1) el.append(codeBlock({ lang: "diff", v: hunksOf(part) }));
+      });
+      return el;
+    });
+    return h(
+      "div",
+      { class: "dp-changes" },
+      h("p", { class: "dp-sum" }, h("strong", { class: "tnum" }, `${line.files} file${line.files === 1 ? "" : "s"}`), " ", h("span", { class: "tnum" }, h("span", { class: "tok-added-text" }, `+${line.added}`), " ", h("span", { class: "tok-removed-text" }, `−${line.removed}`)), h("span", { class: "subtle" }, ` · ${line.from}`)),
+      ...(files.length ? files : [h("p", { class: "dp-note" }, "Nothing changed yet.")]),
+      ...view.untracked.map((path) => h("div", { class: "dp-file" }, h("div", { class: "dp-file-line" }, h("span", { class: "dp-status mono", title: "Not yet in git" }, "?"), h("span", { class: "dp-path mono ellipsis", title: path }, path), h("span", { class: "dp-lines subtle" }, "new")))),
+      view.cut ? h("p", { class: "dp-note" }, "The diff is cut: only its beginning is here.") : null,
+      view.redacted ? h("p", { class: "dp-note" }, "Something that looked like a key was redacted.") : null,
     );
   }
 
@@ -660,10 +778,13 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     if (!n || !trailRead) return;
     details.hidden = !wide.matches || !shownDetails;
     if (details.hidden) return;
-    const version = JSON.stringify([n.task, trail.after, Boolean(prices), changes?.files.length, n.agent?.workspace, n.snapshot.tasks.filter((other) => other.dependsOn.includes(n.task.id)).map((other) => [other.id, other.status])]);
+    const version = JSON.stringify([n.task, trail.after, Boolean(prices), changes?.files.length, changes?.diff.length, n.agent?.workspace, n.snapshot.tasks.filter((other) => other.dependsOn.includes(n.task.id)).map((other) => [other.id, other.status]), desk.matches, panelTab]);
     if (version === detailsVersion && !force) return;
     detailsVersion = version;
-    keepPlace(details, () => replace(details, detailsBody(n)));
+    // (A file's diff left open stays open as its panel is drawn again.)
+    const opened = new Set([...details.querySelectorAll("details.dp-file[open] .dp-path")].map((el) => el.textContent ?? ""));
+    keepPlace(details, () => replace(details, desk.matches ? deskPanel(n) : detailsBody(n)));
+    for (const el of details.querySelectorAll<HTMLDetailsElement>("details.dp-file")) if (opened.has(el.querySelector(".dp-path")?.textContent ?? "")) el.open = true;
   }
 
   function openDetailsSheet(): void {
@@ -783,6 +904,8 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   };
   wide.addEventListener("change", resized);
   scope.add(() => wide.removeEventListener("change", resized));
+  desk.addEventListener("change", resized);
+  scope.add(() => desk.removeEventListener("change", resized));
   // The trail as it was last read this session, at once (api.peek): the work shows with the page.
   const kept = id ? ctx.api.peek<TrailPage>("/api/team/trail", { task: id, after: 0 }) : null;
   if (kept && !kept.more) {

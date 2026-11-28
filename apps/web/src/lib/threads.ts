@@ -1,6 +1,7 @@
-import type { ConversationSummary, ProjectView } from "@invincible/core";
+import type { ConversationSummary, ProjectView, TeamChangedFile, TeamTask } from "@invincible/core";
 import type { ChatState } from "@invincible/core/turns";
 import type { AgentState } from "./agent-state.ts";
+import type { Verdict } from "./steps.ts";
 import { projectKey, type Work, type WorkTask } from "./work.ts";
 
 /*
@@ -100,4 +101,47 @@ export function age(at: number, now: number): string {
   if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
   return days < 7 ? `${days}d` : `${Math.floor(days / 7)}w`;
+}
+
+/**
+ * What a desk's thread header names beside its title (views/task.ts, from 1024 px), as T3 Code's does:
+ *  - its verdict as its proof allows it (lib/steps.ts verdictOf), toned as its row and its card are (lib/work.ts);
+ *  - the branch its fix is on, or else the commit its work began from (kept, or read from its VM: `base`);
+ *  - its pull request: where it was shipped, or the one its fix is on (a fix is always GitHub's: TeamTaskFix).
+ */
+export interface ThreadChips {
+  verdict: { word: string; tone: "ok" | "failed" | "neutral"; proven: boolean } | null;
+  branch: { text: string; title: string } | null;
+  pr: { number: number; url: string } | null;
+}
+
+export function threadChips(task: Pick<TeamTask, "shipped" | "fix" | "changes">, verdict: { word: string; verdict: Verdict } | null, base: string | null = null): ThreadChips {
+  const failed = verdict?.verdict === "failed" || verdict?.verdict === "rejected" || verdict?.verdict === "gave-up";
+  const from = task.changes?.base ?? base;
+  const fix = task.fix;
+  const shipped = task.shipped?.pr ? { number: task.shipped.pr, url: task.shipped.url } : null;
+  return {
+    verdict: verdict ? { word: verdict.word, tone: verdict.verdict === "proven" ? "ok" : failed ? "failed" : "neutral", proven: verdict.verdict === "proven" } : null,
+    branch: fix ? { text: fix.branch, title: `On ${fix.branch}` } : from ? { text: `from ${from.slice(0, 8)}`, title: `Its work began from ${from}` } : null,
+    pr: shipped ?? (fix?.pr ? { number: fix.pr, url: `https://github.com/${encodeURIComponent(fix.owner)}/${encodeURIComponent(fix.repo)}/pull/${fix.pr}` } : null),
+  };
+}
+
+/** What a task changed, in a line over its files (a desk's Changes panel): how many, the lines added and taken away (a
+ * binary file counts none), and since when. */
+export function changesLine(view: { files: readonly Pick<TeamChangedFile, "added" | "removed">[]; base: string | null }): { files: number; added: number; removed: number; from: string } {
+  return {
+    files: view.files.length,
+    added: view.files.reduce((sum, file) => sum + (file.added ?? 0), 0),
+    removed: view.files.reduce((sum, file) => sum + (file.removed ?? 0), 0),
+    from: view.base ? `from ${view.base.slice(0, 8)}` : "since its last commit",
+  };
+}
+
+/** A file's part of a diff from its first hunk (a desk's Changes, as T3 Code's diff shows it): its header lines (diff --git,
+ * index, ---, +++) say only what its file's line above it says. A part with no hunk (a binary file, a mode changed) whole. */
+export function hunksOf(part: string): string {
+  if (part.startsWith("@@")) return part;
+  const at = part.indexOf("\n@@");
+  return at < 0 ? part : part.slice(at + 1);
 }

@@ -480,6 +480,65 @@ try {
   let noaAtWork = false;
   let steeredNoa: () => void = () => {};
   const noaHold = new Promise<void>((release) => (steeredNoa = release));
+  // Noa's kept task, once it is given, and what a look into its VM finds it changed (the stand-in has no repository).
+  let keptTask = "";
+  const keptDiff = [
+    "diff --git a/src/importer.ts b/src/importer.ts",
+    "index 3b18e51..a9c4f02 100644",
+    "--- a/src/importer.ts",
+    "+++ b/src/importer.ts",
+    "@@ -9,5 +9,10 @@ export function parseDate(text: string): Date {",
+    "   const trimmed = text.trim();",
+    "   if (!trimmed) throw new Error(\"empty date\");",
+    "-  const [d, m, y] = trimmed.split(\"/\");",
+    "+  // ISO 8601 first (2026-11-28, with or without a time), then the day-first form last year's exports use.",
+    "+  if (/^\\d{4}-\\d{2}-\\d{2}/.test(trimmed)) {",
+    "+    const date = new Date(trimmed);",
+    "+    if (!Number.isNaN(date.getTime())) return date;",
+    "+  }",
+    "+  const [d, m, y] = trimmed.split(\"/\");",
+    "   return new Date(Number(y), Number(m) - 1, Number(d));",
+    " }",
+    "diff --git a/test/importer.test.ts b/test/importer.test.ts",
+    "index 8c0e2d4..f1a7b39 100644",
+    "--- a/test/importer.test.ts",
+    "+++ b/test/importer.test.ts",
+    "@@ -1,6 +1,15 @@",
+    " import { expect, test } from \"bun:test\";",
+    " import { parseDate } from \"../src/importer.ts\";",
+    " ",
+    " test(\"reads the day-first form\", () => {",
+    "   expect(parseDate(\"28/11/2026\").getDate()).toBe(28);",
+    " });",
+    "+",
+    "+test(\"reads ISO 8601 dates\", () => {",
+    "+  expect(parseDate(\"2026-11-28\").toISOString()).toBe(\"2026-11-28T00:00:00.000Z\");",
+    "+  expect(parseDate(\"2026-11-28T09:30:00Z\").getUTCHours()).toBe(9);",
+    "+});",
+    "+",
+    "+test(\"an ISO date that isn't one falls back to the day-first form\", () => {",
+    "+  expect(() => parseDate(\"2026-13-45\")).not.toThrow();",
+    "+});",
+    "diff --git a/CHANGELOG.md b/CHANGELOG.md",
+    "index 1d2e3f4..5a6b7c8 100644",
+    "--- a/CHANGELOG.md",
+    "+++ b/CHANGELOG.md",
+    "@@ -1,3 +1,4 @@",
+    " # Changelog",
+    " ",
+    "+- The importer reads ISO 8601 dates as well as the day-first form.",
+    " - Exports name their columns.",
+    "",
+  ].join("\n");
+  const keptLook = JSON.stringify({
+    base: "4f7a1c2e9b8d0a1f2e3c4b5a69788796a5b4c3d2",
+    head: "4f7a1c2e9b8d0a1f2e3c4b5a69788796a5b4c3d2",
+    names: "M\tsrc/importer.ts\nM\ttest/importer.test.ts\nM\tCHANGELOG.md",
+    numstat: "6\t1\tsrc/importer.ts\n9\t0\ttest/importer.test.ts\n1\t0\tCHANGELOG.md",
+    untracked: [],
+    diff: keptDiff,
+    cut: false,
+  });
   docker.onExec = async (_container: string, command: string[]) => {
     const text = command.join("\n");
     if (text.includes("write-sync")) {
@@ -492,6 +551,8 @@ try {
     }
     if (text.includes("write-give")) await hold;
     if (text.includes("desktop shot")) return { code: 0, stdout: desktopShot };
+    // A look at what Noa's kept task changed (its Changes, beside its thread on a desk): git's words, as the look prints them.
+    if (keptTask && text.includes("numstat") && text.includes(`/work/tasks/${keptTask}`)) return { code: 0, stdout: keptLook };
     if (text.includes("gate-fail")) return { code: 1, stdout: "", stderr: "error: connect ECONNREFUSED 127.0.0.1:5432" };
     return { code: 0, stdout: text.includes("gate-") ? "required gate passed" : "command completed" };
   };
@@ -699,6 +760,7 @@ try {
   await admin("postTeamMessage", { room: own.rio, text: "Once your VM has its desktop, can you fetch this month's export from the dashboard?" });
   await until("Rio's reply", idle);
   const kept = (await admin("createTeamTask", { room: own.noa, assignee: "noa", title: "The importer reads ISO dates", goal: "TASK_KEEP: make the importer read ISO 8601 dates as well as the day-first form, with tests.", dependsOn: [], gates: ["bun test importer # gate-keep"] })).task;
+  keptTask = kept.id;
   // Steered as its first command runs: the run takes it after that command, and its review judges the work against it.
   if (steering) {
     await until("Noa's first command", () => noaAtWork);
@@ -1153,6 +1215,11 @@ try {
       // Its proof opened (since 27 November 2026 one line with its verdict, opened for its gates, its reviewer and its cost).
       { name: "task-verified-proof", hash: `#/task/${kept.id}`, wait: ".thread-page .proof", steps: [`document.querySelector(".proof-fold")?.setAttribute("open", "")`] },
       { name: "task-failed", hash: `#/task/${failing.id}`, wait: ".thread-page .proof" },
+      // A desk's (from 1024 px, since 28 November 2026): its details docked beside it, on what it changed with a file's
+      // diff opened, on its proof, and at work on the rest. (Narrower, its details are the card or the sheet, as ever.)
+      { name: "task-verified-panel", hash: `#/task/${kept.id}`, wait: ".thread-page .dp-changes", prefs: { "invincible:task-details": "shown", "invincible:task-panel": "changes" }, steps: [`document.querySelector("details.dp-file")?.setAttribute("open", "")`] },
+      { name: "task-verified-panel-proof", hash: `#/task/${kept.id}`, wait: ".thread-page .proof", prefs: { "invincible:task-details": "shown", "invincible:task-panel": "proof" } },
+      { name: "task-running-panel", hash: `#/task/${first.id}`, wait: ".thread-page .thread-steps", prefs: { "invincible:task-details": "shown", "invincible:task-panel": "details" } },
       { name: "inbox", hash: "#/inbox" },
       { name: "memory", hash: "#/memory", wait: "#memory-results .item" },
       { name: "more", hash: "#/more" },

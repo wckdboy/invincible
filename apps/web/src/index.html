@@ -1493,6 +1493,52 @@
         /* The thread keeps clear of the card beside it, where there is room for both. */
         .thread-body:has(> .thread-details:not([hidden])) :is(.thread-items, .thread-live, .thread-composer-wrap) { max-width: min(760px, calc(100% - 368px)); margin-right: 368px; }
       }
+      /* A desk's thread (from 1024 px), as T3 Code's: its header names its proof, the branch it is on and its pull request;
+         its details are a panel docked beside it (⌘D), in tabs, the thread keeping the rest of the width. */
+      .thread-chips { display: none; }
+      @media (min-width: 1024px) {
+        .thread-chips { flex: 0 1 auto; display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 44%; }
+        .thread-chips > .badge { flex: none; }
+        .thread-chip {
+          flex: 0 1 auto; display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 240px; height: 22px; padding: 0 8px;
+          border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--text-2); font-size: var(--fs-12); line-height: 1; white-space: nowrap; text-decoration: none;
+        }
+        a.thread-chip { flex: none; }
+        .thread-chip.mono { font-family: var(--font-mono); font-size: 11.5px; }
+        .thread-chip > svg { flex: none; color: var(--text-3); }
+        a.thread-chip:hover { background: var(--surface-2); color: var(--text); }
+        .thread-details:not([hidden]) {
+          position: static; z-index: auto; flex: none; display: block; width: clamp(340px, 32vw, 560px); max-height: none; overflow-y: auto; overscroll-behavior: contain;
+          border-left: 1px solid var(--border); border-radius: 0; background: var(--bg); box-shadow: none;
+        }
+        .thread-body:has(> .thread-details:not([hidden])) :is(.thread-items, .thread-live, .thread-composer-wrap) { max-width: 760px; margin-right: auto; }
+        .dp-tabs {
+          position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 var(--sp-2);
+          border-bottom: 1px solid var(--border); background: var(--bg);
+        }
+        .dp-tab { height: 26px; padding: 0 10px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-13); cursor: pointer; }
+        .dp-tab:hover { background: var(--surface-2); color: var(--text); }
+        .dp-tab[aria-selected="true"] { background: var(--surface-3); color: var(--text); font-weight: 550; }
+        .dp-sum { margin: 0; padding: 10px 12px; font-size: var(--fs-12); color: var(--text-2); }
+        .dp-sum strong { color: var(--text); font-weight: 600; }
+        .dp-file { border-top: 1px solid var(--border); }
+        .dp-file:last-child { border-bottom: 1px solid var(--border); }
+        .dp-file-line { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2); min-height: 30px; padding: 0 12px; font-size: var(--fs-12); list-style: none; }
+        .dp-file-line::-webkit-details-marker { display: none; }
+        summary.dp-file-line { cursor: pointer; }
+        summary.dp-file-line:hover, details.dp-file[open] > summary.dp-file-line { background: var(--surface-2); }
+        .dp-status { color: var(--text-3); font-size: 11px; text-align: center; }
+        .dp-path { font-size: 12px; color: var(--text); }
+        .dp-lines { font-size: 11.5px; }
+        .dp-file > .codeblock { border: 0; border-top: 1px solid var(--border); border-radius: 0; }
+        .dp-file > .codeblock .cb-head { display: none; }
+        .dp-file > .codeblock pre { font-size: 11.5px; line-height: 1.55; }
+        .dp-note { margin: 0; padding: 12px; font-size: var(--fs-12); color: var(--text-3); }
+      }
+      /* (A narrow desk's header keeps its words for the task: the Workspace button is its icon there.) */
+      @media (min-width: 1024px) and (max-width: 1279px) {
+        .thread-head-acts .thread-workspace .label { display: none; }
+      }
       @media (max-width: 767px) {
         .thread-head { gap: var(--sp-2); padding-left: var(--sp-2); }
         .thread-crumb { flex-direction: column; align-items: flex-start; gap: 1px; }
