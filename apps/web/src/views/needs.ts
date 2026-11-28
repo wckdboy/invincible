@@ -2,6 +2,7 @@ import type { ActionView, MemoryView, NoticeView } from "@invincible/core";
 import { isNotifyActionId } from "@invincible/core/notify-payload";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { isWaiting } from "../live.ts";
+import { askPlain } from "../lib/asks.ts";
 import { hashOf } from "../lib/nav.ts";
 import { noticeFrom } from "../lib/notices.ts";
 import { agentOfCaller } from "../lib/roster.ts";
@@ -95,7 +96,9 @@ function approvalNeed(ctx: Ctx, action: ActionView, row: WorkRow | null): Need {
     kind: "action",
     lead: row ? face(row) : leadIcon(info?.icon ?? "shield"),
     who: row ? `${row.agent.name} · ${row.title}` : `${askerName(ctx, action.by)} asks`,
-    what: [`${info?.label ?? action.class} · `, h("span", { class: "mono" }, `${action.connector}.${action.tool}`), " ", h("span", { class: "mono decision-target" }, action.target)],
+    // (In plain words, "Post to Forge: “…”" (lib/asks.ts askPlain); the call itself, its class, connector, tool and target,
+    // is in its whole card, a tap away.)
+    what: askPlain(action),
     answer: admin ? { label: destructive ? "Review…" : "Allow once", run: (trigger, problem) => (destructive ? whole() : void approveAction(ctx, action, trigger, problem)) } : null,
     rest: admin
       ? [

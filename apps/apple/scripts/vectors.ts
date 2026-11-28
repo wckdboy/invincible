@@ -18,6 +18,7 @@ import { homePrimaryLine, homeRows, primaryNeeds, rosterRows } from "../../web/s
 import { listLocale, listTime, timeMark } from "../../web/src/lib/time.ts";
 import { ruleSentence, ruleTitle } from "../../web/src/lib/rules.ts";
 import { budgetWords, meterLine, moneyWords, SETTINGS_WORDS, spentWords } from "../../web/src/lib/usage.ts";
+import { askPlain } from "../../web/src/lib/asks.ts";
 import { handoffTerms, handoffTitle } from "../../web/src/lib/grants.ts";
 import { primaryNow, needsFirst, type NowInput } from "../../web/src/lib/now.ts";
 import { groupConversations, timeMarks } from "../../web/src/lib/chats.ts";
@@ -546,6 +547,25 @@ const chatMarks = {
 
 // ---- Settings' Permissions, read-only, in every app's words: a rule as a sentence (lib/rules.ts ruleSentence), a hand-off
 // grant's title and terms (lib/grants.ts handoffTitle, handoffTerms) ----
+// ---- an approval in plain words, as its ask says it in a chat (lib/asks.ts askPlain): what it would do, to or on which
+// service (its label, else its id with a capital), and the first words it would send, cut on a character at 60. ----
+const askVectors = {
+  plain: (
+    [
+      [{ connector: "forge", tool: "post", args: { text: "Sync survives a dropped connection." } }, "Forge"],
+      [{ connector: "forge", tool: "post", args: { text: "Sync survives a dropped connection: thanks to everyone who tested it on their own nodes." } }, null],
+      [{ connector: "forge", tool: "post", args: { text: "  First line.\nSecond line." } }, null],
+      [{ connector: "forge", tool: "post", args: { text: `${"a".repeat(58)}😀😀😀` } }, null],
+      [{ connector: "github", tool: "create_pull_request", args: { title: "Fix the importer", body: "It reads ISO dates now." } }, "GitHub"],
+      [{ connector: "github", tool: "merge", args: { number: 12 } }, "GitHub"],
+      [{ connector: "github", tool: "merge", args: { title: "   " } }, null],
+      [{ connector: "s3", tool: "bucket.delete", args: { bucket: "old-logs" } }, null],
+      [{ connector: "mail", tool: "send_email", args: { subject: "The 0.4 notes", body: "Attached." } }, "Mail"],
+      [{ connector: "drive", tool: "upload", args: { name: "notes.md" } }, "  "],
+    ] as [{ connector: string; tool: string; args: Record<string, unknown> }, string | null][]
+  ).map(([ask, label]) => ({ ask, label, words: askPlain(ask, label) })),
+};
+
 const permissions = {
   rules: (
     [
@@ -2144,6 +2164,7 @@ const vectors = {
   listTimes,
   chatMarks,
   permissions,
+  asks: askVectors,
   proofLines,
   homePrimary,
   agentForms,

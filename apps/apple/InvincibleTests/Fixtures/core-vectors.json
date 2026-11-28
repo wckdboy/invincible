@@ -6117,6 +6117,122 @@
       }
     ]
   },
+  "asks": {
+    "plain": [
+      {
+        "ask": {
+          "connector": "forge",
+          "tool": "post",
+          "args": {
+            "text": "Sync survives a dropped connection."
+          }
+        },
+        "label": "Forge",
+        "words": "Post to Forge: “Sync survives a dropped connection.”"
+      },
+      {
+        "ask": {
+          "connector": "forge",
+          "tool": "post",
+          "args": {
+            "text": "Sync survives a dropped connection: thanks to everyone who tested it on their own nodes."
+          }
+        },
+        "label": null,
+        "words": "Post to Forge: “Sync survives a dropped connection: thanks to everyone who…”"
+      },
+      {
+        "ask": {
+          "connector": "forge",
+          "tool": "post",
+          "args": {
+            "text": "  First line.\nSecond line."
+          }
+        },
+        "label": null,
+        "words": "Post to Forge: “First line.”"
+      },
+      {
+        "ask": {
+          "connector": "forge",
+          "tool": "post",
+          "args": {
+            "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀😀😀"
+          }
+        },
+        "label": null,
+        "words": "Post to Forge: “aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀…”"
+      },
+      {
+        "ask": {
+          "connector": "github",
+          "tool": "create_pull_request",
+          "args": {
+            "title": "Fix the importer",
+            "body": "It reads ISO dates now."
+          }
+        },
+        "label": "GitHub",
+        "words": "Create pull request on GitHub: “Fix the importer”"
+      },
+      {
+        "ask": {
+          "connector": "github",
+          "tool": "merge",
+          "args": {
+            "number": 12
+          }
+        },
+        "label": "GitHub",
+        "words": "Merge on GitHub"
+      },
+      {
+        "ask": {
+          "connector": "github",
+          "tool": "merge",
+          "args": {
+            "title": "   "
+          }
+        },
+        "label": null,
+        "words": "Merge on Github"
+      },
+      {
+        "ask": {
+          "connector": "s3",
+          "tool": "bucket.delete",
+          "args": {
+            "bucket": "old-logs"
+          }
+        },
+        "label": null,
+        "words": "Bucket delete on S3"
+      },
+      {
+        "ask": {
+          "connector": "mail",
+          "tool": "send_email",
+          "args": {
+            "subject": "The 0.4 notes",
+            "body": "Attached."
+          }
+        },
+        "label": "Mail",
+        "words": "Send email to Mail: “The 0.4 notes”"
+      },
+      {
+        "ask": {
+          "connector": "drive",
+          "tool": "upload",
+          "args": {
+            "name": "notes.md"
+          }
+        },
+        "label": "  ",
+        "words": "Upload to Drive: “notes.md”"
+      }
+    ]
+  },
   "proofLines": [
     {
       "task": {

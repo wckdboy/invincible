@@ -125,12 +125,13 @@ fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (Stri
     fun approval(a: Json, row: Work.Row?): Decision {
         val kind = a["class"].string
         val key = "a:${a["id"].string}"
-        val target = "${a["connector"].string}.${a["tool"].string} ${a["target"].string ?: ""}".trim()
         return Decision(
             key,
             if (row != null) Lead.Agent(row) else Lead.Icon(ShieldIcon),
             if (row != null) "${row.agentName} · ${row.title}" else "${asker(a["by"].string ?: "")} asks",
-            listOfNotNull(kind?.replaceFirstChar { it.uppercase() }, target).joinToString(" · "),
+            // (In plain words, "Post to Forge: “…”" (Asks.plain, the PWA's askPlain); the call itself, its class, connector,
+            // tool and target, is in its whole card, behind More.)
+            sh.invincible.bot.core.Asks.plain(a["connector"].string ?: "", a["tool"].string ?: "", a["args"]),
             // A delete is answered only in its whole card; anything else asks once before it is sent.
             answer = Answer(if (kind == "delete") "Review…" else "Allow once") { if (kind == "delete") card(a) else confirming = a },
             rest = listOf(Answer("Deny", danger = true) { act(key) { app.decide(a["id"].string!!, false) } }, Answer("More") { card(a) }),
