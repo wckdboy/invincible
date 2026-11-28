@@ -773,3 +773,27 @@ test("agents merge says whether your agent merges its agents' proven work itself
   for (const bad of [[], ["shipyard"], ["amiriteorg/shipyard", "maybe"], ["https://github.com/amiriteorg/shipyard"], ["amiriteorg/shipyard", "on", "now"], ["amiriteorg/.git"], ["amiriteorg/.."], ["-amiriteorg/shipyard"]]) await expect(teamCommand(api, "merge", bad, {}, say)).rejects.toThrow(/invincible agents merge <owner\/repo> \[on\|off\]/);
   expect(asked).toHaveLength(refused);
 });
+
+test("where an agent's next task of each kind begins: by how its tasks of that kind went, the planner's where the last was verified there", async () => {
+  const lines: string[] = [];
+  const done = (id: string, assignee: string, routing: object) => ({ id, room: "forge", assignee, title: id, goal: "g", dependsOn: [], gates: [], status: "done", verified: true, progress: "", output: "", error: null, chainId: "c", createdAt: 1, updatedAt: 1, record: { startedAt: 0, endedAt: 1, ended: "done", commands: 3, revisions: 0, spent: [], routing } });
+  // The latest first, as the node lists them; another agent's tasks are its own.
+  const state = { agents: [member("ada"), member("bo")], rooms: [], deliveries: [], tasks: [
+    done("task-code00000001", "ada", { began: "engineer", moved: "rereads", kind: "code" }),
+    done("task-bo0000000001", "bo", { began: "engineer", kind: "code" }),
+    done("task-fix000000001", "ada", { began: "engineer", kind: "fix" }),
+  ] };
+  const api = { async call<T>(): Promise<T> { return state as T; } };
+  await teamCommand(api, "routing", ["ada"], {}, (line) => lines.push(line));
+  expect(lines).toEqual([
+    "Ada's next task of each kind begins:",
+    "  fix      on the engineer's models · its last fix was verified on the engineer's models (task-fix000000001)",
+    "  code     on the planner's models · its last code task was verified on the planner's models (task-code00000001)",
+  ]);
+  // None kept yet: said so, and where they begin until then.
+  const none: string[] = [];
+  await teamCommand({ async call<T>(): Promise<T> { return { ...state, tasks: [] } as T; } }, "routing", ["ada"], {}, (line) => none.push(line));
+  expect(none).toEqual(["Ada has no finished task with its routing kept yet: each kind begins on the engineer's models until one is verified on the planner's."]);
+  await expect(teamCommand(api, "routing", [], {}, () => {})).rejects.toThrow("usage: invincible agents routing <id>");
+  await expect(teamCommand(api, "routing", ["cy"], {}, () => {})).rejects.toThrow("no agent cy");
+});

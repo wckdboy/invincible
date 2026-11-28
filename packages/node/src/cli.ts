@@ -83,6 +83,8 @@ of its own; "agents" and "team" are the same command)
   agents import <file.md> [--id <new id>] [-y]
                                     an agent file in as a new agent here, shown first; the keys it had, yours to give
   agents steps <task-id>          the steps of an agent's task in a repository, each kept as it ended
+  agents routing <id>             where its next task of each kind begins (a fix, desktop work, code, a task): the
+                                    planner's models where the last of that kind was verified there, else the engineer's
   agents again <task-id> [--from <step>] ["<goal>"]
                                     give a task again (your stepping in, counted on it): from its start, or from
                                     one of its steps, its workspace as it stood then and what came after set aside

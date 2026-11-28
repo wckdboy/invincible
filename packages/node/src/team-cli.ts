@@ -1,4 +1,4 @@
-import { capLabel, TEAM_LIMITS, interventionWords, agentFromFile, agentToFile, plainLine, plainText, type Prices, type TeamChangesView, type TeamFilesView, type TeamFileView, type RouteName, taskRecordFacts, type TeamModelChoice, type TeamSnapshot, type TeamRoomView, type TeamRoom, type TeamTask, type Agent, type TeamCheckpoint, mergeRepository } from "@invincible/core";
+import { beginsByKind, capLabel, TEAM_LIMITS, interventionWords, agentFromFile, agentToFile, plainLine, plainText, type Prices, type TeamChangesView, type TeamFilesView, type TeamFileView, type RouteName, taskRecordFacts, type TeamModelChoice, type TeamSnapshot, type TeamRoomView, type TeamRoom, type TeamTask, type Agent, type TeamCheckpoint, mergeRepository } from "@invincible/core";
 import { MARK_PALETTE } from "@invincible/core/agent-mark";
 import { GLASS_RAMPS, GLASS_SHAPES, glassOf, readGlassProfile } from "@invincible/core/glass";
 
@@ -54,7 +54,7 @@ export const taskRecordLine = (task: Pick<TeamTask, "record">, prices: Prices): 
 /** What a task changed in its repository and where that is kept (`invincible ship <artifact>` opens a pull request from it). Empty when it kept nothing. */
 export const taskChangesLine = (task: Pick<TeamTask, "changes">): string => (task.changes ? ` · ${task.changes.files} file${task.changes.files === 1 ? "" : "s"} changed, kept as ${task.changes.artifact}` : "");
 
-const usage = "invincible agents [add <id> | avatar <id> | models <id> [provider/model…] | sensitive <id> [on|off] [provider/model…] | dm <id> [message] | room <name> <member…> | chat <room> [message] | task <room> <assignee> <goal> [--sensitive] [--models provider/model,…] | steps <task-id> | again <task-id> [--from <step>] [goal] | keys <id> [add <secret> [--write] | rm <secret>] | export <id> [--out file.md] | import <file.md> [--id <new id>] [-y] | give <goal> | trail <task-id> [--follow] | provision <id> | memory <id> [text] | engram [on|off] | ci [on|off] | daily [<usd>] | merge <owner/repo> [on|off] | pause|resume|stop <room|agent|task> <id> | approve|decline <task-id> | remove <id> [--destroy-workspace] [--yes]]";
+const usage = "invincible agents [add <id> | avatar <id> | models <id> [provider/model…] | sensitive <id> [on|off] [provider/model…] | dm <id> [message] | room <name> <member…> | chat <room> [message] | task <room> <assignee> <goal> [--sensitive] [--models provider/model,…] | steps <task-id> | again <task-id> [--from <step>] [goal] | keys <id> [add <secret> [--write] | rm <secret>] | export <id> [--out file.md] | import <file.md> [--id <new id>] [-y] | give <goal> | trail <task-id> [--follow] | routing <id> | provision <id> | memory <id> [text] | engram [on|off] | ci [on|off] | daily [<usd>] | merge <owner/repo> [on|off] | pause|resume|stop <room|agent|task> <id> | approve|decline <task-id> | remove <id> [--destroy-workspace] [--yes]]";
 
 /** What an agent works on, in a sentence: its own models or its role's, and whether it is in sensitive mode. */
 const agentModels = (m: Agent): string =>
@@ -308,6 +308,22 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
       if (!flags.follow) { print(`(still ${page.task.status}: invincible agents trail ${page.task.id} --follow)`); return; }
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
+  }
+  if (sub === "routing") {
+    // Where an agent's next task of each kind begins (core's routing.ts): by how its tasks of that kind went, the
+    // planner's models where the last of its kind was verified there, the engineer's until one was.
+    if (!args[0]) throw new Error("usage: invincible agents routing <id>");
+    const state = await api.call<TeamSnapshot>("team");
+    const agent = state.agents.find((a) => a.id === args[0]);
+    if (!agent) throw new Error(`no agent ${args[0]}`);
+    const begins = beginsByKind(state.tasks.filter((t) => t.assignee === agent.id));
+    if (!begins.length) {
+      print(`${agent.name} has no finished task with its routing kept yet: each kind begins on the engineer's models until one is verified on the planner's.`);
+      return;
+    }
+    print(`${agent.name}'s next task of each kind begins:`);
+    for (const { kind, begin } of begins) print(`  ${kind.padEnd(8)} on the ${begin.tier}'s models · ${begin.why}${begin.from ? ` (${begin.from})` : ""}`);
+    return;
   }
   if (sub === "steps") {
     // The steps of a task another can be given from (PLAN #15): each command, and when it ended.
