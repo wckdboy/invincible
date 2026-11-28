@@ -56,11 +56,16 @@ function vm(runtime: "runc" | "kata"): string {
   return name;
 }
 
-/** The host, as the node has it, its listing a stand-in that knows this VM is running (what Docker says of it). */
+/**
+ * The host, as the node has it, its lookups a stand-in that knows this VM is running (what Docker says of it): `get`,
+ * and `forCommand`, the one a command's exec asks (by its container's name, held to this node's labels). This test's
+ * VMs carry no node's labels, so no node on the host ever lists them, and the stand-in answers for them instead.
+ */
 function host(name: string): SandboxHost {
   const made = new SandboxHost({ node: "test", maxCpus: 8, maxMemoryGb: 16, docker: bin, ledger: () => {}, tokens: { mint: () => ({ token: "t", info: { hash: "h" } }), revoke: () => true } } as never);
   const view = { id: name, name, status: "running", image: IMAGE, run: null } as unknown as SandboxView;
-  Object.assign(made, { get: async (id: string) => (id === name && docker("inspect", "--format", "{{.State.Running}}", id).stdout.trim() === "true" ? view : null) });
+  const found = async (id: string) => (id === name && docker("inspect", "--format", "{{.State.Running}}", id).stdout.trim() === "true" ? view : null);
+  Object.assign(made, { get: found, forCommand: found });
   return made;
 }
 
