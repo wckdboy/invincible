@@ -25,6 +25,40 @@ def version_of(text):
     except ValueError:
         return None
 
+# What agy keeps of its own from one start to the next: its sign-in, and its sessions (each one's conversation, which
+# session/load reads, and its brain: agy 1.5.18 on Ultra, 28 November 2026). The rest of its profile is configuration
+# (hooks, MCP servers, plugins, skills, rules, agents, settings), its built-in skills and its state, which agy makes anew
+# as it starts; a run may have left any of it there, to run commands or steer it. So each start is from the node's own,
+# which is none of it, and no link stays anywhere in it (the review of 28 November 2026, M2).
+KEPT = {"antigravity-oauth-token": "file", "conversations": "dir", "brain": "dir"}
+
+def gone(path):
+    if path.is_symlink() or not path.is_dir():
+        path.unlink()
+        return
+    for inner in list(path.iterdir()):
+        gone(inner)
+    path.rmdir()
+
+def unlinked(folder):
+    for inner in list(folder.iterdir()):
+        if inner.is_symlink():
+            inner.unlink()
+        elif inner.is_dir():
+            unlinked(inner)
+
+def reset(gemini):
+    for path in list(gemini.iterdir()):
+        if path.name != "antigravity-acp" or path.is_symlink() or not path.is_dir():
+            gone(path)
+            continue
+        for inner in list(path.iterdir()):
+            kept = KEPT.get(inner.name)
+            if inner.is_symlink() or kept is None or (kept == "dir") != inner.is_dir():
+                gone(inner)
+            elif kept == "dir":
+                unlinked(inner)
+
 class Bridge(Client):
     agent = "Antigravity"
     permit = True
@@ -34,6 +68,7 @@ class Bridge(Client):
         args = self.args
         gemini = Path(args.gemini_dir or os.environ.get("INVINCIBLE_AGY_DIR") or os.path.join(os.path.expanduser("~"), ".antigravity"))
         gemini.mkdir(parents=True, exist_ok=True, mode=0o700)
+        reset(gemini)
         temp = gemini / "tmp"
         temp.mkdir(exist_ok=True, mode=0o700)
         # Deliberate allowlist, as T3 Code's antigravityEnvironment: no key of yours (GEMINI_API_KEY, GOOGLE_API_KEY), no

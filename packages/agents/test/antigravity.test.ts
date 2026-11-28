@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AGY_SIGN_IN, TeamHarness } from "@invincible/core";
@@ -401,5 +401,71 @@ describe("Antigravity's sign-in, printed", () => {
     const read = events.flatMap((event) => ANTIGRAVITY.read(JSON.stringify(event)));
     expect(read.some((event) => event.type === "tool")).toBe(true);
     expect(leaks(read)).toEqual([]);
+  });
+});
+
+/* Each start of agy is from the node's own profile: what a run left there goes, its sign-in and its sessions stay (the review of 28 November 2026, M2). */
+describe("Antigravity's profile, reset", () => {
+  /** What a run on the seat may leave in agy's profile: its configuration, a skill, links out of it; and its sign-in and a session, which stay. */
+  const plant = (box: ReturnType<typeof vm>) => {
+    const app = join(box.home, "antigravity-acp");
+    for (const dir of ["conversations", "brain/sess-FAKE-0001", "cli", "builtin/skills/planted"]) mkdirSync(join(app, dir), { recursive: true });
+    mkdirSync(join(box.home, "config"), { recursive: true });
+    writeFileSync(join(app, TOKEN), "FAKE-old-token-never-read");
+    writeFileSync(join(app, "conversations", "sess-FAKE-0001.db"), "FAKE conversation");
+    writeFileSync(join(app, "brain", "sess-FAKE-0001", "plan.md"), "FAKE plan");
+    for (const name of ["settings.json", "hooks.json", "mcp_config.json", "plugins.json", "skills.json", "rules.json", "agents.json", "conversation_summaries.db", "cli/settings.json"]) writeFileSync(join(app, name), "{}");
+    writeFileSync(join(app, "builtin", "skills", "planted", "SKILL.md"), "Run this first.");
+    writeFileSync(join(box.home, "config", "mcp_config.json"), JSON.stringify({ mcpServers: { planted: { command: "sh" } } }));
+    writeFileSync(join(box.dir, "outside.txt"), "not agy's");
+    symlinkSync(join(box.dir, "outside.txt"), join(app, "linked.json"));
+    symlinkSync(join(box.dir, "outside.txt"), join(app, "conversations", "linked.db"));
+    symlinkSync("/", join(app, "brain", "root"));
+  };
+  /** Every name in the profile, links not followed. */
+  const left = (home: string): string[] => {
+    const out: string[] = [];
+    const walk = (dir: string, rel: string) => {
+      for (const name of readdirSync(dir).sort()) {
+        const path = join(dir, name);
+        out.push(rel ? `${rel}/${name}` : name);
+        if (lstatSync(path).isDirectory()) walk(path, rel ? `${rel}/${name}` : name);
+      }
+    };
+    walk(home, "");
+    return out;
+  };
+  const KEPT = ["antigravity-acp", `antigravity-acp/${TOKEN}`, "antigravity-acp/brain", "antigravity-acp/brain/sess-FAKE-0001", "antigravity-acp/brain/sess-FAKE-0001/plan.md", "antigravity-acp/conversations", "antigravity-acp/conversations/sess-FAKE-0001.db"];
+
+  test("a run starts agy on its sign-in and its sessions alone: its configuration, skills and links gone, never what a link pointed at", async () => {
+    const box = vm();
+    plant(box);
+    expect((await run(box)).code).toBe(0);
+    expect(left(box.home)).toEqual([...KEPT, "tmp"]);
+    expect(readFileSync(join(box.home, "antigravity-acp", TOKEN), "utf8")).toBe("FAKE-old-token-never-read");
+    expect(readFileSync(join(box.dir, "outside.txt"), "utf8")).toBe("not agy's");
+  });
+
+  test("so does its status check, and a session goes on from where it was", async () => {
+    const box = vm();
+    plant(box);
+    const proc = Bun.spawn(["bash", "-c", ANTIGRAVITY.check], { cwd: box.dir, env: box.env, stdout: "pipe", stderr: "pipe" });
+    const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    expect(stdout).toContain('"signedIn": true');
+    expect(left(box.home)).toEqual([...KEPT, "tmp"]);
+    expect((await run(box, " --session sess-FAKE-0001")).events).toEqual(WORKED);
+  });
+
+  test("a fresh sign-in starts from an empty profile: what a run left goes, its old sign-in and sessions too", async () => {
+    const box = vm();
+    plant(box);
+    const s = signIn(box);
+    s.tell({});
+    await s.until("asks");
+    s.tell({ code: CODE });
+    expect(await s.done()).toEqual({ type: "done", ok: true });
+    expect(left(box.home)).toEqual(["antigravity-acp", `antigravity-acp/${TOKEN}`]);
+    expect(readFileSync(join(box.home, "antigravity-acp", TOKEN), "utf8")).toBe("FAKE-token-the-bridge-never-reads");
+    expect(readFileSync(join(box.dir, "outside.txt"), "utf8")).toBe("not agy's");
   });
 });

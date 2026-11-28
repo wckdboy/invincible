@@ -1412,6 +1412,13 @@ describe("a subscription's sign-in never reaches your agent", () => {
       const lines = text.split("\n").filter((line) => line.includes(name));
       return lines.length === 1 && new RegExp(`^  if \\(kind === "[a-z-]+"\\) return \\{ ${name}: \`\\$\\{home\\}/[a-z]+\` \\};$`).test(lines[0]!);
     };
+    // And agy's sign-in is named in one place too: the one line of Antigravity's bridge that keeps it where agy keeps it,
+    // as the rest of agy's profile is reset at each start (the review of 28 November 2026, M2). It is kept, never read.
+    const KEEPS = "packages/agents/src/antigravity.ts";
+    const keepsAgyToken = (text: string) => {
+      const lines = text.split("\n").filter((line) => line.includes("antigravity-oauth-token"));
+      return lines.length === 1 && lines[0] === 'KEPT = {"antigravity-oauth-token": "file", "conversations": "dir", "brain": "dir"}';
+    };
     const root = new URL("../../../", import.meta.url).pathname;
     const sources: string[] = [];
     const walk = (dir: string) => {
@@ -1427,13 +1434,16 @@ describe("a subscription's sign-in never reaches your agent", () => {
     const found = sources.flatMap((path) => {
       const text = readFileSync(path, "utf8");
       const rel = path.slice(root.length);
-      const named = [...kept, ...homes].filter((name) => text.includes(name) && !(rel === POINTED && homes.includes(name) && pointsAtSeatHome(text, name)));
+      const named = [...kept, ...homes].filter((name) => text.includes(name) && !(rel === POINTED && homes.includes(name) && pointsAtSeatHome(text, name)) && !(rel === KEEPS && name === "antigravity-oauth-token" && keepsAgyToken(text)));
       return named.map((name) => `${rel}: ${name}`);
     });
     expect(found).toEqual([]);
     // And the one place does say each, so this test holds what it says it holds.
     const pointed = readFileSync(join(root, POINTED), "utf8");
     for (const name of homes) expect([name, pointsAtSeatHome(pointed, name)]).toEqual([name, true]);
+    expect(keepsAgyToken(readFileSync(join(root, KEEPS), "utf8"))).toBe(true);
+    // (And nothing of the bridge opens, reads or copies it: its one use is to be kept as the rest goes.)
+    expect(ANTIGRAVITY_ACP_BRIDGE.match(/\bKEPT\b/g)).toHaveLength(2);
     // Nor do the bridges speak to anyone themselves, or say who the tool is: they start it and read it.
     for (const bridge of [CLAUDE_BRIDGE, CODEX_BRIDGE, ANTIGRAVITY_ACP_BRIDGE, ANTIGRAVITY_SIGN_IN]) expect(bridge).not.toMatch(/user.agent|urllib\.request|http\.client|\bsocket\b|\bcurl\b|\bwget\b/i);
   });

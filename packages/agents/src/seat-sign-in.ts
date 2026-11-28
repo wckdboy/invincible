@@ -212,7 +212,7 @@ main()
  * so it prints Google's page, and reads from its input the code that page shows (Google's own callback page,
  * antigravity.google/oauth-callback, shows it). The code goes to agy alone, once; what it makes, agy keeps in the profile.
  */
-export const ANTIGRAVITY_SIGN_IN = String.raw`${COMMON}import subprocess
+export const ANTIGRAVITY_SIGN_IN = String.raw`${COMMON}import shutil, subprocess
 ESCAPES = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 PAGE = re.compile(r"https://accounts\.google\.com/[^\s\x1b\"'<>]+")
 CODE = re.compile(r"[\w./~-]{1,2048}")
@@ -225,6 +225,17 @@ def main():
     # As T3 Code's antigravityEnvironment: no key of yours, no display or browser, its updates off, a remote session.
     env = {k: os.environ[k] for k in ("PATH", "LANG", "LC_ALL", "TERM", "HOME", "USER") if k in os.environ}
     env.update({"AGY_CLI_DISABLE_AUTO_UPDATE": "true", "SSH_CONNECTION": "127.0.0.1 0 127.0.0.1 0"})
+    # A fresh sign-in starts from an empty profile: whatever a run left in the last one goes with it (the review of 28
+    # November 2026, M2). Each run's start resets it again, keeping its sign-in and its sessions (antigravity.ts).
+    if os.path.isdir(gemini) and not os.path.islink(gemini):
+        for name in os.listdir(gemini):
+            path = os.path.join(gemini, name)
+            if os.path.islink(path) or not os.path.isdir(path):
+                os.unlink(path)
+            else:
+                shutil.rmtree(path)
+    elif os.path.lexists(gemini):
+        os.unlink(gemini)
     os.makedirs(gemini, mode=0o700, exist_ok=True)
     argv = ["agy", "acp", "--gemini-dir", gemini, "--app-data-dir", "antigravity-acp", "--disable-telemetry", "--login"]
     try:
