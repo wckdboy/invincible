@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import * as core from "../../../packages/core/src/index.ts";
 import { besideChip, primaryState, type AgentState } from "../../web/src/lib/agent-state.ts";
 import { homeRows, primaryNeeds, rosterRows } from "../../web/src/lib/roster.ts";
+import { listTime } from "../../web/src/lib/time.ts";
 import { primaryNow, needsFirst, type NowInput } from "../../web/src/lib/now.ts";
 import { groupConversations } from "../../web/src/lib/chats.ts";
 import { highlight } from "../../web/src/lib/highlight.ts";
@@ -492,6 +493,26 @@ const seenSnapshot: core.TeamSnapshot = {
   ],
   seen: { "agent:ada": at(30), "agent:bea": at(5), "agent:dee": at(10), "room:forge": at(15), "room:shed": at(30) },
 };
+// ---- when, as the list that is home says it (lib/time.ts listTime): a chat app's times, its zone and locale pinned ----
+const LIST_NOW = Date.UTC(2026, 10, 28, 13, 30);
+const LIST_ZONE = "Europe/Copenhagen";
+const LIST_LOCALE = "en-GB";
+const listTimes = {
+  now: LIST_NOW,
+  zone: LIST_ZONE,
+  locale: LIST_LOCALE,
+  cases: [
+    // Today there (Copenhagen is UTC + 1): the afternoon, the morning, half past midnight (still yesterday in UTC), a
+    // minute ahead.
+    Date.UTC(2026, 10, 28, 13, 5), Date.UTC(2026, 10, 28, 7, 4), Date.UTC(2026, 10, 27, 23, 30), Date.UTC(2026, 10, 28, 13, 31),
+    // Yesterday there, at its last minute and its first.
+    Date.UTC(2026, 10, 27, 22, 59), Date.UTC(2026, 10, 26, 23, 1),
+    // Two and six days back; then a week back, single-digit days and months, last year, and a day ahead.
+    Date.UTC(2026, 10, 26, 8, 0), Date.UTC(2026, 10, 22, 8, 0), Date.UTC(2026, 10, 21, 8, 0), Date.UTC(2026, 10, 5, 7, 0),
+    Date.UTC(2026, 0, 2, 7, 0), Date.UTC(2025, 11, 31, 22, 0), Date.UTC(2026, 10, 29, 8, 0),
+  ].map((at) => ({ at, words: listTime(at, LIST_NOW, LIST_ZONE, LIST_LOCALE) })),
+};
+
 const unread = {
   snapshot: seenSnapshot,
   rows: rosterRows({ snapshot: seenSnapshot, asks: [], now: NOW }).map((row) => ({ id: row.id, kind: row.kind, line: row.line, needs: row.needs, unread: row.unread, state: row.state ?? null })),
@@ -2006,6 +2027,7 @@ const vectors = {
   agents,
   unread,
   rooms,
+  listTimes,
   agentForms,
   keys,
   desktop,

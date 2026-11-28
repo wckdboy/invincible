@@ -54,6 +54,26 @@ export function dayLabel(ms: number, now = Date.now()): string {
   return new Date(ms).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 }
 
+/**
+ * When, as a chat app's list says it (the list that is home on a phone, after Grok Bot): the clock time today, "Yesterday",
+ * the weekday's name within the week before, else the date in numbers with its whole year. In the device's time zone and
+ * locale ([zone] and [locale] pin them, for the vectors every app checks); a day ahead (a clock running fast) is a date too.
+ */
+export function listTime(ms: number, now: number, zone?: string, locale?: string): string {
+  const timeZone = zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  // (Days counted by the calendar there: its dates, not 24-hour spans.)
+  const date = (t: number): number => {
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(t);
+    const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((one) => one.type === type)?.value);
+    return Date.UTC(part("year"), part("month") - 1, part("day")) / DAY;
+  };
+  const days = date(now) - date(ms);
+  if (days === 0) return new Intl.DateTimeFormat(locale, { timeZone, timeStyle: "short" }).format(ms);
+  if (days === 1) return "Yesterday";
+  if (days > 1 && days < 7) return new Intl.DateTimeFormat(locale, { timeZone, weekday: "long" }).format(ms);
+  return new Intl.DateTimeFormat(locale, { timeZone, year: "numeric", month: "numeric", day: "numeric" }).format(ms);
+}
+
 /** "850 ms", "4.2 s", "3 min 20 s", "1 h 5 min". */
 export function duration(ms: number): string {
   if (ms < 1000) return `${Math.max(0, Math.round(ms))} ms`;

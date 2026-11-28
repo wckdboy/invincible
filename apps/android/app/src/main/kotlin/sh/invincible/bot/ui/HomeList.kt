@@ -1,5 +1,6 @@
 package sh.invincible.bot.ui
 
+import android.text.format.DateFormat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -50,19 +53,19 @@ import androidx.compose.ui.unit.sp
 import sh.invincible.bot.app.AppModel
 import sh.invincible.bot.core.AgentMark
 import sh.invincible.bot.core.AgentState
+import sh.invincible.bot.core.ListTime
 import sh.invincible.bot.core.Primary
 import sh.invincible.bot.core.Roster
-import sh.invincible.bot.core.Work
-import sh.invincible.bot.core.get
-import sh.invincible.bot.core.long
+import java.time.ZoneId
 
 /*
  * Home (the owner's word, 28 November 2026, after Grok Bot: "like a chat app, with the primary at the top, the other
  * agents, and a settings menu"; I10's page as the lead approved it): a list, as a messaging app's. Its bar: Settings (the
  * gear), "Invincible", and + (a new chat with your agent, or a new agent). Pulled down, a search of agents and chats. Your
  * agent pinned first; then every agent and room by what it last did, the latest first (Roster.homeRows: the PWA's
- * lib/roster.ts homeRows, held to the vectors): its face and how it stands, its name, its latest line, when, and how much
- * waits on you. A row opens its chat. On a tablet the same list is the sidebar, beside the chat open.
+ * lib/roster.ts homeRows, held to the vectors): its face and how it stands, its name, its latest line, when (as a chat
+ * app says it: ListTime), and how much waits on you. A row opens its chat. On a tablet the same list is the sidebar,
+ * beside the chat open.
  */
 
 /**
@@ -73,9 +76,9 @@ import sh.invincible.bot.core.long
 fun HomeList(app: AppModel, open: (String) -> Unit, settings: () -> Unit, current: String? = null, modifier: Modifier = Modifier) {
     val table by app.table.collectAsState()
     val needsYou by app.needsYou.collectAsState()
-    val live by app.chat.live.collectAsState()
     val minute = rememberMinute()
     val now = minute * 60_000
+    val times = rememberListTime()
     // (A task's thread marks its agent's row.)
     val marked = current?.removePrefix("task:")?.takeIf { current.startsWith("task:") }?.let { id -> table.tasks.firstOrNull { it.id == id }?.assignee?.let(Nav::agent) } ?: current
     // (The search sits above the first row, out of sight until the list is pulled down, as a messaging app's: the list
@@ -111,12 +114,11 @@ fun HomeList(app: AppModel, open: (String) -> Unit, settings: () -> Unit, curren
                 }
             }
             item(key = "primary") {
-                // (Its time: now while it works; else its newest answer you haven't read; else none said.)
-                val at = if (live || table.primary.state == AgentState.WORKING) now else table.unread.mapNotNull { it["answeredAt"].long }.maxOrNull()
+                // (Pinned first, it says no time.)
                 HomeRowView(
                     name = Primary.name,
                     line = table.primary.line,
-                    time = at?.let { Work.shortSpan(now - it) },
+                    time = null,
                     count = 0,
                     needs = table.primary.tone == "warn",
                     selected = marked == "chat",
@@ -131,7 +133,7 @@ fun HomeList(app: AppModel, open: (String) -> Unit, settings: () -> Unit, curren
                 HomeRowView(
                     name = row.row.name,
                     line = row.row.line,
-                    time = Work.shortSpan(now - row.at),
+                    time = times.of(row.at, now),
                     count = row.count,
                     needs = row.row.needs,
                     failed = row.row.state == AgentState.FAILED,
@@ -149,6 +151,20 @@ fun HomeList(app: AppModel, open: (String) -> Unit, settings: () -> Unit, curren
             }
             item(key = "end") { Spacer(Modifier.height(Space.s6)) }
         }
+    }
+}
+
+/**
+ * How this phone says when, for the list (ListTime): in its time zone and its locale, its clock as it is set (24 hours or
+ * 12, as Settings has it) and its numeric date, as Android's own DateFormat writes them.
+ */
+@Composable
+private fun rememberListTime(): ListTime {
+    val locale = LocalConfiguration.current.locales[0]
+    val hours24 = DateFormat.is24HourFormat(LocalContext.current)
+    val zone = ZoneId.systemDefault()
+    return remember(locale, hours24, zone) {
+        ListTime(zone, locale, clock = DateFormat.getBestDateTimePattern(locale, if (hours24) "Hm" else "hm"), date = DateFormat.getBestDateTimePattern(locale, "yMd"))
     }
 }
 
