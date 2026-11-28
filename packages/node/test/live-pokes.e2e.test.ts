@@ -89,7 +89,7 @@ beforeAll(async () => {
   const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "keep" });
   store.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
-  daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, loopIntervalMs: 60_000, archiveIntervalMs: false, defaultHeartbeat: false, backups: false, measure: false });
+  daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, loopIntervalMs: 60_000, archiveIntervalMs: false, defaultHeartbeat: false, backups: false, measure: false, syncIntervalMs: 3_600_000, push: { tickMs: false } });
   for (const [name, input] of [["setProvider", { id: "stand-in", kind: "openai", baseUrl: `http://127.0.0.1:${model.port}/v1` }], ["setRoster", { role: "planner", models: ["stand-in/m"] }]] as const) {
     const response = await admin(name, input);
     if (!response.ok) throw new Error(`${name}: ${response.status} ${await response.text()}`);
@@ -100,6 +100,27 @@ afterAll(async () => {
   await daemon?.stop();
   model.stop(true);
   rmSync(root, { recursive: true, force: true });
+});
+
+describe("the live stream's look", () => {
+  test("reads none of the fleet's devices while a device listens: which peers are online is what sync last found of each", async () => {
+    const stop = new AbortController();
+    await listen(stop.signal);
+    try {
+      const read = daemon.store.devices.bind(daemon.store);
+      let devicesRead = 0;
+      daemon.store.devices = () => (devicesRead++, read());
+      try {
+        // Four looks and more, with nothing else here that reads the devices (sync's ticks and the notifications' are off).
+        await Bun.sleep(LOOK_MS * 4 + 100);
+        expect(devicesRead).toBe(0);
+      } finally {
+        daemon.store.devices = read;
+      }
+    } finally {
+      stop.abort();
+    }
+  });
 });
 
 describe("the live stream, as the background moves", () => {

@@ -49,6 +49,35 @@ function before(store: LedgerStore, seen: Seen) {
   };
 }
 
+describe("which peers are online, as the live stream reads it", () => {
+  test("moves as a peer is found online and again as it goes, stays as it was for one found offline that was never on, and reads none of the fleet's devices", async () => {
+    const { a, b, storeA, storeB } = fleet();
+    let up = true;
+    // (Down: a peer that answers, refusing, as one stopping does.)
+    const engine = new SyncEngine(storeB, b, { fetch: async (url, init) => (up ? today(storeA, { bodies: [], largest: 0 })(url, init) : new Response("stopping", { status: 503 })) });
+    const read = storeB.devices.bind(storeB);
+    let devicesRead = 0;
+    storeB.devices = () => (devicesRead++, read());
+    const at = engine.onlineStamp();
+    expect(at).toBe("");
+    // A peer never reached, found offline: as it stood (status() said it was "-" all along).
+    up = false;
+    await engine.pullFrom(peer(a)).catch(() => {});
+    expect(engine.onlineStamp()).toBe(at);
+    up = true;
+    await engine.pullFrom(peer(a));
+    const online = engine.onlineStamp();
+    expect(online).not.toBe(at);
+    expect(online).toContain(a.id);
+    up = false;
+    await engine.pullFrom(peer(a)).catch(() => {});
+    expect(engine.onlineStamp()).toBe("");
+    devicesRead = 0;
+    for (let i = 0; i < 100; i++) engine.onlineStamp();
+    expect(devicesRead).toBe(0);
+  });
+});
+
 describe("the sync engine", () => {
   test("against today's nodes: learns they compare set hashes, then sends them, and repairs a hole page by page", async () => {
     const { a, b, storeA, storeB } = fleet();

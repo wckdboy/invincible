@@ -1970,7 +1970,8 @@ export function createApp(ctx: AppContext) {
   const liveChanges = new LiveChanges(
     {
       // A device joined, left or changed, or a node went on- or offline (its load and round trip: the pages that show them).
-      fleet: () => `${mindCounts.of("fleet")}.${ctx.sync.status().map((peer) => `${peer.device}${peer.online ? "+" : "-"}`).join(",")}`,
+      // (Who the peers are moves with the fleet's events, counted; which are online, from what sync last found of each.)
+      fleet: () => `${mindCounts.of("fleet")}.${ctx.sync.onlineStamp()}`,
       pairings: () => ctx.pairing.pending().map((r) => `${r.invite}.${r.device}.${r.conflict ? 1 : 0}`).join(","),
       secretRequests: () => String(mindCounts.of("secretRequests")),
       loopDrafts: () => ctx.loopDrafts.list().map((draft) => draft.id).join(","),

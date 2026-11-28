@@ -123,6 +123,18 @@ export class SyncEngine {
     );
   }
 
+  /**
+   * Which peers it last found online, as a short string that changes as one comes or goes: what the live stream's `fleet`
+   * stamp reads, four times a second while a device listens. Who the peers are moves with the fleet's own events, which
+   * the stream counts apart, so this reads none of the fleet's devices, as status() does (each one's profile parsed: on
+   * the mini, 43 % of what a listening device cost its node, 28 November 2026).
+   */
+  onlineStamp(): string {
+    let online = "";
+    for (const peer of this.statuses.values()) if (peer.online) online += `${peer.device},`;
+    return online;
+  }
+
   async pullFrom(peer: Device): Promise<number> {
     const started = performance.now();
     let added = 0;
