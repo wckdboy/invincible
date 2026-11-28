@@ -134,7 +134,8 @@ fun HomeList(app: AppModel, open: (String) -> Unit, settings: () -> Unit, curren
                 HomeRowView(
                     name = row.row.name,
                     line = row.row.line,
-                    time = times.of(row.at, now),
+                    // (None said where none is known: an agent kept on the phone before its making was.)
+                    time = row.at.takeIf { it > 0 }?.let { times.of(it, now) },
                     count = row.count,
                     needs = row.row.needs,
                     failed = row.row.state == AgentState.FAILED,

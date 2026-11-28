@@ -69,6 +69,21 @@ class KeptTableTest {
         assertEquals(Roster.primaryNow(turns = listOf("Release notes", null), runs = emptyList(), needs = null, unread = listOf("The importer")), before.primary)
     }
 
+    @Test fun theListThatIsHomeIsDrawnFromTheKeptTeamAsTheNodeDrewIt() {
+        // Bea, made last, has done nothing yet; Ada was made before her; the room last spoke before either was made.
+        val made = Json.parse(
+            """{"agents":[{"id":"ada","name":"Ada","role":"engineer","enabled":true,"createdAt":1763500000000},
+                          {"id":"bea","name":"Bea","role":"engineer","enabled":true,"createdAt":1763600000000}],
+                "rooms":[{"id":"r1","name":"Release room","direct":false,"members":["ada","bea"],"createdAt":1763400000000,"updatedAt":1763450000000,"paused":false}],
+                "tasks":[],"deliveries":[]}""",
+        )
+        val now = 1_763_700_200_000
+        val kept = KeptTable.read(Json.parse(KeptTable.of(node, made, turns, asks, waiting = 0, at = 1, inbox = 0).text()), node)!!
+        val node = Roster.homeRows(Snapshot.of(made), asks, now)
+        assertEquals(listOf("person:bea", "person:ada", "room:r1"), node.map { it.key })
+        assertEquals(node, Table.restored(kept, Snapshot.of(kept.team), now).home)
+    }
+
     @Test fun keepsNoMoreThanTheAgentsDraws() {
         val text = KeptTable.of(node, team, turns, asks, waiting = 3, at = 1).text()
         // An agent's standing instructions, what the team holds beyond the roster, a chat's words: none of it is kept.

@@ -24,11 +24,12 @@ object KeptTable {
     /**
      * Of each list, the fields the roster and the work's rows read (Agent.of, Room.of, Job.task, Job.delivery, TeamTask.of
      * for a row) and no others: an agent's standing instructions, its working notes, the keys it may use, a task's whole
-     * brief are not the team's. (An agent's repository names its tasks' project; a task's start says how long it has
-     * been at work; a shipped task keeps its pull request's number.)
+     * brief are not the team's. (An agent's repository names its tasks' project; when it was made places its row in the
+     * list that is home until it has done anything; a task's start says how long it has been at work; a shipped task
+     * keeps its pull request's number.)
      */
     private val FIELDS = mapOf(
-        "agents" to setOf("id", "name", "role", "enabled", "dailyTurns", "turnsToday", "createdBy", "avatar", "workspace", "repository"),
+        "agents" to setOf("id", "name", "role", "enabled", "dailyTurns", "turnsToday", "createdBy", "avatar", "workspace", "repository", "createdAt"),
         "rooms" to setOf("id", "name", "direct", "members", "updatedAt", "paused"),
         "tasks" to setOf("id", "title", "assignee", "status", "verified", "createdAt", "updatedAt", "progress", "error", "changes", "proposedBy", "room", "dependsOn", "shipped"),
         "deliveries" to setOf("id", "agent", "status", "updatedAt", "error", "room"),

@@ -167,7 +167,10 @@ data class Table(
         fun restored(kept: KeptTable.Kept, snapshot: Snapshot, now: Long): Table {
             val owed = kept.inbox?.let { Roster.primaryNeeds(it, kept.asks, snapshot.agents.map { agent -> agent.id }) }
             val primary = Roster.primaryNow(turns = kept.turns, runs = emptyList(), needs = owed, unread = kept.unread.map { it["title"].string })
-            return Table(snapshot, Roster.rows(snapshot, kept.asks, now), primary, kept.unread, asOf = kept.at, tasks = TeamTask.all(kept.team), primaryNeeds = owed ?: 0)
+            return Table(
+                snapshot, Roster.rows(snapshot, kept.asks, now), primary, kept.unread, asOf = kept.at, tasks = TeamTask.all(kept.team),
+                home = Roster.homeRows(snapshot, kept.asks, now), primaryNeeds = owed ?: 0,
+            )
         }
     }
 }
