@@ -176,6 +176,12 @@ export interface SandboxHostOptions {
   imageContext?: string;
   /** Whether this host runs KVM microVMs (Kata installed, /dev/kvm present). */
   microVMs?: boolean;
+  /**
+   * Whether its sandboxes may join the sandbox networks (default: they may). False on a scratch node beside a live one on
+   * the same host (the daemon's sandboxNetworks): those networks are the live node's there, so every sandbox made here is
+   * isolated, whatever was asked, on the isolation it was asked for. Linux alone: a Mac's have no network that isn't one.
+   */
+  sandboxNetworks?: boolean;
   /** The resolv.conf online microVMs get (see vmResolvConf). */
   resolvConf?: string;
   tokenStore?: SandboxTokenStore;
@@ -963,6 +969,10 @@ export class SandboxHost {
   }
 
   async create(input: CreateInput, seated: CreateOptions = {}): Promise<SandboxView> {
+    // A host whose sandboxes have no networks (sandboxNetworks false: a scratch node beside a live one) makes each
+    // one isolated, on the isolation its ask had: an online one on a host with Kata stays a microVM, never weaker
+    // than asked.
+    if (this.opts.sandboxNetworks === false && !this.apple && input.network !== "isolated") input = { ...input, network: "isolated", isolation: this.isolationFor(input.network, input.isolation) };
     // (A VM that shares an agent's store is counted from here, before anything is awaited, and none is begun while its move
     // may be about to be: R5-1.)
     if (seated.shares && this.moving.has(seated.shares.sandbox)) throw new SandboxError("that agent's store is being moved to layout 2: nothing shares it until its move is done or put back", 409);

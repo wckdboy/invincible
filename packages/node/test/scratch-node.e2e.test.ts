@@ -86,3 +86,18 @@ test("a node whose sandboxes have no networks makes no network, keeps no image a
   expect(made.sandbox).toMatchObject({ network: "isolated", status: "running" });
   expect(scratch.asked.filter((args) => args[0] === "network")).toEqual([]);
 });
+
+test("on a node whose sandboxes have no networks, one asked online is made isolated, and so is an agent's VM: none joins the networks the live node has there", async () => {
+  // (Asked online or with the gateway, a sandbox here joined invincible-net and invincible-gw, the live node's networks on
+  // a shared host, and an agent's VM above all: online is its default. Two nodes, each with room for one VM.)
+  const joined = (asked: string[][]) => asked.filter((args) => args[0] === "run").map((args) => args.flatMap((arg, i) => (args[i - 1] === "--network" ? [arg] : [])));
+  const scratch = await node("scratch-isolated", false);
+  const made = await scratch.api<{ sandbox: SandboxView }>("createSandbox", { network: "online", run: "scratch-online" });
+  expect(made.sandbox).toMatchObject({ network: "isolated", isolation: "vm", status: "running" });
+  expect(joined(scratch.asked)).toEqual([["none"]]);
+  const agents = await node("scratch-agent", false);
+  await agents.api("saveAgent", { id: "ada", name: "Ada", role: "engineer" });
+  const agent = await agents.api<{ workspace: SandboxView }>("provisionAgent", { id: "ada", desktop: false });
+  expect(agent.workspace).toMatchObject({ network: "isolated", isolation: "vm" });
+  expect(joined(agents.asked)).toEqual([["none"]]);
+}, 60_000);

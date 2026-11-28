@@ -608,6 +608,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       imageContext: sandboxContext,
       // Online sandboxes run in KVM microVMs where Kata is installed (scripts/remote-setup.sh).
       microVMs,
+      // (A scratch node beside a live one: the sandbox networks there are the live node's, so its sandboxes join none.)
+      ...(opts.sandboxNetworks === false ? { sandboxNetworks: false } : {}),
       ...(apple ? {} : { resolvConf }),
       // Layout 2 (sandbox's layout.ts): an agent's HOME apart from its workspace, on a Linux host with Docker, when its own
       // setting says so (sandboxLayout). A Mac's VMs stay in layout 1: no VM there shares a workspace. An agent's VM moved to
