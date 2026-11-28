@@ -309,19 +309,39 @@ describe("a sign-in's card", () => {
     expect(signInUrlOk("api", "https://claude.ai/oauth/authorize")).toBe(false);
   });
 
-  test("an Antigravity seat's card shows Google's own sign-in page alone: not the page that shows its code, nor a look-alike", () => {
-    const google = "https://accounts.google.com/o/oauth2/v2/auth?client_id=FAKE-client.apps.googleusercontent.com&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&state=FAKE-state-0000";
-    expect(signInUrlOk("google-antigravity", google)).toBe(true);
+  test("an Antigravity seat's card shows agy's own sign-in on Google's page alone: its client, its redirect, its scopes, as agy 1.5.18 prints it; never another app's, nor the page that shows its code (the review's L3)", () => {
+    // As agy 1.5.18 printed it, signed out, on Ultra (28 November 2026): its state and PKCE challenge stand-ins here.
+    const AGY = {
+      client_id: "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
+      redirect_uri: "https://antigravity.google/oauth-callback",
+      response_type: "code",
+      scope: "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs https://www.googleapis.com/auth/aicode openid",
+    };
+    const page = (over: Record<string, string> = {}, path = "/o/oauth2/auth") =>
+      `https://accounts.google.com${path}?${new URLSearchParams({ access_type: "offline", ...AGY, code_challenge: "FAKE-challenge-0000", code_challenge_method: "S256", prompt: "consent", state: "FAKE-state-0000", ...over })}`;
+    expect(signInUrlOk("google-antigravity", page())).toBe(true);
+    // Another app's consent page on the same host: its own client, redirect, scopes (one more, or fewer), response or
+    // path; or agy's with a second client named in it.
+    const lookalikes = [
+      page({ client_id: "000000000000-FAKEotherapp.apps.googleusercontent.com" }),
+      page({ redirect_uri: "https://example.test/oauth-callback" }),
+      page({ scope: `${AGY.scope} https://www.googleapis.com/auth/gmail.readonly` }),
+      page({ scope: "openid https://www.googleapis.com/auth/userinfo.email" }),
+      page({ response_type: "token" }),
+      page({}, "/o/oauth2/v2/auth"),
+      `${page()}&client_id=000000000000-FAKEotherapp.apps.googleusercontent.com`,
+    ];
+    expect(lookalikes.map((url) => signInUrlOk("google-antigravity", url))).toEqual(lookalikes.map(() => false));
     for (const url of [
-      "http://accounts.google.com/o/oauth2/v2/auth",
-      "https://accounts.google.com.example.test/o/oauth2/v2/auth",
-      "https://user:pass@accounts.google.com/o/oauth2/v2/auth",
-      "https://accounts.google.com:8443/o/oauth2/v2/auth",
+      page().replace("https://", "http://"),
+      page().replace("accounts.google.com", "accounts.google.com.example.test"),
+      page().replace("https://", "https://user:pass@"),
+      page().replace("accounts.google.com", "accounts.google.com:8443"),
       "https://antigravity.google/oauth-callback",
       "https://claude.ai/oauth/authorize",
-    ]) expect([url, signInUrlOk("google-antigravity", url)]).toEqual([url, false]);
-    expect(signInUrlOk("claude-subscription", google)).toBe(false);
-    expect(signInUrlOk("chatgpt-codex", google)).toBe(false);
+    ]) expect([url.slice(0, 48), signInUrlOk("google-antigravity", url)]).toEqual([url.slice(0, 48), false]);
+    expect(signInUrlOk("claude-subscription", page())).toBe(false);
+    expect(signInUrlOk("chatgpt-codex", page())).toBe(false);
   });
 });
 

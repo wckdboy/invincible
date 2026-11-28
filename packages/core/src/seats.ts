@@ -314,7 +314,44 @@ export const SIGN_IN_HOSTS: Readonly<Record<"claude-subscription" | "chatgpt-cod
   "google-antigravity": ["accounts.google.com"],
 };
 
-/** Whether an address a seat's tool showed is its vendor's sign-in page: https, on one of its hosts, nothing else in it. */
+/**
+ * For Google the host binds nothing: accounts.google.com serves the consent page of any OAuth app anyone registers, with
+ * its own redirect and scopes (Gmail, say), so a card showing one would hand your account to someone else. A Gemini
+ * seat's card is held to agy's own sign-in, as agy 1.5.18 prints it (read signed out on Ultra, 28 November 2026): its
+ * path, its OAuth client, its redirect to Google's callback page, a code to paste, and exactly its scopes, each said
+ * once. An agy that asks for anything else gets no card until its pin moves, and this with it (the review's L3).
+ */
+export const AGY_SIGN_IN = {
+  path: "/o/oauth2/auth",
+  clientId: "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
+  redirectUri: "https://antigravity.google/oauth-callback",
+  responseType: "code",
+  scopes: [
+    "openid",
+    "https://www.googleapis.com/auth/aicode",
+    "https://www.googleapis.com/auth/cclog",
+    "https://www.googleapis.com/auth/cloud-platform",
+    "https://www.googleapis.com/auth/experimentsandconfigs",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+  ],
+} as const;
+function agySignIn(url: URL): boolean {
+  const once = (name: string): string | null => {
+    const said = url.searchParams.getAll(name);
+    return said.length === 1 ? said[0]! : null;
+  };
+  const scopes = (once("scope") ?? "").split(" ").filter(Boolean).sort();
+  return (
+    url.pathname === AGY_SIGN_IN.path &&
+    once("client_id") === AGY_SIGN_IN.clientId &&
+    once("redirect_uri") === AGY_SIGN_IN.redirectUri &&
+    once("response_type") === AGY_SIGN_IN.responseType &&
+    scopes.join(" ") === [...AGY_SIGN_IN.scopes].sort().join(" ")
+  );
+}
+
+/** Whether an address a seat's tool showed is its vendor's sign-in page: https, on one of its hosts, nothing else in it (and for Google, agy's own). */
 export function signInUrlOk(kind: SeatKind, url: string): boolean {
   if (kind !== "claude-subscription" && kind !== "chatgpt-codex" && kind !== "google-antigravity") return false;
   if (url.length > 4_096 || /[\s<>"'`]/.test(url)) return false;
@@ -324,7 +361,8 @@ export function signInUrlOk(kind: SeatKind, url: string): boolean {
   } catch {
     return false;
   }
-  return parsed.protocol === "https:" && !parsed.username && !parsed.password && !parsed.port && SIGN_IN_HOSTS[kind].includes(parsed.hostname);
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port || !SIGN_IN_HOSTS[kind].includes(parsed.hostname)) return false;
+  return kind !== "google-antigravity" || agySignIn(parsed);
 }
 
 /* ---------- in the log (the bodies, with a node's own device id where one is named: events.ts) ---------- */

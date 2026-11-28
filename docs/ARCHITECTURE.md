@@ -294,9 +294,10 @@ The run loop is carried and renamed (§10), the most proven part of it:
     app server by ChatGPT's device code, Claude Code's `auth login` on a terminal of its own, its page's code relayed
     to it once (D7), and Antigravity's `agy acp --login`, the code the page after Google's shows relayed to it once. The
     card (its page, and Codex's code) is answered to you and kept nowhere; it shows only an address on the vendor's own
-    hosts (`signInUrlOk`: Google's accounts page alone for Antigravity). Ten minutes, then it lapses. Then the tool's own
-    status says how it stands; another account than the seat's is refused and signed out again by the tool's own
-    command (agy says no account without its token read, so an Antigravity seat keeps none to hold a later sign-in to).
+    hosts (`signInUrlOk`: Google's accounts page alone for Antigravity, and agy's own sign-in there, `AGY_SIGN_IN`).
+    Ten minutes, then it lapses. Then the tool's own status says how it stands; another account than the seat's is
+    refused and signed out again by the tool's own command (agy says no account without its token read, so an
+    Antigravity seat keeps none to hold a later sign-in to).
     A Mistral plan is a key seat (Vibe's sign-in ends in an API key), and Sign in with ChatGPT is the node's own (to come);
   - Antigravity on a Gemini plan, driven as T3 Code drives agy (the owner's choice, 27 November 2026, accepting that
     Google's Antigravity terms call it a breach that may suspend the account: core's `SEAT_TERMS`): `agy acp` in the

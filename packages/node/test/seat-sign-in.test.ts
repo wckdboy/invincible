@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { newNodeIdentity, seatState } from "@invincible/core";
+import { AGY_SIGN_IN, newNodeIdentity, seatState } from "@invincible/core";
 import { AGENTS } from "@invincible/agents";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import type { SandboxStream } from "@invincible/sandbox";
@@ -243,7 +243,8 @@ describe("a ChatGPT seat's sign-in, by Codex's device code", () => {
  * the card, the code its page then shows pasted back to agy once, and its status asked of agy itself in the same VM.
  */
 describe("an Antigravity seat's sign-in, Google's to finish", () => {
-  const GOOGLE = "https://accounts.google.com/o/oauth2/v2/auth?client_id=FAKE-client.apps.googleusercontent.com&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&state=FAKE-state-0000";
+  // agy's own sign-in, as agy 1.5.18 prints it (core's AGY_SIGN_IN): the node shows no other Google page on a card.
+  const GOOGLE = `https://accounts.google.com${AGY_SIGN_IN.path}?${new URLSearchParams({ access_type: "offline", client_id: AGY_SIGN_IN.clientId, code_challenge: "FAKE-challenge-0000", code_challenge_method: "S256", prompt: "consent", redirect_uri: AGY_SIGN_IN.redirectUri, response_type: AGY_SIGN_IN.responseType, scope: AGY_SIGN_IN.scopes.join(" "), state: "FAKE-state-0000" })}`;
   /** A code of the shape Google's callback page shows ("4/0A" and 69 more), fake: made here, never anyone's (the review's H2: a short one hid that the node refused a real one). */
   const GOOGLE_CODE = `4/0A${Array.from({ length: 69 }, (_, i) => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[(i * 37 + 11) % 64]).join("")}`;
 
