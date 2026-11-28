@@ -40,6 +40,8 @@ What the owner uses every day, built on the carried engine around the new model.
   by the owner's word of 26 November 2026: the field orb (gold, with its beam) for the primary, fields in their own
   colours for agents, the embers, and the INVINCIBLE wordmark. Then, the same day: the I-beam as the icon (with a
   transparent dark variant for iOS), and the apps monochrome, colour kept for the agents.
+- A Gemini API key for agents on Antigravity: dropped (the owner, 28 November 2026). They sign in with their own Google
+  account and use their AI Ultra plan, and want nothing else to do; a seat of it is the product.
 
 **Exit:**
 - a task given in plain words, in a repository the agent has never seen, ends verified and shipped as a pull request,
