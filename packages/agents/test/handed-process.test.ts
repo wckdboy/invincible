@@ -279,6 +279,56 @@ test("a module where its helper starts isn't run by it: it is python3 -I (R8-3)"
   }
 });
 
+/*
+ * The eleventh fabric review's R11-1: a process whose leader thread has exited (SYS_exit, that thread alone) while
+ * another thread of its runs on is alive, and /proc says "Z" of it: so the list of what a task left running, and its
+ * end, passed it by as a zombie, and its thread ran on past the task. Now a "Z" with a thread that isn't one is a process.
+ * Here /proc is a procfs-shaped fixture and the signals are intercepted, as end_task's test does: no real process is
+ * ended.
+ */
+test("a process whose leader thread has exited while another runs is kept on its task's list, and ended with the task; a zombie isn't (R11-1)", () => {
+  const scenario = String.raw`
+import tempfile
+with tempfile.TemporaryDirectory(prefix="handed-") as root:
+    PROC = Path(root) / "proc"
+    D = Path(root) / "handed"
+    (PROC / "sys/kernel/random").mkdir(parents=True)
+    (PROC / "sys/kernel/random/boot_id").write_text("boot-A")
+    def stat(state, pid, parent, group, start):
+        return str(pid) + " (python3) " + " ".join([state, str(parent), str(group)] + ["0"] * 16 + [str(start)])
+    def process(pid, parent, group, start, threads):
+        # Its leader's stat, and each of its threads' (the leader's first), as /proc/<pid>/task/<tid>/stat.
+        path = PROC / str(pid)
+        (path / "task").mkdir(parents=True, exist_ok=True)
+        (path / "stat").write_text(stat(threads[0], pid, parent, group, start))
+        for n, state in enumerate(threads):
+            (path / "task" / str(pid + n)).mkdir(exist_ok=True)
+            (path / "task" / str(pid + n) / "stat").write_text(stat(state, pid + n, parent, group, start))
+    killed = []
+    def fake_kill(pid, sig):
+        assert sig == signal.SIGKILL
+        killed.append(pid)
+        shutil.rmtree(PROC / str(pid))
+    os.kill = fake_kill
+    time.sleep = lambda _: None
+    me = os.getpid()
+    process(me, 1, me, 50, ["S"])
+    # The command ran in group 400: 401's leader thread has exited and its other thread runs on; 402 is a zombie, all of
+    # it dead, not yet reaped.
+    process(401, 1, 400, 100, ["Z", "S"])
+    process(402, 1, 400, 101, ["Z"])
+    keep("task-z", 400)
+    kept = sorted(json.loads(line)["pid"] for line in (D / "task-z.jsonl").read_text().splitlines())
+    assert kept == [401], kept
+    assert end_task("task-z") == 0
+    assert killed == [401], killed
+print("ok")
+`;
+  const ran = spawnSync("python3", ["-I", "-c", `import shutil\n${HANDED_PROCESS_PY}\n${scenario}`], { encoding: "utf8" });
+  expect(ran.stderr).toBe("");
+  expect(ran.stdout.trim()).toBe("ok");
+});
+
 test("a gate whose processes couldn't all be ended doesn't pass, whatever its command said (R9-2)", () => {
   const run = "\nsys.exit(run(";
   const command = handedCommand("exit 0", { task: "task-test", limitSec: 20, ends: "gate" });

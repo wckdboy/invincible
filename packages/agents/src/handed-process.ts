@@ -15,7 +15,7 @@ import { VM_GATES } from "@invincible/core";
  * - Any other command ("task"): what it leaves running (a server the next command uses) may go on while the task does.
  *   The helper writes each one's identity (pid, start time, boot) to the task's list, and when the task ends,
  *   `end_task` ends every process on that list that is still the same process, what each of them started since, and
- *   what has joined their process groups since.
+ *   what has joined their process groups since. A process whose leader thread has exited while another runs is one.
  *
  * No shell command, process id or path in it comes from a model: the command is an argument, and the task's list is
  * named by its id, which `handedCommand` checks. It runs as `/usr/bin/python3 -I`, named by its path: no shell function,
@@ -32,12 +32,23 @@ def proc_ok():
 def boot():
     return (PROC / "sys/kernel/random/boot_id").read_text().strip()
 
+def running(pid):
+    # Whether any thread of its runs: /proc says "Z" of a group whose leader thread alone has exited, its others running
+    # on (the eleventh fabric review's R11-1), so its leader's state alone isn't whether it is alive.
+    try:
+        for thread in (PROC / str(pid) / "task").iterdir():
+            if (thread / "stat").read_text().rsplit(")", 1)[1].split()[0] not in ("Z", "X"):
+                return True
+    except (FileNotFoundError, ProcessLookupError, PermissionError, NotADirectoryError, IndexError):
+        pass
+    return False
+
 def identity(pid):
     try:
         fields = (PROC / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()
     except (FileNotFoundError, ProcessLookupError, PermissionError, IndexError):
         return None
-    if fields[0] in ("Z", "X"):
+    if fields[0] in ("Z", "X") and not running(pid):
         return None
     return {"parent": int(fields[1]), "group": int(fields[2]), "start": fields[19]}
 
