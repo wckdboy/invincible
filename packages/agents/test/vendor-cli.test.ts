@@ -14,8 +14,17 @@ import { CLAUDE_BRIDGE, CODEX_BRIDGE } from "../src/vendor-cli.ts";
 
 // Every test here starts a bridge and a stand-in tool as processes of their own, so its time is the machine's to
 // give: "a result that is an error ends the run as failed" took 0.6 s alone and 5.0 s (bun's default limit) in a full
-// run at a load of 24 (27 November 2026). The limit is how long a busy machine may take, never what a test checks.
-setDefaultTimeout(20_000);
+// run at a load of 24 (27 November 2026), and "the tool is only ever asked its version…" ran past 20 s in a full run at
+// 72 to 151 on 12 cores. With 2 % of a core (what each of about 585 runnable tasks gets of 12) that one took 80.0 s, the
+// rest at most 34.2 s. The limit is how long a busy machine may take, never what a test checks: the one test whose
+// subject is a clock (a spent allowance ends the run within 15 s) keeps its own.
+setDefaultTimeout(150_000);
+/**
+ * How long a busy machine may take for the tool to say what a test waits for: 10 s ran out with 2 % of a core, where
+ * the "told as it works" tests then took at most 11.6 s. Well inside the file's limit, so a tool that never says it
+ * fails with what it did say.
+ */
+const WAIT_MS = 60_000;
 
 /*
  * The vendors' own CLIs as harnesses: Claude Code and Codex, each run headless and live by a bridge inside the agent's
@@ -526,7 +535,7 @@ function vm(tool: keyof typeof TOOLS, options: { installed?: boolean; signedIn?:
     return {
       seen,
       /** Until it has said what `find` looks for. */
-      until: async (find: (event: AgentEvent) => boolean, ms = 10_000) => {
+      until: async (find: (event: AgentEvent) => boolean, ms = WAIT_MS) => {
         const end = Date.now() + ms;
         while (!seen.some(find)) {
           if (Date.now() > end) throw new Error(`it never said what was waited for; it said ${JSON.stringify(seen)}`);
@@ -873,7 +882,7 @@ describe("Claude Code, told as it works", () => {
   test("words that come once its input has closed are said back late, never lost: its next run says them", async () => {
     const box = vm("claude");
     const run = box.start(OWN, "work", "lingering");
-    const end = Date.now() + 10_000;
+    const end = Date.now() + WAIT_MS;
     while (!box.trace().some((item) => item.eof) && Date.now() < end) await Bun.sleep(5);
     run.say("steer_0003", STEER);
     const done = await run.done();
@@ -1075,7 +1084,7 @@ describe("Codex, told as it works", () => {
   test("words that come once its input has closed are said back late, never lost: its next run says them", async () => {
     const box = vm("codex");
     const run = box.start(OWN, "work", "lingering");
-    const end = Date.now() + 10_000;
+    const end = Date.now() + WAIT_MS;
     while (!box.trace().some((item) => item.eof) && Date.now() < end) await Bun.sleep(5);
     run.say("steer_0007", STEER);
     const done = await run.done();
