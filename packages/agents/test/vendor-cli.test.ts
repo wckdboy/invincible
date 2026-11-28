@@ -1398,7 +1398,8 @@ describe("a seat's status", () => {
 });
 
 describe("a subscription's sign-in never reaches your agent", () => {
-  test("no shipped source names where either tool keeps its sign-in, but to tell a seat's tool its own home: nothing reads, copies or moves one", () => {
+  // (Its name begins as it always has: the re-checks' guard scripts run it by that.)
+  test("no shipped source names where either tool keeps its sign-in, but to tell a seat's tool its own home, and to seal a Gemini seat's and copy it in, whole: nothing reads one", () => {
     // Each tool's sign-in, and the variables that carry one: named nowhere.
     // (Antigravity's CLI keeps its sign-in in its OS keyring, or with none, as in every VM, in its profile in a file of
     // the first of these names: agy 1.5.18 reads and writes it there, strace showed on Ultra (the review of 28 November
@@ -1412,12 +1413,16 @@ describe("a subscription's sign-in never reaches your agent", () => {
       const lines = text.split("\n").filter((line) => line.includes(name));
       return lines.length === 1 && new RegExp(`^  if \\(kind === "[a-z-]+"\\) return \\{ ${name}: \`\\$\\{home\\}/[a-z]+\` \\};$`).test(lines[0]!);
     };
-    // And agy's sign-in is named in one place too: the one line of Antigravity's bridge that keeps it where agy keeps it,
-    // as the rest of agy's profile is reset at each start (the review of 28 November 2026, M2). It is kept, never read.
-    const KEEPS = "packages/agents/src/antigravity.ts";
-    const keepsAgyToken = (text: string) => {
-      const lines = text.split("\n").filter((line) => line.includes("antigravity-oauth-token"));
-      return lines.length === 1 && lines[0] === 'KEPT = {"antigravity-oauth-token": "file"}';
+    // And agy's sign-in is named in two places, a line each (design (a), 28 November 2026: the lead's call). Each copies
+    // it whole and never opens it for what it says, and nothing else of Invincible's names it, joined, escaped or plain.
+    const AGY_TOKEN_LINES: Readonly<Record<string, string>> = {
+      // The run's bridge: each start of agy on a seat copies the seat's sealed sign-in in under the name agy keeps it by
+      // (sealed_in), as agy's profile is emptied (the review's M2); in an agent's own VM, where you sign agy in yourself,
+      // it is the one file of the profile kept.
+      "packages/agents/src/antigravity.ts": 'TOKEN = "antigravity-oauth-token"',
+      // The sign-in's bridge: once agy says a sign-in took, its sign-in is sealed for the seat (seal), from the profile agy
+      // signed in to; one that didn't take writes nothing.
+      "packages/agents/src/seat-sign-in.ts": '        source = os.open(os.path.join(fresh, "antigravity-acp", "antigravity-oauth-token"), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)',
     };
     const root = new URL("../../../", import.meta.url).pathname;
     const sources: string[] = [];
@@ -1448,21 +1453,29 @@ describe("a subscription's sign-in never reaches your agent", () => {
         .replace(/(["'])([^"'\n]*)\1\s*\.join\(\s*\[([^\[\]\n]{1,400})\]\s*\)/g, (all, _q, by: string, list: string) => literals(list)?.join(by) ?? all)
         .replace(/(["'`])\s*\+\s*\1/g, "")
         .replace(/(["'])[ \t]+\1/g, "");
+    /** Whether a file names agy's sign-in on its allowed line alone: once as written, and once read as joined. */
+    const namesAgyTokenOnce = (rel: string, text: string) => {
+      const allowed = AGY_TOKEN_LINES[rel];
+      const naming = (t: string) => t.split("\n").filter((line) => line.includes("antigravity-oauth-token"));
+      return allowed !== undefined && [naming(text), naming(joined(text))].every((lines) => lines.length === 1 && lines[0] === allowed);
+    };
     for (const dir of ["packages", "apps/web/src", "sandbox", "integrations"]) walk(join(root, dir));
     expect(sources.length).toBeGreaterThan(100);
     const found = sources.flatMap((path) => {
       const text = readFileSync(path, "utf8");
       const rel = path.slice(root.length);
-      const named = [...kept, ...homes].filter((name) => (text.includes(name) || joined(text).includes(name)) && !(rel === POINTED && homes.includes(name) && pointsAtSeatHome(text, name)) && !(rel === KEEPS && name === "antigravity-oauth-token" && keepsAgyToken(text)));
+      const named = [...kept, ...homes].filter((name) => (text.includes(name) || joined(text).includes(name)) && !(rel === POINTED && homes.includes(name) && pointsAtSeatHome(text, name)) && !(name === "antigravity-oauth-token" && namesAgyTokenOnce(rel, text)));
       return named.map((name) => `${rel}: ${name}`);
     });
     expect(found).toEqual([]);
     // And the one place does say each, so this test holds what it says it holds.
     const pointed = readFileSync(join(root, POINTED), "utf8");
     for (const name of homes) expect([name, pointsAtSeatHome(pointed, name)]).toEqual([name, true]);
-    expect(keepsAgyToken(readFileSync(join(root, KEEPS), "utf8"))).toBe(true);
-    // (And nothing of the bridge opens, reads or copies it: its one use is to be kept as the rest goes.)
-    expect(ANTIGRAVITY_ACP_BRIDGE.match(/\bKEPT\b/g)).toHaveLength(2);
+    for (const rel of Object.keys(AGY_TOKEN_LINES)) expect([rel, namesAgyTokenOnce(rel, readFileSync(join(root, rel), "utf8"))]).toEqual([rel, true]);
+    // (And the run's bridge uses that name three times: its line, the file kept in an agent's own VM, and where the sealed
+    // sign-in is copied to. The sign-in's names it on its one line alone.)
+    expect(ANTIGRAVITY_ACP_BRIDGE.match(/\bTOKEN\b/g)).toHaveLength(3);
+    expect(ANTIGRAVITY_SIGN_IN.split("antigravity-oauth-token")).toHaveLength(2);
     // Nor do the bridges speak to anyone themselves, or say who the tool is: they start it and read it.
     for (const bridge of [CLAUDE_BRIDGE, CODEX_BRIDGE, ANTIGRAVITY_ACP_BRIDGE, ANTIGRAVITY_SIGN_IN]) expect(bridge).not.toMatch(/user.agent|urllib\.request|http\.client|\bsocket\b|\bcurl\b|\bwget\b/i);
   });

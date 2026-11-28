@@ -11,8 +11,9 @@
  *   {"type":"done","ok":true|false,"why":…}   how it ended: the tool said it was signed in, or why not
  *
  * Nothing it prints is a sign-in: a page's address, Codex's one-time code to type there, and what ended it. Claude Code's
- * code goes to the tool's own terminal and nowhere else (D7). The sign-in itself the tool keeps in the seat's home,
- * where nothing of Invincible's reads it; whether it holds is asked afterwards of the tool's own status command.
+ * code goes to the tool's own terminal and nowhere else (D7). The sign-in itself the tool keeps in the seat's home (a
+ * Gemini seat's, sealed beside it once it took: ANTIGRAVITY_SIGN_IN), where nothing of Invincible's reads it; whether it
+ * holds is asked afterwards of the tool's own status command.
  */
 
 const COMMON = String.raw`import json, os, re, select, signal, sys, time
@@ -207,42 +208,79 @@ main()
 `;
 
 /**
- * Antigravity (Google's agy): its own ACP sign-in, `agy acp --login`, in the seat's profile, as T3 Code signs it in
- * (pingdotgg/t3code, Drivers/AntigravityDriver.ts codeLogin; antigravityAuthSupport.ts): a remote session with no display,
- * so it prints Google's page, and reads from its input the code that page shows (Google's own callback page,
- * antigravity.google/oauth-callback, shows it). The code goes to agy alone, once; what it makes, agy keeps in the profile.
+ * Antigravity (Google's agy): its own ACP sign-in, `agy acp --login`, as T3 Code signs it in (pingdotgg/t3code,
+ * Drivers/AntigravityDriver.ts codeLogin; antigravityAuthSupport.ts): a remote session with no display, so it prints
+ * Google's page, and reads from its input the code that page shows (Google's own callback page,
+ * antigravity.google/oauth-callback, shows it). The code goes to agy alone, once; what it makes, agy keeps in a profile of
+ * its own, and once agy says it took, its sign-in is sealed: the seat's sealed sign-in (packages/sandbox, seatSealed),
+ * which each start of agy copies in (antigravity.ts).
  */
-export const ANTIGRAVITY_SIGN_IN = String.raw`${COMMON}import shutil, subprocess
+export const ANTIGRAVITY_SIGN_IN = String.raw`${COMMON}import shutil, stat, subprocess, tempfile
 ESCAPES = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 PAGE = re.compile(r"https://accounts\.google\.com/[^\s\x1b\"'<>]+")
 CODE = re.compile(r"[\w./~-]{1,2048}")
+def clear(path):
+    if os.path.islink(path) or (os.path.lexists(path) and not os.path.isdir(path)):
+        os.unlink(path)
+    elif os.path.isdir(path):
+        shutil.rmtree(path)
+# agy's sign-in, sealed: the file agy 1.5.18 keeps it in with no keyring, named here alone of the sign-in's code, copied
+# whole from the profile agy signed in to into the seat's sealed sign-in, and never opened for what it says (parsed,
+# printed, logged, hashed or sent). Written beside it, then put in its place at once, so the seat's sealed sign-in is
+# always one sign-in that took, whole: this one, or the one before it. Why not, if not: agy left no sign-in to keep, or it
+# couldn't be kept.
+def seal(fresh, sealed):
+    try:
+        source = os.open(os.path.join(fresh, "antigravity-acp", "antigravity-oauth-token"), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return "agy said it was signed in, but left no sign-in to keep"
+    held = os.fstat(source)
+    if not stat.S_ISREG(held.st_mode) or not held.st_size:
+        os.close(source)
+        return "agy said it was signed in, but left no sign-in to keep"
+    beside = os.path.join(sealed, ".sign-in.new")
+    try:
+        with os.fdopen(source, "rb") as blob:
+            clear(beside)
+            with os.fdopen(os.open(beside, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), "wb") as copy:
+                shutil.copyfileobj(blob, copy)
+                copy.flush()
+                os.fsync(copy.fileno())
+        os.replace(beside, os.path.join(sealed, "sign-in"))
+        folder = os.open(sealed, os.O_RDONLY)
+        try:
+            os.fsync(folder)
+        finally:
+            os.close(folder)
+    except OSError:
+        try:
+            clear(beside)
+        except OSError:
+            pass
+        return "agy signed in, but its sign-in couldn't be kept for the seat"
+    return None
 def main():
     sys.stdin.readline()
-    gemini = os.environ.get("INVINCIBLE_AGY_DIR", "")
-    if not gemini:
-        emit("done", ok=False, why="this VM names no Antigravity profile")
+    sealed = os.environ.get("INVINCIBLE_AGY_SEALED", "")
+    if not sealed or not os.path.isdir(sealed) or os.path.islink(sealed):
+        emit("done", ok=False, why="this VM has no sealed sign-in for the seat")
         return
     # As T3 Code's antigravityEnvironment: no key of yours, no display or browser, its updates off, a remote session.
     env = {k: os.environ[k] for k in ("PATH", "LANG", "LC_ALL", "TERM", "HOME", "USER") if k in os.environ}
     env.update({"AGY_CLI_DISABLE_AUTO_UPDATE": "true", "SSH_CONNECTION": "127.0.0.1 0 127.0.0.1 0"})
-    # A fresh sign-in starts from an empty profile: whatever a run left in the last one goes with it (the review of 28
-    # November 2026, M2). Each run's start resets it again, keeping its sign-in alone (antigravity.ts). It is made in a
-    # profile of its own beside the seat's, which stays as it was, signed in, until agy says the new one took; then the
-    # new one takes its place (the re-check of 28 November 2026, R10). Anything at either name, a link a run left among
-    # it, is taken away, never followed.
-    def clear(path):
-        if os.path.islink(path) or (os.path.lexists(path) and not os.path.isdir(path)):
-            os.unlink(path)
-        elif os.path.isdir(path):
-            shutil.rmtree(path)
-    fresh, before = gemini + ".signing-in", gemini + ".before"
-    for path in (fresh, before):
-        clear(path)
-    os.makedirs(fresh, mode=0o700)
+    # A fresh sign-in starts from an empty profile of its own, in this VM's memory (/tmp), which nothing else reaches: no
+    # run's VM has it, and it goes as the sign-in ends. Nothing a run left in the seat's home is in it (the review of 28
+    # November 2026, M2), and the seat's home is left as it is: each start of agy, a run's or a status check's, empties
+    # agy's profile there and copies in the seat's sealed sign-in (antigravity.ts). Only once agy says the new sign-in
+    # took is it sealed (seal), and this VM is the only one that can write the sealed sign-in (a run's VM and a status
+    # check's mount it read-only): a sign-in that didn't take, cancelled, lapsed or refused, writes nothing there, and the
+    # seat stays signed in as it was (the re-check of 28 November 2026, R10).
+    fresh = tempfile.mkdtemp(prefix="agy-sign-in-", dir="/tmp")
     argv = ["agy", "acp", "--gemini-dir", fresh, "--app-data-dir", "antigravity-acp", "--disable-telemetry", "--login"]
     try:
         child = subprocess.Popen(argv, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     except OSError:
+        shutil.rmtree(fresh, ignore_errors=True)
         emit("done", ok=False, why="agy isn't in this VM")
         return
     out, stdin = Lines(child.stdout.fileno()), Lines(sys.stdin.fileno())
@@ -305,12 +343,9 @@ def main():
         code = child.wait()
     ok = not why and code == 0
     if ok:
-        if os.path.lexists(gemini):
-            os.rename(gemini, before)
-        os.rename(fresh, gemini)
-        clear(before)
-    else:
-        clear(fresh)
+        why = seal(fresh, sealed) or ""
+        ok = not why
+    shutil.rmtree(fresh, ignore_errors=True)
     emit("done", ok=ok, **({} if ok else {"why": (why or "it ended without saying it was signed in")[:200]}))
 main()
 `;

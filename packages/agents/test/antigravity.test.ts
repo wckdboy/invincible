@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AGY_SIGN_IN, redact, TeamHarness } from "@invincible/core";
@@ -35,6 +35,8 @@ const PAGE = `https://accounts.google.com${AGY_SIGN_IN.path}?${new URLSearchPara
 const CODE = `4/0A${Array.from({ length: 69 }, (_, i) => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[(i * 37 + 11) % 64]).join("")}`;
 // (Where agy 1.5.18 keeps its sign-in with no keyring, as in every VM: its profile, in a file of this name; strace, on Ultra.)
 const TOKEN = "antigravity-oauth-token";
+/** Another Google account's sign-in, fake, as a run's command can put it in agy's profile in place of the seat's. */
+const SWAPPED = "FAKE-another-accounts-sign-in";
 
 const AGY_STAND_IN = `#!${PYTHON}
 import json, os, signal, sys, time
@@ -57,9 +59,11 @@ if args == ["--version"]:
 assert args[0] == "acp", args
 gemini = Path(args[args.index("--gemini-dir") + 1]) if "--gemini-dir" in args else Path.home() / ".gemini"
 data = gemini / (args[args.index("--app-data-dir") + 1] if "--app-data-dir" in args else "antigravity-cli")
+held = sorted(os.listdir(gemini)) if gemini.is_dir() else None
 data.mkdir(parents=True, exist_ok=True)
 token = data / "${TOKEN}"
 if "--login" in args:
+    record({"profileHeld": held})
     # As agy 1.5.x does with no display: Google's page, then the code that page shows, read from its input.
     sys.stdout.write("Open the following link to authenticate the ACP server: \\n${PAGE}\\n\\nEnter the authorization code: ")
     sys.stdout.flush()
@@ -68,7 +72,9 @@ if "--login" in args:
     line = sys.stdin.readline().strip()
     record({"code": line})
     if line == "${CODE}":
-        token.write_text("FAKE-token-the-bridge-never-reads")
+        # (Or, as no agy should, it says so and keeps no sign-in.)
+        if mode != "no-token":
+            token.write_text("FAKE-token-the-bridge-never-reads")
         print("authentication completed successfully")
         sys.exit(0)
     print("invalid_grant: the code is not valid")
@@ -87,6 +93,8 @@ for raw in sys.stdin:
              "agentCapabilities": {"loadSession": True, "promptCapabilities": {"image": True}}}})
     elif method == "authenticate":
         if token.exists():
+            # (Which sign-in it started on, said for these tests alone: fake, every one.)
+            record({"signedInAs": token.read_text()})
             out({"jsonrpc": "2.0", "id": said["id"], "result": {}})
         else:
             out({"jsonrpc": "2.0", "id": said["id"], "error": {"code": -32603, "message": "No browser is available here (this is a remote (SSH) session, so the browser's sign-in redirect can't reach this machine). Run \`agy acp --login\` in a terminal on this machine, then retry; or use a Gemini API key."}})
@@ -111,14 +119,21 @@ for raw in sys.stdin:
              "options": [{"optionId": "allow-once", "kind": "allow_once", "name": "Allow"}, {"optionId": "reject", "kind": "reject_once", "name": "Reject"}]}})
         granted = json.loads(sys.stdin.readline())
         record({"permission": granted.get("result")})
+        # (Or, as any command agy runs can, it puts another account's sign-in in place of the seat's.)
+        if mode == "swaps":
+            token.write_text("${SWAPPED}")
         # (Or, as a prompt or a repository can make agy do, its command prints the seat's sign-in.)
         update({"sessionUpdate": "tool_call_update", "toolCallId": "call-1", "status": "completed", "rawOutput": {"stdout": token.read_text() if mode == "prints-token" else "1 pass"}})
         update({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "All tests pass."}})
         out({"jsonrpc": "2.0", "id": said["id"], "result": {"stopReason": "end_turn", "usage": {"inputTokens": 1200, "outputTokens": 80}}})
 `;
 
-/** An agent's VM in miniature, or a seat's: the stand-in agy on PATH, a seat's home, and the trace of what agy was asked. */
-function vm(mode = "signed-out") {
+/**
+ * A seat's VM in miniature: the stand-in agy on PATH, the seat's home (agy's profile in it) and its sealed sign-in beside
+ * it, as the sandbox mounts them (seatEnv), and the trace of what agy was asked. Or (`own`) an agent's own VM, where you
+ * sign agy in yourself: its profile in the VM's HOME, and no sealed sign-in.
+ */
+function vm(mode = "signed-out", where: "seat" | "own" = "seat") {
   const dir = mkdtempSync(join(tmpdir(), "antigravity-"));
   dirs.push(dir);
   const bin = join(dir, "bin");
@@ -126,11 +141,49 @@ function vm(mode = "signed-out") {
   writeFileSync(join(bin, "agy"), AGY_STAND_IN);
   chmodSync(join(bin, "agy"), 0o700);
   writeFileSync(join(bin, "mode"), mode);
-  const home = join(dir, "seats", "seat-FAKE", "antigravity");
-  const env = { PATH: `${bin}:/usr/bin:/bin`, HOME: dir, LANG: "C.UTF-8", INVINCIBLE_AGY_DIR: home, DISPLAY: ":0", GEMINI_API_KEY: "FAKE-not-the-owners" };
+  const home = where === "seat" ? join(dir, "seats", "seat-FAKE", "antigravity") : join(dir, ".antigravity");
+  const sealed = where === "seat" ? join(dir, "seats", "seat-FAKE.sealed") : null;
+  if (sealed) mkdirSync(sealed, { recursive: true, mode: 0o700 });
+  const env = { PATH: `${bin}:/usr/bin:/bin`, HOME: dir, LANG: "C.UTF-8", ...(sealed ? { INVINCIBLE_AGY_DIR: home, INVINCIBLE_AGY_SEALED: sealed } : {}), DISPLAY: ":0", GEMINI_API_KEY: "FAKE-not-the-owners" };
   const trace = (): Record<string, unknown>[] => (existsSync(join(bin, "trace.jsonl")) ? readFileSync(join(bin, "trace.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line)) : []);
-  const signedIn = () => existsSync(join(home, "antigravity-acp", TOKEN));
-  return { dir, bin, home, env, trace, signedIn };
+  const signedIn = () => (sealed ? existsSync(join(sealed, "sign-in")) : existsSync(join(home, "antigravity-acp", TOKEN)));
+  return { dir, bin, home, sealed, env, trace, signedIn };
+}
+
+/** The seat signed in: its sealed sign-in, as a sign-in that took leaves it (fake). */
+function seal(box: ReturnType<typeof vm>, text: string) {
+  writeFileSync(join(box.sealed!, "sign-in"), text, { mode: 0o600 });
+}
+
+/** What the seat's sealed sign-in holds, by name, links not followed. */
+const sealedNow = (box: ReturnType<typeof vm>) => Object.fromEntries(readdirSync(box.sealed!).sort().map((name) => [name, lstatSync(join(box.sealed!, name)).isFile() ? readFileSync(join(box.sealed!, name), "utf8") : "(not a file)"]));
+
+/**
+ * A run's VM and a status check's mount the sealed sign-in read-only (packages/sandbox: seatSealed), so here its folder and
+ * its file are read-only for as long as one runs, and the bridge has to do with reading it.
+ */
+async function asMounted<T>(box: ReturnType<typeof vm>, go: () => Promise<T>): Promise<T> {
+  if (!box.sealed) return go();
+  const file = join(box.sealed, "sign-in");
+  const there = existsSync(file) && lstatSync(file).isFile();
+  if (there) chmodSync(file, 0o400);
+  chmodSync(box.sealed, 0o500);
+  try {
+    return await go();
+  } finally {
+    chmodSync(box.sealed, 0o700);
+    if (there) chmodSync(file, 0o600);
+  }
+}
+
+/** Its status check, as a status check's VM runs it (ANTIGRAVITY.check, passed whole), and what it said. */
+async function status(box: ReturnType<typeof vm>, command = ANTIGRAVITY.check) {
+  return asMounted(box, async () => {
+    const proc = Bun.spawn(["bash", "-c", command], { cwd: box.dir, env: box.env, stdout: "pipe", stderr: "pipe" });
+    const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    expect([proc.exitCode, /"type":\s*"status"/.test(stdout)]).toEqual([0, true]);
+    return ANTIGRAVITY.signIn!.read(stdout);
+  });
 }
 
 /** The sign-in bridge, run as the node runs it in a seat's VM: its JSON lines in and out. */
@@ -183,9 +236,11 @@ async function run(box: ReturnType<typeof vm>, extra = "", bridge = ANTIGRAVITY_
   writeFileSync(join(agent, "prompt.md"), "Fix the sum in calc.py, then run the tests.");
   writeFileSync(join(agent, "antigravity-acp.py"), bridge);
   const command = ANTIGRAVITY.command(OWN_SIGN_IN, null).replaceAll("/work/.agent", agent) + extra;
-  const proc = Bun.spawn(["bash", "-c", command], { cwd: join(box.dir, "work"), env: box.env, stdout: "pipe", stderr: "pipe" });
-  const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-  return { code: proc.exitCode, events: stdout.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>) };
+  return asMounted(box, async () => {
+    const proc = Bun.spawn(["bash", "-c", command], { cwd: join(box.dir, "work"), env: box.env, stdout: "pipe", stderr: "pipe" });
+    const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    return { code: proc.exitCode, events: stdout.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>) };
+  });
 }
 
 describe("its sign-in, ours to start and Google's to finish", () => {
@@ -201,11 +256,17 @@ describe("its sign-in, ours to start and Google's to finish", () => {
     expect(box.signedIn()).toBe(true);
     const [started] = box.trace();
     // T3 Code's login: agy's own ACP sign-in, a remote session with no display and no key of yours, in a profile of its own
-    // beside the seat's, which takes the seat's place once it took (the re-check's R10).
+    // in the VM's memory, which goes once agy's sign-in is sealed for the seat, whole, as agy left it.
+    const fresh = (started!.argv as string[])[2]!;
     expect(started).toEqual({
-      argv: ["acp", "--gemini-dir", `${box.home}.signing-in`, "--app-data-dir", "antigravity-acp", "--disable-telemetry", "--login"],
+      argv: ["acp", "--gemini-dir", fresh, "--app-data-dir", "antigravity-acp", "--disable-telemetry", "--login"],
       env: { SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0", AGY_CLI_DISABLE_AUTO_UPDATE: "true", DISPLAY: null, GEMINI_API_KEY: null, HOME: box.env.HOME },
     });
+    // (Python's own temporary names: tempfile's alphabet.)
+    expect(fresh).toMatch(/^\/tmp\/agy-sign-in-[a-z0-9_]{8}$/);
+    expect(existsSync(fresh)).toBe(false);
+    expect(sealedNow(box)).toEqual({ "sign-in": "FAKE-token-the-bridge-never-reads" });
+    expect(lstatSync(join(box.sealed!, "sign-in")).mode & 0o777).toBe(0o600);
     expect(box.trace().filter((item) => "code" in item)).toEqual([{ code: CODE }]);
     // It says agy took the code, and refuses the second as one already given: never the code itself.
     expect(s.said.map((line) => line.type)).toEqual(["card", "asks", "took", "refused", "done"]);
@@ -253,17 +314,11 @@ describe("its sign-in, ours to start and Google's to finish", () => {
 describe("its status, asked of agy itself: never a model call, never its token read", () => {
   test("signed out, then signed in: its version from its own initialize, and nothing but initialize and authenticate asked", async () => {
     const box = vm();
-    const check = async (command = ANTIGRAVITY.signIn!.seatCheck("salt-FAKE")) => {
-      const proc = Bun.spawn(["bash", "-c", command], { cwd: box.dir, env: box.env, stdout: "pipe", stderr: "pipe" });
-      const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-      // (A run's VM asks it as the readiness check, which reads only a status line: team-runtime.ts signedIn.)
-      expect([proc.exitCode, /"type":\s*"status"/.test(stdout)]).toEqual([0, true]);
-      return ANTIGRAVITY.signIn!.read(stdout);
-    };
+    // (A run's VM asks it as the readiness check, which reads only a status line: team-runtime.ts signedIn.)
+    const check = (command = ANTIGRAVITY.signIn!.seatCheck("salt-FAKE")) => status(box, command);
     expect(await check()).toEqual({ signedIn: false });
     expect(await check(ANTIGRAVITY.check)).toEqual({ signedIn: false });
-    mkdirSync(join(box.home, "antigravity-acp"), { recursive: true });
-    writeFileSync(join(box.home, "antigravity-acp", TOKEN), "FAKE-token-the-bridge-never-reads");
+    seal(box, "FAKE-token-the-bridge-never-reads");
     expect(await check()).toEqual({ signedIn: true, method: "signed in" });
     expect(await check(ANTIGRAVITY.check)).toEqual({ signedIn: true, method: "signed in" });
     const asked = box.trace().flatMap((item) => (typeof item.asked === "string" ? [item.asked] : []));
@@ -274,8 +329,7 @@ describe("its status, asked of agy itself: never a model call, never its token r
 describe("a run on it, as T3 Code drives agy", () => {
   test("agy acp in the seat's profile, our name said truthfully, signed in, its session and its work followed, a permission given once", async () => {
     const box = vm();
-    mkdirSync(join(box.home, "antigravity-acp"), { recursive: true });
-    writeFileSync(join(box.home, "antigravity-acp", TOKEN), "FAKE-token-the-bridge-never-reads");
+    seal(box, "FAKE-token-the-bridge-never-reads");
     const { code, events } = await run(box);
     expect(code).toBe(0);
     expect(events).toEqual(WORKED);
@@ -295,8 +349,7 @@ describe("a run on it, as T3 Code drives agy", () => {
     expect(out.code).toBe(1);
     expect(out.events).toEqual([{ type: "error", message: "Antigravity isn't signed in on this seat: sign the seat in again (its card), then retry" }]);
     const old = vm("old");
-    mkdirSync(join(old.home, "antigravity-acp"), { recursive: true });
-    writeFileSync(join(old.home, "antigravity-acp", TOKEN), "FAKE");
+    seal(old, "FAKE");
     const refused = await run(old);
     expect(refused.events).toEqual([{ type: "error", message: "Antigravity 1.5.0 is older than 1.5.1, the first that serves every ACP client" }]);
     expect(old.trace().some((item) => item.asked === "session/new")).toBe(false);
@@ -342,8 +395,7 @@ describe("Antigravity and the notes store", () => {
   const opened = (box: ReturnType<typeof vm>, method: string) => box.trace().filter((item) => item.asked === method).map((item) => (item.params as { mcpServers: unknown }).mcpServers);
   const signedIn = (mode?: string) => {
     const box = vm(mode);
-    mkdirSync(join(box.home, "antigravity-acp"), { recursive: true });
-    writeFileSync(join(box.home, "antigravity-acp", TOKEN), "FAKE-token-the-bridge-never-reads");
+    seal(box, "FAKE-token-the-bridge-never-reads");
     return box;
   };
 
@@ -478,8 +530,7 @@ describe("Antigravity's sign-in, printed", () => {
 
   test("a run whose command prints the seat's sign-in carries none of it, in any event the node reads", async () => {
     const box = vm("prints-token");
-    mkdirSync(join(box.home, "antigravity-acp"), { recursive: true });
-    writeFileSync(join(box.home, "antigravity-acp", TOKEN), JSON.stringify({ token: { access_token: ACCESS, token_type: "Bearer", refresh_token: REFRESH, id_token: ID_TOKEN, expiry: "2099-01-01T00:00:00Z" } }));
+    seal(box, JSON.stringify({ token: { access_token: ACCESS, token_type: "Bearer", refresh_token: REFRESH, id_token: ID_TOKEN, expiry: "2099-01-01T00:00:00Z" } }));
     const { code, events } = await run(box);
     expect(code).toBe(0);
     // The bridge passed them on as agy printed them; the node's reading of its lines takes them out.
@@ -491,13 +542,14 @@ describe("Antigravity's sign-in, printed", () => {
 });
 
 /*
- * Each start of agy is from the node's own profile: what a run left there goes, its sign-in and its sessions'
- * conversations stay (the review of 28 November 2026, M2). A session's brain goes too: agy 1.5.18 loads it as a
- * customization root, and hooks and MCP servers a run planted in it ran when the session was loaded (the re-check, R1,
- * on Ultra); a session loads with its conversation alone (measured there, and by the M2 probe).
+ * Each start of agy is from the node's own profile: what a run left there goes (the review of 28 November 2026, M2), its
+ * sign-in too on a seat, whose start's is the seat's sealed one; in an agent's own VM, where you sign agy in yourself,
+ * its sign-in alone stays. A session's brain goes: agy 1.5.18 loads it as a customization root, and hooks and MCP servers
+ * a run planted in it ran when the session was loaded (the re-check, R1, on Ultra); and so does its conversation, whose
+ * database brings back the MCP servers it was made with (its round 4).
  */
 describe("Antigravity's profile, reset", () => {
-  /** What a run on the seat may leave in agy's profile: its configuration, a skill, links out of it; and its sign-in and a session, which stay. */
+  /** What a run may leave in agy's profile: its configuration, a skill, a session, links out of it, and a sign-in. */
   const plant = (box: ReturnType<typeof vm>) => {
     const app = join(box.home, "antigravity-acp");
     for (const dir of ["conversations", "brain/sess-FAKE-0001/.agents/skills/planted", "brain/sess-FAKE-0001/_agents", "brain/sess-FAKE-0001/.system_generated/messages", "cli", "builtin/skills/planted"]) mkdirSync(join(app, dir), { recursive: true });
@@ -533,22 +585,26 @@ describe("Antigravity's profile, reset", () => {
   // was made with back as it is loaded (the re-check's round 4, on Ultra, 28 November 2026).
   const KEPT = ["antigravity-acp", `antigravity-acp/${TOKEN}`];
 
-  test("a run starts agy on its sign-in and its sessions' conversations alone: its configuration, skills, each session's brain and links gone, never what a link pointed at", async () => {
-    const box = vm();
-    plant(box);
-    expect((await run(box)).code).toBe(0);
-    expect(left(box.home)).toEqual([...KEPT, "tmp"]);
-    expect(readFileSync(join(box.home, "antigravity-acp", TOKEN), "utf8")).toBe("FAKE-old-token-never-read");
-    expect(readFileSync(join(box.dir, "outside.txt"), "utf8")).toBe("not agy's");
+  test("a run starts agy on its sign-in alone, a seat's sealed one or the one you signed in in your own VM: its configuration, skills, sessions and links gone, never what a link pointed at", async () => {
+    for (const where of ["seat", "own"] as const) {
+      const box = vm("signed-out", where);
+      plant(box);
+      if (where === "seat") seal(box, "FAKE-the-seats-sealed-sign-in");
+      expect([where, (await run(box)).code]).toEqual([where, 0]);
+      expect([where, left(box.home)]).toEqual([where, [...KEPT, "tmp"]]);
+      // On a seat, the sign-in left in agy's profile goes too, and its start's is the sealed one; in your own VM it stays.
+      expect([where, readFileSync(join(box.home, "antigravity-acp", TOKEN), "utf8")]).toEqual([where, where === "seat" ? "FAKE-the-seats-sealed-sign-in" : "FAKE-old-token-never-read"]);
+      expect(readFileSync(join(box.dir, "outside.txt"), "utf8")).toBe("not agy's");
+    }
   });
 
   test("so does its status check; and a run named an earlier session never loads it: it opens a new one", async () => {
     const box = vm();
     plant(box);
-    const proc = Bun.spawn(["bash", "-c", ANTIGRAVITY.check], { cwd: box.dir, env: box.env, stdout: "pipe", stderr: "pipe" });
-    const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    expect(stdout).toContain('"signedIn": true');
+    seal(box, "FAKE-the-seats-sealed-sign-in");
+    expect(await status(box)).toEqual({ signedIn: true, method: "signed in" });
     expect(left(box.home)).toEqual([...KEPT, "tmp"]);
+    expect(readFileSync(join(box.home, "antigravity-acp", TOKEN), "utf8")).toBe("FAKE-the-seats-sealed-sign-in");
     expect((await run(box, " --session sess-FAKE-0001")).events).toEqual(WORKED);
     expect(box.trace().map((item) => item.asked).filter((asked) => typeof asked === "string" && asked.startsWith("session/"))).toEqual(["session/new", "session/prompt"]);
   });
@@ -563,24 +619,26 @@ describe("Antigravity's profile, reset", () => {
       mkdirSync(join(box.home, ".."), { recursive: true });
       symlinkSync(work, box.home);
       if (how === "run") expect((await run(box)).events.at(-1)).toMatchObject({ type: "error", message: expect.stringContaining("isn't signed in") });
-      else {
-        const proc = Bun.spawn(["bash", "-c", ANTIGRAVITY.check], { cwd: box.dir, env: box.env, stdout: "pipe", stderr: "pipe" });
-        const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-        expect(stdout).toContain('"signedIn": false');
-      }
+      else expect(await status(box)).toEqual({ signedIn: false });
       expect([how, readFileSync(join(work, "repo", "unpushed.txt"), "utf8"), lstatSync(box.home).isSymbolicLink(), lstatSync(box.home).isDirectory()]).toEqual([how, "an hour of the agent's work", false, true]);
     }
   });
 
-  test("a fresh sign-in starts from an empty profile: what a run left goes, its old sign-in and sessions too", async () => {
+  test("a fresh sign-in starts from an empty profile of its own, in its VM's memory: nothing a run left is in it, and the seat's is left for the next start to empty", async () => {
     const box = vm();
     plant(box);
+    const planted = left(box.home);
     const s = signIn(box);
     s.tell({});
     await s.until("asks");
     s.tell({ code: CODE });
     expect(await s.done()).toEqual({ type: "done", ok: true });
-    expect(left(box.home)).toEqual(["antigravity-acp", `antigravity-acp/${TOKEN}`]);
+    expect(box.trace().find((item) => "profileHeld" in item)).toEqual({ profileHeld: [] });
+    expect(sealedNow(box)).toEqual({ "sign-in": "FAKE-token-the-bridge-never-reads" });
+    // The sign-in never touches the seat's profile: the next start empties it, a run's or (here) a status check's.
+    expect(left(box.home)).toEqual(planted);
+    expect(await status(box)).toEqual({ signedIn: true, method: "signed in" });
+    expect(left(box.home)).toEqual([...KEPT, "tmp"]);
     expect(readFileSync(join(box.home, "antigravity-acp", TOKEN), "utf8")).toBe("FAKE-token-the-bridge-never-reads");
     expect(readFileSync(join(box.dir, "outside.txt"), "utf8")).toBe("not agy's");
     // Nothing of it is left beside the seat's profile.
@@ -588,19 +646,82 @@ describe("Antigravity's profile, reset", () => {
   });
 
   // The re-check of 28 November 2026, R10: a sign-in made the seat's profile empty as it began, so one cancelled or
-  // lapsed left the seat with no sign-in and no sessions. It is made in a profile of its own, beside the seat's, which
-  // stays as it was until agy says the new one took.
-  test("a sign-in cancelled before it took leaves the seat's profile as it was: its sign-in and its sessions", async () => {
+  // lapsed left the seat with no sign-in. Now one that didn't take never writes the seat's sealed sign-in (the lead's
+  // word for design (a)): agy signs in to a profile of its own, and only a sign-in that took is sealed.
+  test("a sign-in that didn't take (its code refused, cancelled, or agy keeping no sign-in) never writes the seat's sealed sign-in: the seat stays signed in as it was", async () => {
+    for (const how of ["refused", "cancelled", "kept nothing"] as const) {
+      const box = vm(how === "kept nothing" ? "no-token" : "signed-out");
+      plant(box);
+      seal(box, "FAKE-the-owners-sign-in");
+      const before = [sealedNow(box), statSync(box.sealed!).mtimeMs, left(box.home)];
+      const s = signIn(box);
+      s.tell({});
+      await s.until("asks");
+      s.tell(how === "refused" ? { code: "4/0FAKE-wrong-000" } : how === "cancelled" ? { cancel: true } : { code: CODE });
+      const why = { refused: "it ended without saying it was signed in", cancelled: "cancelled", "kept nothing": "agy said it was signed in, but left no sign-in to keep" }[how];
+      expect([how, await s.done()]).toEqual([how, { type: "done", ok: false, why }]);
+      expect([how, sealedNow(box), statSync(box.sealed!).mtimeMs, left(box.home)]).toEqual([how, ...before]);
+      // Its own profile went with it.
+      expect([how, existsSync((box.trace()[0]!.argv as string[])[2]!)]).toEqual([how, false]);
+      expect([how, await status(box)]).toEqual([how, { signedIn: true, method: "signed in" }]);
+    }
+  });
+});
+
+/*
+ * A Gemini seat's sealed sign-in (design (a), 28 November 2026). Any command agy runs can put another Google account's
+ * sign-in in agy's profile in place of the seat's, and the reset kept it as agy's sign-in: every later start, other
+ * agents' on a shared seat too, ran on that account unseen. Now the seat's sign-in is sealed in a volume of its own,
+ * written only by the seat's sign-in, which a run's VM and a status check's mount read-only (packages/sandbox:
+ * seatSealed); and each start of agy empties its profile, its sign-in too, and copies the sealed one in, whole and never
+ * opened for what it says.
+ */
+describe("a Gemini seat's sealed sign-in", () => {
+  const OWNERS = "FAKE-the-owners-sign-in";
+  /** The sign-in each start of agy found in its profile, in order. */
+  const startedOn = (box: ReturnType<typeof vm>) => box.trace().flatMap((item) => ("signedInAs" in item ? [item.signedInAs] : []));
+
+  test("a run that swaps the seat's sign-in for another account's leaves it to no later start: the next starts on the sealed one, and the swapped copy is gone", async () => {
+    const box = vm("swaps");
+    // Signed in: agy's sign-in in its profile, as a sign-in left it before, and sealed beside it.
+    mkdirSync(join(box.home, "antigravity-acp"), { recursive: true });
+    writeFileSync(join(box.home, "antigravity-acp", TOKEN), OWNERS);
+    seal(box, OWNERS);
+    expect(await run(box)).toEqual({ code: 0, events: WORKED });
+    // Its command put another account's sign-in in agy's profile, as any command agy runs can.
+    expect(readFileSync(join(box.home, "antigravity-acp", TOKEN), "utf8")).toBe(SWAPPED);
+    writeFileSync(join(box.bin, "mode"), "signed-out");
+    expect(await run(box)).toEqual({ code: 0, events: WORKED });
+    expect(await status(box)).toEqual({ signedIn: true, method: "signed in" });
+    expect(startedOn(box)).toEqual([OWNERS, OWNERS, OWNERS]);
+    expect(readFileSync(join(box.home, "antigravity-acp", TOKEN), "utf8")).toBe(OWNERS);
+    expect(sealedNow(box)).toEqual({ "sign-in": OWNERS });
+  });
+
+  test("a seat with no sealed sign-in is signed out, whatever agy's profile holds: a sign-in a run left there, or one from before, is never started on", async () => {
     const box = vm();
-    plant(box);
-    const before = left(box.home);
-    const s = signIn(box);
-    s.tell({});
-    await s.until("asks");
-    s.tell({ cancel: true });
-    expect(await s.done()).toMatchObject({ type: "done", ok: false, why: "cancelled" });
-    expect(left(box.home)).toEqual(before);
-    expect(readFileSync(join(box.home, "antigravity-acp", TOKEN), "utf8")).toBe("FAKE-old-token-never-read");
-    expect(readdirSync(join(box.home, "..")).sort()).toEqual(["antigravity"]);
+    mkdirSync(join(box.home, "antigravity-acp"), { recursive: true });
+    writeFileSync(join(box.home, "antigravity-acp", TOKEN), SWAPPED);
+    expect((await run(box)).events).toEqual([{ type: "error", message: "Antigravity isn't signed in on this seat: sign the seat in again (its card), then retry" }]);
+    writeFileSync(join(box.home, "antigravity-acp", TOKEN), SWAPPED);
+    expect(await status(box)).toEqual({ signedIn: false });
+    expect(startedOn(box)).toEqual([]);
+    expect(existsSync(join(box.home, "antigravity-acp", TOKEN))).toBe(false);
+    expect(sealedNow(box)).toEqual({});
+  });
+
+  test("anything at the sealed sign-in but a file, a link, a pipe or a folder, is never followed, waited on or copied: the seat is signed out", async () => {
+    for (const what of ["a link", "a pipe", "a folder"] as const) {
+      const box = vm();
+      const at = join(box.sealed!, "sign-in");
+      writeFileSync(join(box.dir, "elsewhere"), "FAKE-not-the-seats-sign-in");
+      if (what === "a link") symlinkSync(join(box.dir, "elsewhere"), at);
+      else if (what === "a pipe") expect(Bun.spawnSync(["mkfifo", at]).exitCode).toBe(0);
+      else mkdirSync(at);
+      // (A pipe opened to read waits for a writer: the bridge would hang there, and the test with it, were it waited on.)
+      expect([what, await status(box)]).toEqual([what, { signedIn: false }]);
+      expect([what, (await run(box)).code, startedOn(box), existsSync(join(box.home, "antigravity-acp", TOKEN))]).toEqual([what, 1, [], false]);
+      expect([what, readFileSync(join(box.dir, "elsewhere"), "utf8")]).toEqual([what, "FAKE-not-the-seats-sign-in"]);
+    }
   });
 });

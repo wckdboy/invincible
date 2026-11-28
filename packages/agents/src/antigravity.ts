@@ -13,9 +13,13 @@ import { ACP_CLIENT, ACP_ENTRY, notesServer, readSignedIn, withNotes } from "./a
  * truthfully (invincible), authenticates with the profile's sign-in (oauth-personal) before anything else, as T3 Code
  * does, and runs nothing on an agy older than 1.5.1, the first that serves every ACP client. What agy asks permission
  * for is given once, as for every ACP agent: the VM is the boundary. agy keeps its sign-in in its OS keyring, and with
- * none (a VM has none) in a file of its own in the profile: nothing of Invincible's names, reads, copies or moves it.
+ * none (a VM has none) in a file of its own in the profile. Nothing of Invincible's reads it: on a seat, each start copies
+ * the seat's sealed sign-in into that file, whole and never opened for what it says (sealed_in), and in an agent's own VM
+ * the file is kept as the rest of the profile goes.
  */
 const BRIDGE = String.raw`
+import shutil, stat
+
 FIRST_FOR_EVERY_CLIENT = (1, 5, 1)
 
 def version_of(text):
@@ -25,14 +29,22 @@ def version_of(text):
     except ValueError:
         return None
 
-# What agy keeps of its own from one start to the next: its sign-in, and nothing else. The rest of its profile is
-# configuration (hooks, MCP servers, plugins, skills, rules, agents, settings), its built-in skills and its state, which
-# agy makes anew as it starts; a run may have left any of it there, to run commands or steer it. So are its sessions: it
-# loads a session's brain/<session>/ as a customization root (the re-check of 28 November 2026, R1), and a session's
-# conversations/<session>.db keeps the MCP servers that session was made with, which agy starts again at its next prompt
-# once it is loaded (its round 4, agy 1.5.18 on Ultra). So each start is from the node's own, which is none of it, each
-# run's session is a new one, and no link stays anywhere in it (the review of 28 November 2026, M2).
-KEPT = {"antigravity-oauth-token": "file"}
+# agy's sign-in: the one file agy 1.5.18 keeps it in with no keyring, as in every VM (its profile's antigravity-acp
+# folder; strace on Ultra). This is the one line of the run's code that names it, and nothing here opens it for what it
+# says: on a seat, each start copies the seat's sealed sign-in in under this name, whole (sealed_in); in an agent's own
+# VM, where you sign agy in yourself, it is kept as the rest of the profile goes.
+TOKEN = "antigravity-oauth-token"
+
+# What agy keeps of its own from one start to the next: on a seat, nothing, its sign-in included (a run's command can put
+# another Google account's there, and each start's is the seat's sealed one); in an agent's own VM, its sign-in alone.
+# The rest of its profile is configuration (hooks, MCP servers, plugins, skills, rules, agents, settings), its built-in
+# skills and its state, which agy makes anew as it starts; a run may have left any of it there, to run commands or steer
+# it. So are its sessions: it loads a session's brain/<session>/ as a customization root (the re-check of 28 November
+# 2026, R1), and a session's conversations/<session>.db keeps the MCP servers that session was made with, which agy starts
+# again at its next prompt once it is loaded (its round 4, agy 1.5.18 on Ultra). So each start is from the node's own,
+# which is none of it, each run's session is a new one, and no link stays anywhere in it (the review of 28 November 2026,
+# M2).
+KEPT = {TOKEN: "file"}
 
 def gone(path):
     if path.is_symlink() or not path.is_dir():
@@ -49,17 +61,35 @@ def unlinked(folder):
         elif inner.is_dir():
             unlinked(inner)
 
-def reset(gemini):
+def reset(gemini, kept):
     for path in list(gemini.iterdir()):
         if path.name != "antigravity-acp" or path.is_symlink() or not path.is_dir():
             gone(path)
             continue
         for inner in list(path.iterdir()):
-            kept = KEPT.get(inner.name)
-            if inner.is_symlink() or kept is None or (kept == "dir") != inner.is_dir():
+            keep = kept.get(inner.name)
+            if inner.is_symlink() or keep is None or (keep == "dir") != inner.is_dir():
                 gone(inner)
-            elif kept == "dir":
+            elif keep == "dir":
                 unlinked(inner)
+
+# The seat's sign-in, as its last sign-in that took sealed it (seat-sign-in.ts), copied whole into agy's emptied profile at
+# each start, where agy reads it and keeps its refreshed token: its bytes are never parsed, printed, logged, hashed or
+# sent. Only a sign-in writes the sealed one (a run's VM and a status check's mount it read-only), so what a run does to
+# this copy ends with it, and the next start's is the sealed one again. None sealed, or anything there but a file (never
+# followed, nor waited on): none is copied, and agy says it isn't signed in.
+def sealed_in(sealed, data):
+    try:
+        source = os.open(os.path.join(sealed, "sign-in"), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return
+    if not stat.S_ISREG(os.fstat(source).st_mode):
+        os.close(source)
+        return
+    with os.fdopen(source, "rb") as blob:
+        data.mkdir(exist_ok=True, mode=0o700)
+        with os.fdopen(os.open(str(data / TOKEN), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), "wb") as copy:
+            shutil.copyfileobj(blob, copy)
 
 class Bridge(Client):
     agent = "Antigravity"
@@ -69,13 +99,17 @@ class Bridge(Client):
     def run(self):
         args = self.args
         gemini = Path(args.gemini_dir or os.environ.get("INVINCIBLE_AGY_DIR") or os.path.join(os.path.expanduser("~"), ".antigravity"))
+        # (A seat's VM names the seat's sealed sign-in beside its home: packages/sandbox, seatEnv. An agent's own VM, none.)
+        sealed = os.environ.get("INVINCIBLE_AGY_SEALED", "")
         # A profile left as a link, or as anything but a folder (a run's command can replace it in the seat's volume), is
         # taken away, never followed, as a sign-in takes one away: else the reset would empty what it points at (the next
         # run's /work) and leave the link (the re-check of 28 November 2026, R2).
         if gemini.is_symlink() or (gemini.exists() and not gemini.is_dir()):
             gemini.unlink()
         gemini.mkdir(parents=True, exist_ok=True, mode=0o700)
-        reset(gemini)
+        reset(gemini, {} if sealed else KEPT)
+        if sealed:
+            sealed_in(sealed, gemini / "antigravity-acp")
         temp = gemini / "tmp"
         temp.mkdir(exist_ok=True, mode=0o700)
         # Deliberate allowlist, as T3 Code's antigravityEnvironment: no key of yours (GEMINI_API_KEY, GOOGLE_API_KEY), no
