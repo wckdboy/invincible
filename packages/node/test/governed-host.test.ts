@@ -68,6 +68,20 @@ describe("another node's task's VM, waiting for room (the fourth fabric review's
   });
 });
 
+describe("another node's task's gates' own user (the eighth fabric review's R8-3)", () => {
+  test("a command asked as the gates' user runs as it, from their own folder, behind the governor too; and only in a VM made for another node's task", async () => {
+    const { sandbox, docker } = host({ layout2: true, capacity: () => capacity({ cores: 32, memoryGb: 64, sandboxes: 4 }) });
+    const agent = await sandbox.create(request({ network: "gateway", persistent: true, run: "arm.team.abcdef0123.ada" }));
+    const vm = await sandbox.createTaskVm({ task: "task-abcdefghijkl", beside: agent.id, run: "handed.task-abcdefghijkl", providers: [], models: [], ttlMinutes: 60 });
+    await sandbox.exec(vm.id, ["test", "-f", "x"], 30, undefined, "gates");
+    expect(docker.execOptions.at(-1)).toEqual(["--user", "65534:65534", "--workdir", "/gates"]);
+    // (Its other commands, as the VMs' user, from /work, as ever.)
+    await sandbox.exec(vm.id, ["true"], 30);
+    expect(docker.execOptions.at(-1)).toEqual(["--workdir", "/work"]);
+    await expect(sandbox.exec(agent.id, ["true"], 30, undefined, "gates")).rejects.toThrow("only a VM made for another node's task has its gates' own user");
+  });
+});
+
 describe("every sandbox takes a slot first", () => {
   test("within the ceiling it starts; past it, it waits, and starts when one ends", async () => {
     const { sandbox, governor, docker } = host();

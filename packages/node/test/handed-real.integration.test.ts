@@ -99,8 +99,8 @@ kind=\${args[0]}
 [ "$kind" = run ] && case $all in *"${LABEL}.task="*) kind=run-task;; esac
 [ "$kind" = run ] || [ "$kind" = run-task ] || case $all in
   *given.bundle*) kind=take;; *"its workspace as it was given"*) kind=give;; *send-index*) kind=send;; *apply-index*) kind=apply;;
-  *tree-index*) kind=tree;; *"no such receive"*) kind=receive;; *"tagged()"*) kind=pipe-end;; *"test -f result-real.txt"*) kind=gate;;
-  *"> result-real.txt"*) kind=work;;
+  *tree-index*) kind=tree;; *"no such receive"*) kind=receive;; *"tagged()"*) kind=pipe-end;; *"its gates run on the tree alone"*) kind=copy;;
+  *gate-faker*|*PROFILE*) kind=work;; *"test -f result-real.txt"*) kind=gate;; *"> result-real.txt"*) kind=work;;
 esac
 printf '%s %s %s (+%s ms here)\\n' "$asked" "$kind" "$(printf '%q ' "\${args[@]:0:12}" | cut -c1-300)" "$(( $(date +%s%3N) - asked ))" >> "$LOG"
 case \${args[0]} in
@@ -114,7 +114,47 @@ exec "$REAL" "\${args[@]}"
   return { path: at, log };
 }
 
-/** The stand-in models: the engineer writes the task's file in one command, then says DONE; the reviewer passes. */
+/**
+ * What the stand-in engineer runs, by the task's goal (its first word): the work, writing the gate's file; or one of two
+ * ways a task could make its gate say it passed without it (the eighth fabric review's R8-3). It then says DONE, and the
+ * reviewer passes whatever it is shown.
+ */
+const WORK = {
+  TASK_REAL: "printf '%s\\n' real > result-real.txt",
+  // The review's PoC (zz-rc8-handed-profile): a login profile whose python3 says each gate passed, and makes the end of
+  // what the task left running a no-op, for each `bash -lc` the node runs in the task's VM.
+  TASK_PROFILE: [
+    "cat > \"$HOME/.bash_profile\" <<'PROFILE'",
+    "python3() {",
+    "  case \"$2\" in *'end_task(sys.argv[1])'*) return 0;; esac",
+    "  if [ \"$1\" = -c ] && [ \"$3\" = gate ]; then echo '(the gate, as this task tells it: passed)'; return 0; fi",
+    "  command python3 \"$@\"",
+    "}",
+    "PROFILE",
+    "echo profile written",
+  ].join("\n"),
+  // A process that outlives the freeze's end, as one does whose command ended its own helper first (FABRIC.md says it
+  // escapes that bound): it writes the gate's file in the task's worktree while a gate looks for it, and takes it away
+  // after, so the tree read before the gates and the one brought back after them never have it.
+  TASK_SURVIVOR: [
+    "cat > \"$TMPDIR/gate-faker.sh\" <<'FAKER'",
+    "while :; do",
+    "  if grep -qa 'test -f result-real[.]txt' /proc/[0-9]*/cmdline 2>/dev/null; then",
+    "    : > \"$1/result-real.txt\"",
+    "    while grep -qa 'test -f result-real[.]txt' /proc/[0-9]*/cmdline 2>/dev/null; do sleep 0.01; done",
+    "    rm -f \"$1/result-real.txt\"",
+    "  fi",
+    "  sleep 0.01",
+    "done",
+    "FAKER",
+    "setsid bash \"$TMPDIR/gate-faker.sh\" \"$PWD\" </dev/null >/dev/null 2>&1 &",
+    // (Its helper, the nearest of its ancestors that is a subreaper, ended: so it lists nothing this command started.)
+    // ([S]: so that this command's own words, in its shell's command line, never match.)
+    "p=$PPID; while [ \"$p\" -gt 1 ]; do if grep -qa 'PR_SET_CHILD_[S]UBREAPER' /proc/$p/cmdline 2>/dev/null; then kill -KILL $p; break; fi; p=$(cut -d' ' -f4 /proc/$p/stat); done",
+    "echo started",
+  ].join("\n"),
+} as const;
+type Work = keyof typeof WORK;
 const fence = "```";
 const models = Bun.serve({
   port: 0,
@@ -125,7 +165,8 @@ const models = Bun.serve({
     const sse = (delta: unknown) => new Response(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
     if (body.model === "reviewer") return sse({ content: "PASS\nThe gate passed after the work, and its evidence shows the file written." });
     if (body.model === "engineer") {
-      const command = "printf '%s\\n' real > result-real.txt";
+      const asked = JSON.stringify(body.messages);
+      const command = WORK[(Object.keys(WORK) as Work[]).find((work) => asked.includes(`${work}:`)) ?? "TASK_REAL"];
       const worked = turns.some((m) => m.role === "assistant" || m.role === "tool");
       if (body.tools?.length && !worked) return sse({ tool_calls: [{ index: 0, id: "call_work", function: { name: "bash", arguments: JSON.stringify({ command }) } }] });
       return sse({ content: worked ? "DONE\nThe file is written." : `${fence}sh\n${command}\n${fence}` });
@@ -176,25 +217,28 @@ for (const runtime of ["kata", "runc"] as const) {
       else process.env.INVINCIBLE_WORKSPACE_SOCKET = socketBefore;
     });
 
-    test("a task handed to beta's agent runs in a VM of its own beside hers, through its gates, review and bring-back, and comes back Proven", async () => {
-      const { callA, callB, b } = pair;
-      const stage: [string, number][] = [];
-      const mark = (what: string) => stage.push([what, Date.now()]);
-      mark("start");
-      // Ada's VM, and her repository in it as a clone would leave it, its origin her repository's (her VM has no network
-      // here: see above).
-      const { workspace } = await callB<{ workspace: { id: string; network: string; isolation: string } }>("provisionAgent", { id: "ada", desktop: false });
-      expect(workspace).toMatchObject({ network: "isolated", isolation: "vm" });
-      mark("her VM made");
-      const herVm = `${PREFIX}sbx-${workspace.id}`;
-      const seeded = docker("exec", "--workdir", "/work", herVm, "bash", "-lc", "set -e; git init -q -b main /work/repo; cd /work/repo; printf 'the project\\n' > README.md; printf 'one\\n' > app.txt; git add -A; git -c user.name=Owner -c user.email=owner@example.test commit -q -m first; git remote add origin https://github.com/you/project; git rev-parse HEAD");
-      expect([seeded.status, seeded.stderr.trim()]).toEqual([0, ""]);
-      mark("her repository made");
+    /** Ada's VM, and her repository in it as a clone would leave it, its origin her repository's (her VM has no network here: see above): made once. */
+    let hers: Promise<{ herVm: string; madeMs: number; seededMs: number }> | null = null;
+    const her = () =>
+      (hers ??= (async () => {
+        const began = Date.now();
+        const { workspace } = await pair.callB<{ workspace: { id: string; network: string; isolation: string } }>("provisionAgent", { id: "ada", desktop: false });
+        expect(workspace).toMatchObject({ network: "isolated", isolation: "vm" });
+        const made = Date.now();
+        const herVm = `${PREFIX}sbx-${workspace.id}`;
+        const seeded = docker("exec", "--workdir", "/work", herVm, "bash", "-lc", "set -e; git init -q -b main /work/repo; cd /work/repo; printf 'the project\\n' > README.md; printf 'one\\n' > app.txt; git add -A; git -c user.name=Owner -c user.email=owner@example.test commit -q -m first; git remote add origin https://github.com/you/project; git rev-parse HEAD");
+        expect([seeded.status, seeded.stderr.trim()]).toEqual([0, ""]);
+        return { herVm, madeMs: made - began, seededMs: Date.now() - made };
+      })());
 
-      const view = await callA<HandedView>("handTask", { node: "beta", goal: "TASK_REAL: write the file and prove it", gates: ["test -f result-real.txt"], agent: "ada" });
-      mark("handed");
+    /** A task handed to beta's agent, whose work is `work`, followed to its end on alpha; its stages and calls printed. */
+    async function handOff(work: Work) {
+      const { callA } = pair;
+      const { herVm, madeMs, seededMs } = await her();
+      const handedAt = Date.now();
+      const view = await callA<HandedView>("handTask", { node: "beta", goal: `${work}: write the file and prove it`, gates: ["test -f result-real.txt"], agent: "ada" });
       await until(async () => (await callA<HandedView>("handedTask", { id: view.id, after: 0 })).phase === "ended", 480_000, "the task ended");
-      mark("ended, on alpha");
+      const seenAt = Date.now();
       const done = await callA<HandedView>("handedTask", { id: view.id, after: 0 });
 
       // Its stages, as alpha saw them come back and as beta's Docker was asked them.
@@ -204,27 +248,28 @@ for (const runtime of ["kata", "runc"] as const) {
       });
       const first = (kind: string, after = 0) => calls.find((c) => c.kind === kind && c.at >= after)?.at;
       const last = (kind: string) => calls.filter((c) => c.kind === kind).at(-1)?.at;
-      const handedAt = stage.find(([what]) => what === "handed")![1];
       const taskVm = calls.find((c) => c.kind === "run-task" && c.at >= handedAt);
       const timeline: [string, number | undefined][] = [
         ["handed (alpha)", handedAt],
         ["task VM asked (run)", taskVm?.at],
         ["clone given (give)", first("give", handedAt)],
         ["clone made in it (take)", first("take", handedAt)],
+        ["first gates' copy (copy)", first("copy", handedAt)],
         ["first gate, before the work", first("gate", handedAt)],
         ["the work's command", first("work", handedAt)],
         ["first bring-back (send)", first("send", handedAt)],
+        ["last gates' copy", last("copy")],
         ["last bring-back's apply", last("apply")],
         ["last gate", last("gate")],
         ["review (trail)", done.trail.find((t) => t.text.startsWith("Review · "))?.at],
         ["ended on beta (alpha's view)", done.endedAt ?? undefined],
-        ["ended, seen on alpha", stage.find(([what]) => what === "ended, on alpha")![1]],
+        ["ended, seen on alpha", seenAt],
       ];
-      console.log(`\n${runtime}: her VM ${stage[1]![1] - stage[0]![1]} ms, her repository ${stage[2]![1] - stage[1]![1]} ms; from the hand-off:`);
+      console.log(`\n${runtime}, ${work}: her VM ${madeMs} ms, her repository ${seededMs} ms (made once); from the hand-off:`);
       for (const [what, at] of timeline) console.log(`  ${at === undefined ? "    —" : `${String(at - handedAt).padStart(6)} ms`}  ${what}`);
-      console.log(`  docker calls: ${calls.length}; trail:\n${done.trail.map((t) => `  ${String(t.at - handedAt).padStart(6)} ms  ${t.text.split("\n")[0]!.slice(0, 150)}`).join("\n")}`);
+      console.log(`  docker calls: ${calls.filter((c) => c.at >= handedAt).length}; trail:\n${done.trail.map((t) => `  ${String(t.at - handedAt).padStart(6)} ms  ${t.text.split("\n")[0]!.slice(0, 150)}`).join("\n")}`);
       // What the wrapper took itself, after the node asked (never counted above: each call is timed as it was asked).
-      const here = calls.map((c) => Number(/\(\+(\d+) ms here\)$/.exec(c.line)?.[1] ?? 0));
+      const here = calls.filter((c) => c.at >= handedAt).map((c) => Number(/\(\+(\d+) ms here\)$/.exec(c.line)?.[1] ?? 0));
       console.log(`  the wrapper's own time: at most ${Math.max(...here)} ms a call, ${here.reduce((a, b) => a + b, 0)} ms in all; the task VM's run +${/\(\+(\d+) ms here\)$/.exec(taskVm?.line ?? "")?.[1] ?? "?"} ms`);
       // Each call of the task's own, as it was asked: when, what, and in which VM (hers, or the task's).
       const vmOf = (line: string) => (line.includes(herVm) ? "hers" : new RegExp(`${PREFIX}sbx-[0-9a-f]+`).test(line) ? "task's" : "");
@@ -234,20 +279,47 @@ for (const runtime of ["kata", "runc"] as const) {
       // Nothing of anything else's was asked of Docker, and nothing reached it but through the wrapper.
       expect(existsSync(`${log}.refused`) ? readFileSync(`${log}.refused`, "utf8") : "").toBe("");
       if (STRAY) expect(existsSync(STRAY) ? readFileSync(STRAY, "utf8") : "").toBe("");
+      // Its work ran in a VM of its own beside hers, never in hers, and that VM is gone.
+      expect(taskVm).toBeDefined();
+      const workIn = calls.filter((c) => c.kind === "work" && c.at >= handedAt).map((c) => c.line);
+      expect(workIn.length).toBeGreaterThan(0);
+      expect(workIn.every((line) => !line.includes(herVm))).toBe(true);
+      expect(docker("ps", "-a", "--filter", `label=${LABEL}.node=${pair.b.identity.id}`, "--filter", `label=${LABEL}.task`, "--format", "{{.Names}}").stdout.trim()).toBe("");
+      return { done, herVm, gates: done.trail.filter((t) => t.text.startsWith("Gate ")).map((t) => t.text.split("\n").slice(0, 2).join(" / ").slice(0, 200)) };
+    }
+
+    test("a task handed to beta's agent runs in a VM of its own beside hers, through its gates, review and bring-back, and comes back Proven", async () => {
+      const { done, herVm } = await handOff("TASK_REAL");
       // Done, and Proven by beta's own signature: its gate failed before the work and passes after, another model reviewed.
       expect(done).toMatchObject({ phase: "ended", status: "done", agent: { id: "ada", name: "Ada" }, error: null });
       expect(done.proof).toEqual({ state: "checked", verified: true, ended: "done", proof: { before: [1], after: [0], review: "pass", sameModel: false } });
-      // Its work ran in a VM of its own beside hers, never in hers, and that VM is gone.
-      expect(taskVm).toBeDefined();
-      const workIn = calls.filter((c) => c.kind === "work").map((c) => c.line);
-      expect(workIn.length).toBeGreaterThan(0);
-      expect(workIn.every((line) => !line.includes(herVm))).toBe(true);
-      expect(docker("ps", "-a", "--filter", `label=${LABEL}.node=${b.identity.id}`, "--filter", `label=${LABEL}.task`, "--format", "{{.Names}}").stdout.trim()).toBe("");
       // Its changes came back to her worktree, and were read and kept there.
-      const there = (await callB<TeamSnapshot>("team")).tasks.find((t) => t.id === done.task);
+      const there = (await pair.callB<TeamSnapshot>("team")).tasks.find((t) => t.id === done.task);
       expect(there).toMatchObject({ status: "done", verified: true, assignee: "ada" });
       expect(docker("exec", herVm, "cat", `/work/tasks/${done.task}/result-real.txt`).stdout).toBe("real\n");
       expect(done.output).toContain("Changes: 1 file");
+    });
+
+    /*
+     * The eighth fabric review's R8-3: each node command in the task's VM ran as `bash -lc`, under the login profile the
+     * task writes there, so a task chose its gates' verdict. Now none reads a profile, the helper is the VM's own python3
+     * by its path, and its gates run as their own user on a copy of the tree: what each says is what its gate did.
+     */
+    test("R8-3: a task whose login profile says its gates pass comes back as its gates find it: not verified", async () => {
+      const { done, herVm, gates } = await handOff("TASK_PROFILE");
+      console.log(`  its gates, as its trail says them:\n    ${gates.join("\n    ")}`);
+      // (Checked against beta's signature, as any: what beta says is that its gate failed, so not verified.)
+      expect(done.proof).toMatchObject({ state: "checked", verified: false, proof: { before: [1], after: [1] } });
+      expect(gates.every((gate) => !gate.includes("as this task tells it"))).toBe(true);
+      expect(docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`).status).not.toBe(0);
+    });
+
+    test("R8-3: a process the freeze's end misses can't make a gate pass: the gates run as their own user, on a copy no process of the task's can reach", async () => {
+      const { done, herVm, gates } = await handOff("TASK_SURVIVOR");
+      console.log(`  its gates, as its trail says them:\n    ${gates.join("\n    ")}`);
+      // (Checked against beta's signature, as any: what beta says is that its gate failed, so not verified.)
+      expect(done.proof).toMatchObject({ state: "checked", verified: false, proof: { before: [1], after: [1] } });
+      expect(docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`).status).not.toBe(0);
     });
   });
 }

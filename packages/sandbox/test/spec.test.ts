@@ -147,6 +147,14 @@ describe("sandbox hardening", () => {
     expect(execArgs("0123456789", ["cat"], 30, { input: true })).toEqual(["exec", "--interactive", "--workdir", "/work", "invincible-sbx-0123456789", "timeout", "--signal=KILL", "30s", "cat"]);
   });
 
+  test("another node's task's gates run as their own user, from their own folder: a filesystem in memory of theirs alone, which a task's VM alone has (R8-3)", () => {
+    expect(execArgs("0123456789", ["test", "-f", "x"], 30, { as: "gates" }).slice(0, 6)).toEqual(["exec", "--user", "65534:65534", "--workdir", "/gates", "invincible-sbx-0123456789"]);
+    const tmpfs = (args: string[]) => args.filter((_, i) => args[i - 1] === "--tmpfs");
+    // (Mounted exec, unlike /tmp and HOME: a gate runs a tree's scripts. Its user's alone, mode 0700: the task's can't list it.)
+    expect(tmpfs(runArgs({ ...base, task: "task-abcdefghijkl", beside: "9876543210", ownHome: { path: "/usr/bin:/bin" } }))).toContain("/gates:rw,exec,nosuid,nodev,size=2g,uid=65534,gid=65534,mode=0700");
+    expect(tmpfs(runArgs(base)).some((mount) => mount.startsWith("/gates"))).toBe(false);
+  });
+
   test("requests default to the safe gateway mode, ephemeral, bounded TTL", () => {
     const parsed = SandboxRequest.parse({});
     expect(parsed).toMatchObject({ network: "gateway", persistent: false, ttlMinutes: 120, cpus: 4, memoryGb: 8 });

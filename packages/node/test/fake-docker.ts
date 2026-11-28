@@ -41,6 +41,8 @@ export interface FakeDocker {
   runner: DockerRunner;
   /** Every `docker exec` command, as the sandbox ran it (after its timeout wrapper). */
   execs: { container: string; cmd: string[] }[];
+  /** Each `docker exec`'s options, before its container (who it runs as, where it starts), in the order of `execs`. */
+  execOptions: string[][];
   /** Containers alive now, and the most there ever were at once. */
   running(): number;
   peak(): number;
@@ -77,6 +79,7 @@ export function fakeDocker(opts: { engine?: string } = {}): FakeDocker {
   const no = (stderr = "No such object") => ({ code: 1, stdout: "", stderr });
   const fake: FakeDocker = {
     execs: [],
+    execOptions: [],
     startMs: 0,
     running: () => [...containers.values()].filter((c) => c.status === "running").length,
     peak: () => peak,
@@ -172,6 +175,7 @@ export function fakeDocker(opts: { engine?: string } = {}): FakeDocker {
           const none = withoutInput([]);
           const cmd = none.every((part, i) => after[i] === part) ? after.slice(none.length) : after;
           fake.execs.push({ container, cmd });
+          fake.execOptions.push(rest.slice(0, at));
           const answer = (await fake.onExec?.(container, cmd)) ?? { code: 0, stdout: "" };
           // A lease the host wrote is kept where the VM's HOME is (its payload: the JSON, base64, its last argument).
           if (answer.code === 0 && cmd.some((part) => part.includes(LEASE_WRITE))) {

@@ -6,6 +6,14 @@
  */
 export const VM_WORK = "/work";
 export const VM_HOME = "/home/agent";
+/**
+ * Where another node's task's gates run in its VM (the eighth fabric review's R8-3): a filesystem in memory of their own
+ * user's alone (VM_GATES_USER, mode 0700), so nothing the task runs, as the VMs' user (1000), can list, write or move
+ * what is there, nor signal or trace what runs there. Unlike /tmp and HOME, what is there may run (a tree's scripts).
+ */
+export const VM_GATES = "/gates";
+/** The user another node's task's gates run as in its VM, uid:gid: nobody, never the VMs' user the task runs as. */
+export const VM_GATES_USER = "65534:65534";
 /** The lease's file in a VM's HOME: its gateway token and where its gateway is (JSON, never a shell's configuration). */
 export const LEASE_FILE = ".invincible-gateway.json";
 /** Where the agent's notes (Engram) are kept, in its HOME: in layout 2 a tree of their own in its store, mounted there. */

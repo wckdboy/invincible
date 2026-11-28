@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { desktopArgv, desktopBriefing, hardwareBriefing, LOOKING } from "./desktop-command.ts";
-import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, looksToNeedAScreen, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
+import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, looksToNeedAScreen, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_GATES, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
 import { seatVmClearCommand } from "./agent-process.ts";
@@ -10,7 +10,7 @@ import { commandsRun, DESKTOP_EVIDENCE, escalatedWhy, runLoop, stepsNamed, type 
 import { type Trip } from "./tripwires.ts";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
 import { HELD_GIT, heldGit } from "./held-git.ts";
-import { handedApply, handedDrop, handedGive, handedNonce, handedReceive, handedSend, handedSweep, handedTake, handedTree } from "./handed-repo.ts";
+import { handedApply, handedDrop, handedGates, handedGive, handedNonce, handedReceive, handedSend, handedSweep, handedTake, handedTree } from "./handed-repo.ts";
 import { runEvidence, runTrail } from "./skills-run.ts";
 
 /** What one run of an agent is given by the team service (node/team.ts) that starts it. */
@@ -69,6 +69,11 @@ const releasing = (vm: HandedVm) => ({ vm, [Symbol.asyncDispose]: () => vm.relea
  */
 export interface HandedVm {
   exec(command: string, timeoutSec: number, signal: AbortSignal): Promise<ExecResult>;
+  /**
+   * A command as its gates' own user, in their own folder (core's VM_GATES): its gates and the node's checks of its work,
+   * on a copy of its tree that user made (the eighth fabric review's R8-3). Nothing of the task's can reach either.
+   */
+  gates(command: string, timeoutSec: number, signal: AbortSignal): Promise<ExecResult>;
   follow?(offset: number, signal: AbortSignal): Promise<FollowedRun>;
   /**
    * What `fromAgent` prints in its agent's VM, given to `intoTask` in this one as its input, and the other way round
@@ -1042,6 +1047,52 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       /** Why its latest review's tree isn't the one its gates began on (I-b's gates); null when it is, or none ran. */
       let moved: string | null = null;
       const lastMoved = (): typeof moved => moved;
+      /**
+       * The tree another node's task's gates judge (the eighth fabric review's R8-3), read in its VM as each run of them
+       * begins (beforeGates): its clone's, or with no repository its folder's as their own user copied it then; or why there
+       * is none. Each gate, each check of the node's on what they judge (the digests of the test files they name) and, with
+       * no repository, its review's evidence then runs on a copy of that tree of its own, made by that user in their own
+       * folder and checked to be that tree: nothing of the task's reaches it, nor anything a gate before it left, as CI
+       * runs each job on a checkout of the tree that comes back.
+       */
+      let judged: { tree: string } | { why: string } | null = null;
+      const failed = (error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false });
+      const said = (r: ExecResult) => redact(r.stderr || r.stdout).trim().split("\n").at(-1)?.slice(0, 200) || "no reason given";
+      /** A copy of its tree, `was` (none yet: its folder as it is), made by its gates' own user and checked: where, and what it took. */
+      const copied = async (was: string): Promise<{ on: string; tree: string; ms: number } | { why: string; ms: number }> => {
+        const on = `${VM_GATES}/${handedNonce()}`;
+        const made = await own!.vm.gates(agent.repository ? handedGates(root, was, on) : handedGates(root, "", on, VM_GATES, was), 600, ctx.signal).catch(failed);
+        const tree = made.stdout.trim().split(" ")[2] ?? "";
+        if (made.exitCode !== 0 || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(tree) || (was !== "" && tree !== was)) return { why: `its gates' copy of its tree couldn't be made: ${said(made)}`, ms: made.durationMs };
+        return { on, tree, ms: made.durationMs };
+      };
+      /** What its gates judge, as their run begins: its clone's tree read in its VM; with no repository, its folder's, copied. */
+      const gatesBegin = async (): Promise<void> => {
+        judged = null;
+        if (agent.repository) {
+          const read = await own!.vm.exec(handedTree(root, base, task.id), 300, ctx.signal).catch(failed);
+          const tree = read.stdout.trim();
+          judged = gated = read.exitCode === 0 && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(tree) ? { tree } : { why: `its workspace's tree couldn't be read in its VM as its gates began: ${said(read)}` };
+          return;
+        }
+        const made = await copied("");
+        judged = "why" in made ? { why: made.why } : { tree: made.tree };
+      };
+      /** A gate, a check of the node's or the evidence of a task with no repository: on a copy of what its gates judge of its own. */
+      const onCopy = async (command: string, limit: number, what: "gate" | "check" | "evidence"): Promise<ExecResult> => {
+        // (Every run of its gates begins with beforeGates: one that didn't takes its tree as it is now.)
+        if (!judged) await gatesBegin();
+        const on = judged!;
+        const made = "why" in on ? { why: on.why, ms: 0 } : await copied(on.tree);
+        if ("why" in made) {
+          // (A check that can't be run finds no change: the gates, which can't run either, decide.)
+          if (what === "check") throw new Error(made.why);
+          return { exitCode: -1, stdout: "", stderr: made.why, durationMs: made.ms, truncated: false };
+        }
+        const ran = await own!.vm.gates(handedCommand(command, { task: task.id, limitSec: limit, ends: "gate", on: made.on }), limit + HANDED_MARGIN_SECONDS, ctx.signal);
+        // (Its copy's time is its own: what all of its gates may take in all counts it.)
+        return { ...ran, durationMs: ran.durationMs + made.ms };
+      };
       const keepStep = (step: number) => {
         const command = steps.command;
         void serially(async () => {
@@ -1071,7 +1122,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       };
       /** A command of the task's, in its workspace: in the agent's own VM (`exec`), or in the VM of the seat its coding tool runs on (`execOn`). */
       const inTask = (command: string) => withGateway(`mkdir -p ${quote(temp)} && export TMPDIR=${quote(temp)} && ${sees ? `export INVINCIBLE_EYES=${quote(sees)} && ` : ""}${space ? `export INVINCIBLE_EYES_SPACE=${quote(space)} && ` : ""}cd ${quote(root)} && ${engram ? engramShell(engram, home) : ""}${command}`);
-      const exec = async (command: string, timeout = 120, what?: "gate" | "evidence") => {
+      const exec = async (command: string, timeout = 120, what?: "gate" | "evidence" | "check") => {
         await onSide;
         // Another node's task's review's evidence, in a repository: read on its agent's side, on the tree its bring-back
         // made there just before (beforeEvidence), and never in its VM, whose processes are the task's own and could change
@@ -1087,9 +1138,16 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         const direct = deps.execArgv && !handed ? desktopArgv(command, sees, space) : null;
         if (direct) return deps.execArgv!(agent, ["desktop", ...direct], Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
         const limit = Math.min(timeout, TEAM_COMMAND_SECONDS);
-        // Another node's task runs each command under the handed helper: in a process group of its own, under its own
-        // deadline, what a gate started ended with it and what any other leaves running kept for the task's end.
-        if (handed) return inVm(inTask(handedCommand(command, { task: task.id, limitSec: limit, ends: what === "gate" ? "gate" : "task" })), limit + HANDED_MARGIN_SECONDS, ctx.signal);
+        if (handed) {
+          // Its gates and the node's checks of its work: on its gates' copy, as their own user (R8-3). So is its review's
+          // evidence with no repository, once its gates' run has made one; before, it is read in its VM, by no profile.
+          if (what === "gate" || what === "check" || (what === "evidence" && judged && "tree" in judged)) return onCopy(command, limit, what);
+          if (what === "evidence") return inVm(`cd ${quote(root)} && ${command}`, limit, ctx.signal);
+          // Each of its own commands under the handed helper, which runs first, by its path: in a process group of its own,
+          // under its own deadline, what it leaves running kept for the task's end. Its login shell comes after, inside the
+          // gateway's, so nothing it writes in its profile runs the helper (R8-3).
+          return inVm(handedCommand(inTask(command), { task: task.id, limitSec: limit, ends: "task" }), limit + HANDED_MARGIN_SECONDS, ctx.signal);
+        }
         return inVm(inTask(command), limit, ctx.signal);
       };
       /**
@@ -1289,17 +1347,15 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
               },
             }
           : {}),
-        // Before a submission's gates, for another node's task: everything of the task's in its VM ended first, so nothing
+        // Before each run of the gates, for another node's task: everything of the task's in its VM ended first, so nothing
         // of it runs under them or between them and the review's bring-back, and its clone's tree read there as they begin
         // (the lead's decision for I-b's gates, 28 November 2026). A task whose gates need a server starts it in the gate.
+        // They run on a copy of that tree, made by their own user (R8-3): what the end misses can't reach them either.
         ...(own
           ? {
               beforeGates: async () => {
                 await endHanded();
-                if (!agent.repository) return;
-                const read = await own.vm.exec(handedTree(root, base, task.id), 300, ctx.signal).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
-                const tree = read.stdout.trim();
-                gated = read.exitCode === 0 && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(tree) ? { tree } : { why: `its workspace's tree couldn't be read in its VM as its gates began: ${redact(read.stderr || read.stdout).trim().split("\n").at(-1)?.slice(0, 200) || "no reason given"}` };
+                await gatesBegin();
               },
             }
           : {}),

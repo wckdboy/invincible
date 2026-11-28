@@ -900,11 +900,22 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       repository, its review's evidence is read on its agent's side, on the tree brought back for it, and that tree is
       what is shipped as verified, nothing its VM had after it; the worktree there is checked to be that tree still, or
       the task isn't verified (the seventh re-review's I-b, `team-runtime.test.ts`); a task with no repository reads its
-      evidence in its VM, and ships nothing. Its gates run in its VM, on its clone: before a submission's gates
-      everything of the task's there is ended and its clone's tree read, and the review's tree must be that one, or the
-      task isn't verified, so nothing of the task's changes a file under its gates and ships. Their verdict isn't bound
-      yet: the gates, that end and that read run in its VM as `bash -lc`, under the login profile the task writes there,
-      so a task can make a gate that fails say it passed (the eighth re-review's R8-3, open). The
+      evidence on a copy of its folder as its gates' are made, or with no gates in its VM, and ships nothing. Before each
+      run of its gates everything of the task's in its VM is ended and the tree they judge read, its clone's (or its
+      folder's), and the review's tree must be that one, or the task isn't verified, so nothing of the task's changes a
+      file under its gates and ships. Its gates' verdict is theirs, never the task's (the eighth re-review's R8-3,
+      `handed-real.integration.test.ts` in Kata and runc, `handed-repo.test.ts`, `handed-process.test.ts`,
+      `team-runtime.test.ts`, `governed-host.test.ts`): each gate, and each check of the node's on what they judge,
+      runs on a copy of that tree of its own, made by the gates' own user (nobody, never the VMs' user the task runs
+      as) in their own folder, a filesystem in memory of theirs alone (`/gates`, 0700), its objects hashed as they come
+      from the clone (`index-pack`), with a HOME and temporary folder of its own, `env -i` but a PATH of the VM's
+      read-only folders, and of the login profiles only the image's own `/etc/profile`. No process of the task's, one
+      its end missed among them, can list, write or move what is there, or signal or trace what runs there, and no gate
+      sees what one before it left. Every other command of the node's in that VM reads no profile (`bash --noprofile
+      --norc`), and the handed helper and its end run as `/usr/bin/python3 -I` by its path; the task's own commands get
+      their login shell inside the helper. A gate gets the tree that comes back, as CI's job gets a checkout: what the
+      task installed or built in its worktree outside that tree, its lease and its HOME are not there, and a link out of
+      the tree is refused. A gate whose command runs the task's code runs it as the gates' user, for that run alone. The
       VM goes as the task ends, however it ends, and with it everything the task started there. When its task's work
       ends (a revocation among its ends: your brake), its lease ends and its VM is removed at once, the command in
       flight there with it, never once that command returns (the fifth re-review's I-1, `task-vms.test.ts`). Its lease
@@ -925,7 +936,7 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       In the VM (Linux) the helper is the command's subreaper while it lives. What a gate starts ends with the gate;
       what its other commands leave running, its coding tool's included, is listed and ended with the task however it
       ends (R3-5). A command that ends or stops its own helper, or a process that double-forks out of it, escapes that
-      bound, but not the task's VM (R3-1, closed).
+      bound, but not the task's VM (R3-1, closed), and reaches none of its gates (R8-3, above).
     - The runner stops it at its call's deadline or after 24 hours, whichever comes first. A stop that can't be
       written (the node stopping, or a write that fails) ends its call all the same, answered as failed (the third
       re-review's R3-2). A task you take up again by its id is held to 24 hours from then (R3-6).

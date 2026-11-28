@@ -18,7 +18,7 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
   /** How often its engine was asked which VMs are other nodes' tasks'. */
   let listed = 0;
   for (const id of options.left ?? []) vms.set(id, { createdAt: STARTED - 60_000, run: `handed.task-${id}` });
-  const asked: unknown[] = [], ran: { vm: string; cmd: string[] }[] = [], removed: string[] = [];
+  const asked: unknown[] = [], ran: { vm: string; cmd: string[]; as?: "gates" }[] = [], removed: string[] = [];
   /** Each pipe between two VMs, as the host was asked for it: from which VM's command to which. */
   const piped: { from: { id: string; cmd: string[] }; to: { id: string; cmd: string[] }; maxBytes: number }[] = [];
   /** Each step of a removal, in order: a lease ended, a VM removed. */
@@ -42,8 +42,8 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
       return { id } as SandboxView;
     },
     // (A command that takes `slow` ms, as one in flight does: it returns then, whatever became of its VM meanwhile.)
-    exec: async (vm: string, cmd: string[]) => {
-      ran.push({ vm, cmd });
+    exec: async (vm: string, cmd: string[], _timeoutSec?: number, _check?: unknown, as?: "gates") => {
+      ran.push({ vm, cmd, ...(as ? { as } : {}) });
       if (options.slow) await Bun.sleep(options.slow);
       return done();
     },
@@ -88,10 +88,14 @@ describe("another node's task's VM, on this node", () => {
     // (Asked for with its work's own signal: one that ends while it waits for room has none made. I-2.)
     expect(h.signals).toEqual([work.signal]);
     await vm.exec("echo one", 30, new AbortController().signal);
-    expect(h.ran).toEqual([{ vm: "vm-1", cmd: ["bash", "-lc", "echo one"] }]);
+    // (A shell that reads no profile of the task's: its HOME is the task's to write. R8-3.)
+    expect(h.ran).toEqual([{ vm: "vm-1", cmd: ["bash", "--noprofile", "--norc", "-c", "echo one"] }]);
+    // Its gates and the node's checks, as their own user, in their own folder, by no profile either.
+    await vm.gates("test -f x", 30, new AbortController().signal);
+    expect(h.ran.at(-1)).toEqual({ vm: "vm-1", cmd: ["bash", "--noprofile", "--norc", "-c", "test -f x"], as: "gates" });
     await vm.release();
     // Its run stopped (the same cleanup as a seat's), then its VM removed; released again, nothing more.
-    expect(h.ran.at(-1)!.cmd.join(" ")).toContain("bash -lc");
+    expect(h.ran.at(-1)!.cmd.slice(0, 4)).toEqual(["bash", "--noprofile", "--norc", "-c"]);
     expect(h.removed).toEqual(["vm-1"]);
     await vm.release();
     expect(h.removed).toEqual(["vm-1"]);
@@ -197,9 +201,11 @@ describe("another node's task's VM, on this node", () => {
     const vm = await vms.open(ask, work.signal);
     await vm.receive("give", "take", 900, work.signal);
     await vm.send("send", "receive", 900, work.signal);
+    // (Each side's command in a shell that reads no profile, the task's VM's or its agent's: R8-3.)
+    const sh = (command: string) => ["bash", "--noprofile", "--norc", "-c", command];
     expect(h.piped).toEqual([
-      { from: { id: "agent-vm", cmd: ["bash", "-lc", "give"] }, to: { id: "vm-1", cmd: ["bash", "-lc", "take"] }, maxBytes: Number.POSITIVE_INFINITY },
-      { from: { id: "vm-1", cmd: ["bash", "-lc", "send"] }, to: { id: "agent-vm", cmd: ["bash", "-lc", "receive"] }, maxBytes: HANDED_CHANGES_BYTES },
+      { from: { id: "agent-vm", cmd: sh("give") }, to: { id: "vm-1", cmd: sh("take") }, maxBytes: Number.POSITIVE_INFINITY },
+      { from: { id: "vm-1", cmd: sh("send") }, to: { id: "agent-vm", cmd: sh("receive") }, maxBytes: HANDED_CHANGES_BYTES },
     ]);
     const stopped = new AbortController();
     stopped.abort();

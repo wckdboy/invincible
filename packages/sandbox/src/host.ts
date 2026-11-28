@@ -695,9 +695,9 @@ export class SandboxHost {
     return this.apple ? containerCannot(ask) : null;
   }
 
-  /** A command's arguments in a sandbox, for this host's engine. */
-  private commandArgs(id: string, cmd: string[], timeoutSec: number): string[] {
-    return this.apple ? containerExecArgs(id, cmd, timeoutSec) : execArgs(id, cmd, timeoutSec);
+  /** A command's arguments in a sandbox, for this host's engine (`as`: execArgs; Docker's alone, as task VMs are). */
+  private commandArgs(id: string, cmd: string[], timeoutSec: number, as?: "gates"): string[] {
+    return this.apple ? containerExecArgs(id, cmd, timeoutSec) : execArgs(id, cmd, timeoutSec, as ? { as } : {});
   }
 
   /** Removing a sandbox's container (or VM), whatever it is doing. */
@@ -2258,12 +2258,13 @@ export class SandboxHost {
   /**
    * A command in one of this node's sandboxes. `check`: what its caller holds it to (whose run it is, what reaches it),
    * asked of the same look the command takes, before anything else is said of it; what it throws is the answer, and
-   * nothing runs.
+   * nothing runs. `as`: "gates", as another node's task's gates' own user, in their own folder (execArgs), which only a
+   * VM made for such a task has (the eighth fabric review's R8-3).
    */
-  async exec(id: string, cmd: string[], timeoutSec = 600, check?: (sandbox: SandboxView) => void): Promise<ExecResult> {
+  async exec(id: string, cmd: string[], timeoutSec = 600, check?: (sandbox: SandboxView) => void, as?: "gates"): Promise<ExecResult> {
     this.busy.set(id, (this.busy.get(id) ?? 0) + 1);
     try {
-      return await this.execNow(id, cmd, timeoutSec, check);
+      return await this.execNow(id, cmd, timeoutSec, check, as);
     } finally {
       const left = (this.busy.get(id) ?? 1) - 1;
       if (left > 0) this.busy.set(id, left);
@@ -2440,7 +2441,7 @@ export class SandboxHost {
     }
   }
 
-  private async execNow(id: string, cmd: string[], timeoutSec: number, check?: (sandbox: SandboxView) => void): Promise<ExecResult> {
+  private async execNow(id: string, cmd: string[], timeoutSec: number, check?: (sandbox: SandboxView) => void, as?: "gates"): Promise<ExecResult> {
     // The VM's own `desktop` command alone goes to its held session where it has one: the same command, its answer
     // the same, in milliseconds; while the session is open the VM is running, so no listing comes first.
     const held = cmd[0] === "desktop" && cmd.length > 1 ? this.sessions.get(id) : undefined;
@@ -2448,9 +2449,10 @@ export class SandboxHost {
     if (!sandbox) throw new SandboxError("no such sandbox on this node", 404);
     check?.(sandbox);
     if (sandbox.status !== "running") throw new SandboxError(`sandbox is ${sandbox.status}`, 409);
+    if (as === "gates" && (this.apple || !sandbox.task)) throw new SandboxError("only a VM made for another node's task has its gates' own user", 409);
     const started = performance.now();
     let result: Run | null = null;
-    if (cmd[0] === "desktop" && cmd.length > 1 && sandbox.image.includes("desktop")) {
+    if (!as && cmd[0] === "desktop" && cmd.length > 1 && sandbox.image.includes("desktop")) {
       await this.desktopRoom(sandbox, String(cmd[1]));
       const session = this.desktopSession(sandbox);
       try {
@@ -2460,19 +2462,19 @@ export class SandboxHost {
         // (One that ended before it answered was no session: the command is run as any other.)
         if (!(error instanceof SessionEnded) || session?.answered) result = { code: 1, stdout: "", stderr: `desktop: ${(error as Error).message}\n`, truncated: false };
       }
-    } else if (sandbox.image.includes("desktop")) {
+    } else if (!as && sandbox.image.includes("desktop")) {
       // A desktop verb in a shell command (a look, or one inside a longer command) may start the desktop too: room first.
       const verb = desktopVerbIn(cmd);
       if (verb) await this.desktopRoom(sandbox, verb);
     }
-    result ??= await this.docker(this.commandArgs(id, cmd, timeoutSec), (timeoutSec + 15) * 1000);
+    result ??= await this.docker(this.commandArgs(id, cmd, timeoutSec, as), (timeoutSec + 15) * 1000);
     this.opts.ledger({
       class: "modify",
       resource: "sandbox.exec",
       target: sandbox.name,
       verdict: "allow",
       run: sandbox.run,
-      detail: `${truncateLedgerDetail(redact(cmd.join(" ")))} → exit ${result.code}`,
+      detail: `${truncateLedgerDetail(redact(cmd.join(" ")))}${as ? " (as its gates' user)" : ""} → exit ${result.code}`,
     });
     return {
       exitCode: result.code,

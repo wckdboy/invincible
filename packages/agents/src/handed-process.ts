@@ -1,3 +1,5 @@
+import { VM_GATES } from "@invincible/core";
+
 /*
  * The processes of another node's task (fabric/handoff.ts) in its agent's VM: none outlives what it was started for.
  *
@@ -5,14 +7,18 @@
  * On Linux (the VMs) the helper is also the command's subreaper, so a process the command started that left its group
  * (setsid) and was orphaned is reparented to it rather than to init, and is still found.
  *
- * - A gate ("gate"): when its command ends, or its time does, every process it started is ended with it.
+ * - A gate ("gate"): when its command ends, or its time does, every process it started is ended with it. On its copy
+ *   (`on`, the eighth fabric review's R8-3), it runs in that copy's tree, in a shell given an environment of its own
+ *   alone (that copy's HOME and temporary folder, and a PATH of the VM's folders on a read-only filesystem) and of the
+ *   login profiles only the image's own, /etc/profile, which puts the image's tools on that PATH: none from a HOME.
  * - Any other command ("task"): what it leaves running (a server the next command uses) may go on while the task does.
  *   The helper writes each one's identity (pid, start time, boot) to the task's list, and when the task ends,
  *   `end_task` ends every process on that list that is still the same process, what each of them started since, and
  *   what has joined their process groups since.
  *
  * No shell command, process id or path in it comes from a model: the command is an argument, and the task's list is
- * named by its id, which `handedCommand` checks.
+ * named by its id, which `handedCommand` checks. It runs as `/usr/bin/python3 -I`, named by its path: no shell function,
+ * PATH or module of the task's (a `json.py` where it starts, a `.pth` of its user's) stands in for it or runs in it.
  */
 export const HANDED_PROCESS_PY = String.raw`import json, os, signal, sys, time
 from pathlib import Path
@@ -108,7 +114,21 @@ def keep(task, group):
         for pid in sorted(left):
             out.write(json.dumps({"pid": pid, "start": procs[pid]["start"], "group": procs[pid]["group"], "boot": b}) + "\n")
 
-def run(mode, task, limit, command):
+def held_path():
+    # The VM's PATH, its folders on a read-only filesystem alone, in order: none the task's user can write (its HOME,
+    # /work and /tmp are each a filesystem of their own), so nothing of the task's stands in for a tool a gate runs.
+    # With none, a folder that isn't there: an empty PATH would be read as the gate's own folder, the task's tree.
+    kept = []
+    for d in os.environ.get("PATH", "").split(":"):
+        if d.startswith("/") and d not in kept:
+            try:
+                if os.statvfs(d).f_flag & os.ST_RDONLY:
+                    kept.append(d)
+            except OSError:
+                pass
+    return ":".join(kept) or "/nonexistent"
+
+def run(mode, task, limit, command, on=""):
     if sys.platform.startswith("linux"):
         try:
             import ctypes
@@ -124,6 +144,11 @@ def run(mode, task, limit, command):
         try:
             os.close(told)
             os.setpgid(0, 0)
+            if on:
+                # A gate on its copy (R8-3): in its tree, with nothing of the VM's environment but its read-only PATH, and of
+                # its login profiles only the image's own (/etc/profile, on its read-only root), which puts its tools on it.
+                os.chdir(os.path.join(on, "tree"))
+                os.execve("/bin/bash", ["bash", "--noprofile", "--norc", "-c", "[ -r /etc/profile ] && . /etc/profile >/dev/null 2>&1\n" + command], {"PATH": held_path(), "HOME": os.path.join(on, "home"), "TMPDIR": os.path.join(on, "tmp"), "LANG": "C.UTF-8"})
             os.execvp("bash", ["bash", "-c", command])
         except BaseException as e:
             try:
@@ -196,20 +221,27 @@ const TASK_ID = /^[A-Za-z0-9_-]{1,80}$/;
 /** The seconds a handed command's helper gets past its own deadline before the VM's own one (execArgs) ends it. */
 export const HANDED_MARGIN_SECONDS = 10;
 
+/** The helper's Python, named by its path and isolated (-I: no PYTHON* variable, user site or module where it starts). */
+const PY = "/usr/bin/python3 -I";
+/** A gate's copy of its task's tree (VM_GATES, handed-repo.ts handedGates): a folder of its own there. */
+const ON = new RegExp(`^${VM_GATES}/[0-9a-f]{32}$`);
+
 /**
  * `command` as another node's task runs it: in a process group of its own, under its own deadline, its processes
- * ended with it (a gate) or kept on the task's list for its end (any other command).
+ * ended with it (a gate) or kept on the task's list for its end (any other command). A gate `on` its copy runs in that
+ * copy's tree with an environment of its own alone (R8-3).
  */
-export function handedCommand(command: string, opts: { task: string; limitSec: number; ends: "gate" | "task" }): string {
+export function handedCommand(command: string, opts: { task: string; limitSec: number; ends: "gate" | "task"; on?: string }): string {
   if (!TASK_ID.test(opts.task)) throw new Error("not a task id");
+  if (opts.on !== undefined && (opts.ends !== "gate" || !ON.test(opts.on))) throw new Error("not a gate's copy");
   const limit = Math.max(1, Math.floor(opts.limitSec));
-  return `python3 -c ${quote(`${HANDED_PROCESS_PY}\nsys.exit(run(sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]))`)} ${opts.ends} ${quote(opts.task)} ${limit} ${quote(command)}`;
+  return `${PY} -c ${quote(`${HANDED_PROCESS_PY}\nsys.exit(run(*sys.argv[1:3], float(sys.argv[3]), *sys.argv[4:6]))`)} ${opts.ends} ${quote(opts.task)} ${limit} ${quote(command)}${opts.on ? ` ${opts.on}` : ""}`;
 }
 
 /** Ends what another node's task left running in its VM, once the task has ended (its list, by identity). */
 export function handedEndCommand(task: string): string {
   if (!TASK_ID.test(task)) throw new Error("not a task id");
-  return `python3 -c ${quote(`${HANDED_PROCESS_PY}\nsys.exit(end_task(sys.argv[1]))`)} ${quote(task)}`;
+  return `${PY} -c ${quote(`${HANDED_PROCESS_PY}\nsys.exit(end_task(sys.argv[1]))`)} ${quote(task)}`;
 }
 
 /** The tasks whose lists a VM keeps (what they left running): their ids, one a line. */

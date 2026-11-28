@@ -64,13 +64,19 @@ export interface RunDeps {
     turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[]; audit?: boolean },
   ): Promise<{ text: string; model: string; skipped?: { model: string; error: string }[]; calls?: ClientCall[]; carry?: string }>;
   /**
-   * Run one shell command in the run's workspace. `what`: a gate's (its processes may be ended with it), or one of the
-   * review's evidence (read where the work is kept, which may be elsewhere than where it is done: team-runtime.ts I-b).
+   * Run one shell command in the run's workspace. `what`: a gate's (its processes may be ended with it), one of the
+   * review's evidence (read where the work is kept, which may be elsewhere than where it is done: team-runtime.ts I-b), or
+   * a check of the run's own on what the gates judge (the digests of the test files they name), which may be run where
+   * they are (another node's task's: on its gates' copy, R8-3).
    */
-  exec(command: string, timeoutSec: number, what?: "gate" | "evidence"): Promise<ExecResult>;
+  exec(command: string, timeoutSec: number, what?: "gate" | "evidence" | "check"): Promise<ExecResult>;
   /** Before each review's evidence is read, once: where it is read elsewhere than the work is done, the work is taken there. */
   beforeEvidence?(): Promise<void>;
-  /** Before a submission's gates run, once: where the work's own processes could change it under them, they are ended. */
+  /**
+   * Before each run of the gates, once (the baseline's with the locked test files' digests, a contract's, a submission's
+   * with its check of them): where the work's own processes could change it under them, they are ended, and where the
+   * gates run on a copy of the work (another node's task's, R8-3), it is made.
+   */
   beforeGates?(): Promise<void>;
   /** Fixed cleanup for this worker, available even after ordinary execution is cancelled. */
   stopAgent?(): Promise<void>;
@@ -1589,12 +1595,15 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
   const submit = async (summary: string, trail: Step[]): Promise<{ verdict: "pass" | "revise"; notes: string; conclusion?: string; by: "gates" | "reviewer" }> => {
     await deps.alive?.();
     emit({ type: "submitted", summary });
+    // (What runs of the work's own is ended first, where it would run on under the gates: nothing changes what they
+    // judge while they run, nor between them and the review. Where they run on a copy, it is made: the check below too.)
+    if (gates.length) await deps.beforeGates?.();
     // The test files the gates name are the contract: work that changed one goes back before any gate runs on it.
     if (locked.size) {
       check();
       let now: Map<string, string> | null = null;
       try {
-        now = digestsOf((await deps.exec(digestCommand([...locked.keys()]), 30)).stdout);
+        now = digestsOf((await deps.exec(digestCommand([...locked.keys()]), 30, "check")).stdout);
       } catch {
         /* the sandbox can't be asked: the gates, which run there too, decide */
       }
@@ -1605,9 +1614,6 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       }
     }
     if (gates.length) {
-      // (What runs of the work's own is ended first, where it would run on under the gates: nothing changes what they
-      // judge while they run, nor between them and the review.)
-      await deps.beforeGates?.();
       const results = await runGates();
       if (results.some((g) => g.exitCode !== 0)) return { verdict: "revise", notes: gateNotes(results), by: "gates" };
     }
@@ -2038,9 +2044,11 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     // Each gate once as the workspace stands, before anything is paid for: what its passing afterwards can show.
     // The test files the gates name, as they are before any work: those there now are locked (one the work is to write isn't).
     const named = [...new Set(gates.flatMap((g) => testFilesOf(g.command)))];
+    // (Where the gates run on a copy of the workspace, it is made as it stands now: the digests below and the baseline's.)
+    if (gates.length) await deps.beforeGates?.();
     if (named.length) {
       try {
-        locked = digestsOf((await deps.exec(digestCommand(named), 30)).stdout);
+        locked = digestsOf((await deps.exec(digestCommand(named), 30, "check")).stdout);
       } catch {
         /* the sandbox can't be asked: nothing is locked, and the gates decide as ever */
       }
@@ -2093,6 +2101,8 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
           tell(rules, block, wrote.exitCode);
         }
         const gate: Gate = { command, by: "planner" };
+        // (Its gate runs on the workspace as it wrote it: where the gates run on a copy, one made now.)
+        if (wrote?.exitCode === 0) await deps.beforeGates?.();
         const now = wrote?.exitCode === 0 ? (await runGate(gate, rules)).result : null;
         const why = there.length
           ? `its test would change ${there.join(", ")}, which is there already`

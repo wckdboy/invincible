@@ -33,6 +33,12 @@ let hold: { tag: string; entered: boolean; release: () => void; done: Promise<vo
 const docker = fakeDocker({ engine: "27.3.1" });
 docker.onExec = async (_container, command) => {
   const text = command.join("\n");
+  // Its gates' copy of its tree (handed-repo.ts handedGates, as their own user: R8-3), made: its files, its bytes, and the
+  // tree it was asked for (its agent has no repository: the folder's, the one it was told, or else one of its own).
+  if (text.includes("its gates run on the tree alone")) {
+    const [, tree, , was] = [...text.matchAll(/ '([^']*)'/g)].map((m) => m[1]!).slice(-4);
+    return { code: 0, stdout: `1 1 ${tree || was || "c".repeat(40)}` };
+  }
   const gate = /gate-([a-z]+)/.exec(text)?.[1];
   if (gate) return written.has(gate) ? { code: 0, stdout: "the file is there" } : { code: 1, stdout: "", stderr: "no such file" };
   const write = /write-([a-z]+)/.exec(text)?.[1];

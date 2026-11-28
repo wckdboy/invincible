@@ -1,4 +1,4 @@
-import { type SandboxNetwork, type SeatKind, VM_HOME, VM_WORK } from "@invincible/core";
+import { type SandboxNetwork, type SeatKind, VM_GATES, VM_GATES_USER, VM_HOME, VM_WORK } from "@invincible/core";
 import { HOME_TREE, LAYOUT_ENV, NOTES_TREE, VM_NOTES, WORK_TREE } from "./layout.ts";
 import { collectCommand } from "./walk.ts";
 
@@ -292,6 +292,8 @@ export function runArgs(spec: SandboxSpec): string[] {
     // Its HOME: /work in layout 1; in layout 2 its own tree, and with it where it installs for itself and its PATH. One
     // that shares a workspace has one of its own, in memory (its notes' tree, when it has it, is mounted inside it).
     ...(spec.ownHome ? ["--tmpfs", `${VM_HOME}:rw,nosuid,nodev,size=1g,uid=1000,gid=1000,mode=0700`] : []),
+    // Another node's task's gates' own folder, their user's alone, where a tree's scripts may run (R8-3: VM_GATES).
+    ...(spec.task ? ["--tmpfs", `${VM_GATES}:rw,exec,nosuid,nodev,size=2g,uid=${VM_GATES_USER.split(":")[0]},gid=${VM_GATES_USER.split(":")[1]},mode=0700`] : []),
     ...((spec.layout ?? spec.ownHome) ? Object.entries({ ...LAYOUT_ENV, PATH: (spec.layout ?? spec.ownHome)!.path }).flatMap(([key, value]) => ["--env", `${key}=${value}`]) : ["--env", "HOME=/work"]),
     // Bounded resources: a runaway agent cannot starve the host.
     "--cpus",
@@ -357,12 +359,13 @@ export const collectArgs = (id: string, path: string): string[] => execArgs(id, 
  * runc; Ultra, 28 November 2026, Q5's audit), and a command that read its input never saw it end. `sh` execs into the
  * command, so the deadline's process group and what it starts stay as they were (withoutInput). A command given input as
  * it runs (`input`: a stream held open) keeps `--interactive`, and reads what it is given; a pipe's sides are pipeArgs'.
+ * `as`: "gates", as another node's task's gates' own user, from their own folder (VM_GATES, a task's VM's alone: the
+ * eighth fabric review's R8-3), never as the VMs' user the task's commands run as.
  */
-export const execArgs = (id: string, cmd: string[], timeoutSec: number, opts: { input?: boolean } = {}): string[] => [
+export const execArgs = (id: string, cmd: string[], timeoutSec: number, opts: { input?: boolean; as?: "gates" } = {}): string[] => [
   "exec",
   ...(opts.input ? ["--interactive"] : []),
-  "--workdir",
-  "/work",
+  ...(opts.as === "gates" ? ["--user", VM_GATES_USER, "--workdir", VM_GATES] : ["--workdir", "/work"]),
   containerName(id),
   "timeout",
   "--signal=KILL",

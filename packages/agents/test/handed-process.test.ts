@@ -1,6 +1,6 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { endLeftovers, HANDED_LISTS_COMMAND, HANDED_PROCESS_PY, handedCommand, handedEndCommand } from "../src/handed-process.ts";
@@ -163,9 +163,7 @@ test("a gate's command makes its process group itself before it runs, so no call
 
 test("a command it can't start is said, and is 127", () => {
   // (No bash where its PATH looks, as an exec the kernel refuses would be: the helper's own python3 named by its path.)
-  const python = Bun.which("python3");
-  expect(python).not.toBeNull();
-  const command = handedCommand("exit 0", { task: "task-test", limitSec: 20, ends: "gate" }).replace(/^python3 /, `${python} `);
+  const command = handedCommand("exit 0", { task: "task-test", limitSec: 20, ends: "gate" });
   const ran = spawnSync("/bin/bash", ["-c", command], { encoding: "utf8", timeout: 30_000, env: { PATH: "/nonexistent" } });
   expect([ran.status, ran.stderr.trim()]).toEqual([127, "(Its command couldn't be started: No such file or directory.)"]);
 });
@@ -240,12 +238,72 @@ print("ok")
 
 test("its commands are fixed: the command and the task are arguments, and a task id is checked", () => {
   const made = handedCommand("echo 'quoted' $HOME", { task: "task-abc_1", limitSec: 42.9, ends: "task" });
-  expect(made.startsWith("python3 -c '")).toBe(true);
+  expect(made.startsWith("/usr/bin/python3 -I -c '")).toBe(true);
   expect(made).toContain(" task 'task-abc_1' 42 'echo '\\''quoted'\\'' $HOME'");
   expect(handedEndCommand("task-abc_1").endsWith(" 'task-abc_1'")).toBe(true);
   for (const bad of ["../x", "a b", "", "x".repeat(81)]) {
     expect(() => handedCommand("true", { task: bad, limitSec: 1, ends: "gate" })).toThrow("not a task id");
     expect(() => handedEndCommand(bad)).toThrow("not a task id");
+  }
+  // A gate's copy is one of GATES_DIR's, by a name the node made, and only a gate runs on one.
+  const on = `/gates/${"0a".repeat(16)}`;
+  expect(handedCommand("true", { task: "task-abc_1", limitSec: 5, ends: "gate", on }).endsWith(` 'true' ${on}`)).toBe(true);
+  for (const bad of ["/gates/x", "/tmp/0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a", `${on}/..`, `${on} ; true`]) expect(() => handedCommand("true", { task: "task-abc_1", limitSec: 5, ends: "gate", on: bad })).toThrow("not a gate's copy");
+  expect(() => handedCommand("true", { task: "task-abc_1", limitSec: 5, ends: "task", on })).toThrow("not a gate's copy");
+});
+
+/*
+ * The eighth fabric review's R8-3: the task's VM is its own to write, its HOME and its workspace among it, so nothing the
+ * node runs there may take a program or a setting from either. The review's PoC wrote a ~/.bash_profile whose python3
+ * said each gate passed; a json.py where the helper starts would do the same, imported before the helper's own.
+ */
+test("a gate's helper is the VM's own python3, by its path: a python3 the task's login profile defines doesn't answer for it (R8-3)", () => {
+  const s = scratch();
+  try {
+    writeFileSync(s.path(".bash_profile"), 'python3() { echo "passed, said the task"; return 0; }\n');
+    const ran = spawnSync("bash", ["-lc", handedCommand("echo ran; exit 3", { task: "task-test", limitSec: 20, ends: "gate" })], { encoding: "utf8", timeout: 30_000, env: { ...process.env, HOME: s.path("") } });
+    expect([ran.status, ran.stdout.trim()]).toEqual([3, "ran"]);
+  } finally {
+    s.done();
+  }
+});
+
+test("a module where its helper starts isn't run by it: it is python3 -I (R8-3)", () => {
+  const s = scratch();
+  try {
+    writeFileSync(s.path("json.py"), `import os\nopen(${JSON.stringify(s.path("planted-ran"))}, "w").close()\nos._exit(0)\n`);
+    const ran = spawnSync("bash", ["-c", handedCommand("echo ran; exit 3", { task: "task-test", limitSec: 20, ends: "gate" })], { cwd: s.path(""), encoding: "utf8", timeout: 30_000 });
+    expect([ran.status, ran.stdout.trim(), existsSync(s.path("planted-ran"))]).toEqual([3, "ran", false]);
+  } finally {
+    s.done();
+  }
+});
+
+test("a gate on its copy runs in the copy's tree, its HOME and TMPDIR the copy's own, with nothing else of the VM's environment (R8-3)", () => {
+  const s = scratch();
+  try {
+    // (handedCommand's `on` is a folder of GATES_DIR's, which only a task's VM has: here the helper's own run() is given a scratch one.)
+    const on = realpathSync(s.path(""));
+    for (const sub of ["tree", "home", "tmp", "bin"]) mkdirSync(join(on, sub));
+    // What the task could leave for it: a profile and an rc in that HOME, a BASH_ENV, and a tool of its own first on the PATH.
+    writeFileSync(join(on, "home", ".bash_profile"), "ls() { echo profile; }\n");
+    writeFileSync(join(on, "home", ".bashrc"), "ls() { echo rc; }\n");
+    writeFileSync(join(on, "bin", "ls"), "#!/bin/sh\necho planted\n", { mode: 0o755 });
+    writeFileSync(join(on, "env.sh"), "ls() { echo bash_env; }\n");
+    const gate = 'printf "%s\\n" "$PWD" "$HOME" "$TMPDIR" "$LANG" "${FOO-unset}" "${BASH_ENV-unset}"; type -t ls; command -v ls || echo none; case ":$PATH:" in *":' + join(on, "bin") + ':"*) echo "planted on PATH";; esac';
+    const ran = spawnSync("python3", ["-I", "-c", `${HANDED_PROCESS_PY}\nsys.exit(run("gate", "task-test", 20.0, sys.argv[1], sys.argv[2]))`, gate, on], {
+      encoding: "utf8",
+      timeout: 30_000,
+      env: { ...process.env, FOO: "bar", BASH_ENV: join(on, "env.sh"), HOME: join(on, "home"), PATH: `${join(on, "bin")}:${process.env.PATH}` },
+    });
+    expect(ran.stderr).toBe("");
+    const said = ran.stdout.trim().split("\n");
+    expect(said.slice(0, 6)).toEqual([join(on, "tree"), join(on, "home"), join(on, "tmp"), "C.UTF-8", "unset", "unset"]);
+    // (Its ls is the system's, a file: where every folder on the PATH is read-only, as a VM's are; none here is planted.)
+    expect(said.slice(6).filter((line) => /profile|rc|bash_env|planted/.test(line))).toEqual([]);
+    expect(said[6]).not.toBe("function");
+  } finally {
+    s.done();
   }
 });
 

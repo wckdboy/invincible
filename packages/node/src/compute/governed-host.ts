@@ -67,11 +67,14 @@ export class GovernedSandboxHost extends SandboxHost {
     return running;
   }
 
-  /** A command in an agent's VM: its threads count against the ceiling while it runs, and a while after (the governor's `work`). */
-  override async exec(id: string, cmd: string[], timeoutSec?: number, check?: Parameters<SandboxHost["exec"]>[3]): Promise<ExecResult> {
+  /**
+   * A command in an agent's VM: its threads count against the ceiling while it runs, and a while after (the governor's
+   * `work`). `check`, and `as` (the user it runs as: another node's task's gates'), go to the host as they came.
+   */
+  override async exec(id: string, cmd: string[], timeoutSec?: number, check?: Parameters<SandboxHost["exec"]>[3], as?: Parameters<SandboxHost["exec"]>[4]): Promise<ExecResult> {
     const ended = this.governed.governor.work(id);
     try {
-      return await super.exec(id, cmd, timeoutSec, check);
+      return await super.exec(id, cmd, timeoutSec, check, as);
     } finally {
       ended();
     }

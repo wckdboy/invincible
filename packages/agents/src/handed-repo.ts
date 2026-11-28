@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { VM_GATES } from "@invincible/core";
 import { heldGit } from "./held-git.ts";
 
 /*
@@ -474,6 +475,133 @@ ref = 'refs/invincible/give/'+task
 if git(root,'rev-parse','-q','--verify',ref).returncode == 0 and git(root,'update-ref','-d',ref).returncode:
     sys.exit('its given workspace could not be let go')`;
 
+/**
+ * In the task's VM, as its gates' own user (the eighth fabric review's R8-3): a copy of the task's tree at `on`, a folder of
+ * its own in the gates' (VM_GATES), for one gate or one check of the node's, with a HOME and a temporary folder of its own
+ * beside it. Every earlier folder there goes first, so nothing one gate (whose command may run the task's code) leaves
+ * there reaches the next.
+ *
+ * - In a repository: the tree `tree`'s objects, from the task's clone, each hashed as the copy's own repository takes them
+ *   (`index-pack`), so what is checked out is that tree, whatever the clone holds or does meanwhile, and the clone, its
+ *   configuration among it, runs nothing (no fetch of any kind). Its `.git` is the copy's own: an index of that tree,
+ *   and HEAD a commit of it with no history.
+ * - With no repository (`tree` ""): the task's folder, copied as this user can read it now (only files, folders and
+ *   links: no FIFO, socket or device), and that copy's tree as git hashes it, which must be `was` when it is given (the
+ *   folder's as its gates began).
+ * - A link that points out of the tree (an absolute one, or one up past its top) is refused: the gates run on the tree
+ *   alone, and out of it is the task's to write.
+ *
+ * It prints how many files the copy holds, their bytes, and its tree.
+ */
+const GATES_SCRIPT = `root, tree, on, was = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+import stat
+hexed = lambda t: re.fullmatch('[0-9a-f]{40}|[0-9a-f]{64}', t)
+if not re.fullmatch('[0-9a-f]{32}', os.path.basename(on)) or not os.path.isabs(on) or (tree and not hexed(tree)) or (was and (tree or not hexed(was))):
+    sys.exit('not a copy for its gates')
+top = os.path.dirname(on)
+def drop(path):
+    def again(fn, p, _):
+        try:
+            os.chmod(os.path.dirname(p), 0o700)
+            if not os.path.islink(p): os.chmod(p, 0o700)
+            fn(p)
+        except OSError:
+            pass
+    shutil.rmtree(path, onerror=again)
+for name in os.listdir(top):
+    path = os.path.join(top, name)
+    if path == on: continue
+    if os.path.isdir(path) and not os.path.islink(path): drop(path)
+    else:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+os.mkdir(on, 0o700)
+for sub in ('home', 'tmp', 'tree'):
+    os.mkdir(os.path.join(on, sub), 0o700)
+copy = os.path.join(on, 'tree')
+env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': os.path.join(on, 'home'), 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_ATTR_NOSYSTEM': '1', 'GIT_TERMINAL_PROMPT': '0', 'GIT_NO_LAZY_FETCH': '1', 'GIT_LFS_SKIP_SMUDGE': '1', 'LC_ALL': 'C'}
+off = RUN_OFF + ['-c', 'protocol.allow=never', '-c', 'safe.directory=*']
+def said(r):
+    return (r.stderr.decode(errors='replace').strip().split('\\n') or [''])[-1][:300] or 'no reason given'
+def ran(*a, extra=None):
+    return subprocess.run(['git', *off, *a], capture_output=True, timeout=600, env={**env, **(extra or {})})
+if tree:
+    r = ran('init', '-q', '--template=', '--object-format=' + ('sha256' if len(tree) == 64 else 'sha1'), '-b', 'main', copy)
+    if r.returncode: sys.exit('its copy could not be begun: ' + said(r))
+    clone = ['--git-dir=' + os.path.join(root, '.git')]
+    listed = os.path.join(on, 'objects')
+    with open(listed, 'wb') as out:
+        r = subprocess.run(['git', *off, *clone, 'rev-list', '--objects', tree], stdout=out, stderr=subprocess.PIPE, timeout=600, env=env)
+    if r.returncode: sys.exit('its tree could not be read from its clone: ' + said(r))
+    with open(listed, 'rb') as names, open(os.path.join(on, 'pack-errors'), 'wb') as errors:
+        packed = subprocess.Popen(['git', *off, *clone, 'pack-objects', '--stdout', '-q'], stdin=names, stdout=subprocess.PIPE, stderr=errors, env=env)
+        taken = subprocess.run(['git', *off, '-C', copy, 'index-pack', '--stdin'], stdin=packed.stdout, capture_output=True, timeout=600, env=env)
+        packed.stdout.close()
+        packed.wait(600)
+    for each in ('objects', 'pack-errors'):
+        os.remove(os.path.join(on, each))
+    if packed.returncode or taken.returncode: sys.exit('its tree could not be taken from its clone: ' + (said(taken) if taken.returncode else 'its objects could not be packed'))
+    r = ran('-C', copy, 'read-tree', tree)
+    if not r.returncode: r = ran('-C', copy, 'checkout-index', '-a', '-f')
+    if r.returncode: sys.exit('its tree could not be checked out: ' + said(r))
+    ident = {'GIT_AUTHOR_NAME': 'Invincible', 'GIT_AUTHOR_EMAIL': 'gates@invincible.invalid', 'GIT_COMMITTER_NAME': 'Invincible', 'GIT_COMMITTER_EMAIL': 'gates@invincible.invalid', 'GIT_AUTHOR_DATE': '@0 +0000', 'GIT_COMMITTER_DATE': '@0 +0000'}
+    r = ran('-C', copy, 'commit-tree', tree, '-m', 'The tree its gates run on', extra=ident)
+    commit = r.stdout.decode().strip()
+    if not r.returncode: r = ran('-C', copy, 'update-ref', 'HEAD', commit)
+    if r.returncode: sys.exit('its copy could not be given a HEAD: ' + said(r))
+else:
+    def copied(src, dst):
+        for entry in os.scandir(src):
+            s, d = entry.path, os.path.join(dst, entry.name)
+            try:
+                st = os.lstat(s)
+                if stat.S_ISLNK(st.st_mode):
+                    os.symlink(os.readlink(s), d)
+                elif stat.S_ISDIR(st.st_mode):
+                    os.mkdir(d, 0o700)
+                    copied(s, d)
+                    os.chmod(d, stat.S_IMODE(st.st_mode) | 0o700)
+                elif stat.S_ISREG(st.st_mode):
+                    fd = os.open(s, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                    try:
+                        if stat.S_ISREG(os.fstat(fd).st_mode):
+                            with os.fdopen(os.dup(fd), 'rb') as a, open(d, 'wb') as b:
+                                shutil.copyfileobj(a, b)
+                            os.chmod(d, stat.S_IMODE(st.st_mode) | 0o600)
+                    finally:
+                        os.close(fd)
+            except OSError:
+                pass
+    copied(root, copy)
+    # (Its tree, as git hashes it, in a scratch store of the copy's own beside it: no file of it is changed.)
+    store = os.path.join(on, 'hashed')
+    held = {'GIT_DIR': store, 'GIT_INDEX_FILE': os.path.join(on, 'hashed.index'), 'GIT_WORK_TREE': copy}
+    r = ran('init', '-q', '--bare', '--template=', store)
+    if not r.returncode: r = subprocess.run(['git', *off, '-c', 'core.bare=false', 'add', '-A', '--force', '.'], cwd=copy, capture_output=True, timeout=600, env={**env, **held})
+    tree = '' if r.returncode else ran('-c', 'core.bare=false', 'write-tree', extra=held).stdout.decode().strip()
+    drop(store)
+    try:
+        os.remove(held['GIT_INDEX_FILE'])
+    except OSError:
+        pass
+    if not hexed(tree): sys.exit('its folder could not be read: ' + (said(r) if r.returncode else 'no tree of it'))
+    if was and tree != was: sys.exit("its folder isn't what it was as its gates began")
+files = size = 0
+for here, dirs, names in os.walk(copy):
+    if here == copy and tree and '.git' in dirs: dirs.remove('.git')
+    for name in dirs + names:
+        path = os.path.join(here, name)
+        if os.path.islink(path):
+            to, rel = os.readlink(path), os.path.relpath(path, copy)
+            if os.path.isabs(to) or os.path.normpath(os.path.join(os.path.dirname(rel), to)).split(os.sep)[0] == '..':
+                sys.exit('its tree has a link out of it, ' + rel + ' -> ' + to + ': its gates run on the tree alone')
+        elif name in names:
+            files += 1
+            size += os.lstat(path).st_size
+print(files, size, tree)`;
+
 /** Where each side keeps its scratch files: under the agent's /work/.agent, and the task VM's own. */
 export const HANDED_KEEP = "/work/.agent/handed";
 
@@ -487,6 +615,16 @@ export const handedApply = (root: string, base: string, task: string, nonce: str
 export const handedDrop = (task: string, nonce: string, keep = HANDED_KEEP): string => heldGit(DROP_SCRIPT, keep, task, nonce);
 export const handedTree = (root: string, base: string, task: string, keep = HANDED_KEEP): string => heldGit(TREE_SCRIPT, root, base, keep, task);
 export const handedSweep = (root: string, task: string, keep = HANDED_KEEP): string => heldGit(SWEEP_SCRIPT, root, task, keep);
+/**
+ * Its gates' copy of the task's tree (GATES_SCRIPT), run as their own user: at `on`, a folder of `gates` (VM_GATES) named
+ * by a nonce of the node's. `tree`, its clone's tree; "" for a task with no repository, whose folder's copy must hash to
+ * `was` when it is given.
+ */
+export const handedGates = (root: string, tree: string, on: string, gates: string = VM_GATES, was = ""): string => {
+  const id = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+  if (!on.startsWith(`${gates}/`) || !/^[0-9a-f]{32}$/.test(on.slice(gates.length + 1)) || (tree !== "" && !id.test(tree)) || (was !== "" && (tree !== "" || !id.test(was)))) throw new Error("not a copy for its gates");
+  return heldGit(GATES_SCRIPT, root, tree, on, was);
+};
 
 /**
  * Its agent's side, as the node starts: the tasks whose cut-off runs left something there (the seventh fabric review's

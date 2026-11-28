@@ -18,6 +18,15 @@ const RETRY_MAX_MS = 15 * 60_000;
 
 type Host = Pick<SandboxHost, "createTaskVm" | "exec" | "destroy" | "stream" | "taskVms" | "get" | "endLease" | "pipe" | "makesSandboxes">;
 
+/**
+ * A command of the node's in a task's VM: a shell that reads no profile of the task's (the eighth fabric review's R8-3).
+ * The VM's HOME and workspace are the task's to write, so a login shell there runs what the task put in its profile before
+ * the node's command: a python3 that said each gate passed, in the review's PoC. Its environment is the VM's own, as
+ * Docker gives each exec: the task changes none of it. The task's own commands get their login shell inside the gateway's
+ * (team-runtime.ts withGateway), under the node's helper, never around it.
+ */
+const shell = (command: string): string[] => ["bash", "--noprofile", "--norc", "-c", command];
+
 /** How long a task's VM may live: longer than any task, which removes it as it ends (a backstop, never its end). */
 export const TASK_VM_MINUTES = 2 * 24 * 60;
 
@@ -95,13 +104,19 @@ export class TaskVms {
     if (signal.aborted) brake();
     else signal.addEventListener("abort", brake, { once: true });
     const stopped = async () => {
-      const ended = await host.exec(vm, ["bash", "-lc", agentCleanupCommand()], 15);
+      const ended = await host.exec(vm, shell(agentCleanupCommand()), 15);
       if (ended.exitCode !== 0) throw new Error("the task's run could not be safely stopped");
     };
     return {
       exec: async (command, timeoutSec, signal) => {
         if (signal.aborted) throw new Error("its work has stopped");
-        return host.exec(vm, ["bash", "-lc", command], timeoutSec);
+        return host.exec(vm, shell(command), timeoutSec);
+      },
+      // Its gates and the node's checks of its work, as their own user in their own folder (R8-3: execArgs, VM_GATES): no
+      // process of the task's, which all run as the VMs' user, can signal, trace or write anything of theirs.
+      gates: async (command, timeoutSec, signal) => {
+        if (signal.aborted) throw new Error("its work has stopped");
+        return host.exec(vm, shell(command), timeoutSec, undefined, "gates");
       },
       follow: async (offset, signal): Promise<FollowedRun> => {
         if (signal.aborted) throw new Error("its work has stopped");
@@ -116,11 +131,11 @@ export class TaskVms {
       // agent's repository, bounded by its time and its VM's disk; its changes are the task's, held to HANDED_CHANGES_BYTES.
       receive: async (fromAgent, intoTask, timeoutSec, signal) => {
         if (signal.aborted) throw new Error("its work has stopped");
-        return host.pipe({ id: ask.vm, cmd: ["bash", "-lc", fromAgent] }, { id: vm, cmd: ["bash", "-lc", intoTask] }, { timeoutSec, maxBytes: Number.POSITIVE_INFINITY });
+        return host.pipe({ id: ask.vm, cmd: shell(fromAgent) }, { id: vm, cmd: shell(intoTask) }, { timeoutSec, maxBytes: Number.POSITIVE_INFINITY });
       },
       send: async (fromTask, intoAgent, timeoutSec, signal) => {
         if (signal.aborted) throw new Error("its work has stopped");
-        return host.pipe({ id: vm, cmd: ["bash", "-lc", fromTask] }, { id: ask.vm, cmd: ["bash", "-lc", intoAgent] }, { timeoutSec, maxBytes: HANDED_CHANGES_BYTES });
+        return host.pipe({ id: vm, cmd: shell(fromTask) }, { id: ask.vm, cmd: shell(intoAgent) }, { timeoutSec, maxBytes: HANDED_CHANGES_BYTES });
       },
       stop: stopped,
       release: async () => {

@@ -193,16 +193,42 @@ transport keys carries all of it:
        A task with no repository keeps its files in its own VM, and they go with it.
      - **What its review passes is what is shipped** (the seventh re-review's I-b). In a repository, its review's
        evidence is read on its agent's side, on the tree its last bring-back made there, never in its VM, whose
-       processes are the task's own; a task with no repository reads it in its VM, and nothing is shipped from one. When
-       the review passes, that tree is what is kept and shipped as verified, and nothing its VM had after it; the
-       worktree there is checked to be that tree still, and short of that the task isn't verified, and says why. Its
-       gates run in its VM, on its clone, and before a submission's gates everything of the task's there is ended (a
-       task whose gates need a server starts it in the gate) and its clone's tree is read as they begin: the review's
-       tree must be that one, so nothing of the task's changes a file under its gates, or between them and the review,
-       and is shipped as verified (the lead's decision for I-b's gates). Their verdict isn't bound yet: the gates, that
-       end and that read run in its VM as `bash -lc`, under the login profile the task writes there, so a task can make
-       a gate that fails say it passed, and come back verified (the eighth re-review's R8-3, open: the fabric stays off
-       until it is fixed).
+       processes are the task's own. A task with no repository reads it on a copy of its folder as its gates' copies are
+       made (below), or, with no gates, in its VM, and nothing is shipped from one. When the review passes, that tree is
+       what is kept and shipped as verified, and nothing its VM had after it; the worktree there is checked to be that
+       tree still, and short of that the task isn't verified, and says why.
+     - **Its gates say what its tree does, never what the task says they did** (the eighth re-review's R8-3). Before
+       each run of them (before the work, a contract's, a submission's), everything of the task's in its VM is ended (a
+       task whose gates need a server starts it in the gate) and the tree they judge is read: its clone's, or with no
+       repository its folder's. The review's tree must be that one, so nothing of the task's changes a file under its
+       gates, or between them and the review, and is shipped as verified (the lead's decision for I-b's gates). Each
+       gate, and each check of the node's on what they judge (the digests of the test files they name), then runs on a
+       copy of that tree of its own:
+       - made by the gates' own user (nobody, never the VMs' user the task's commands run as) in their own folder, a
+         filesystem in memory of theirs alone (`/gates`, mode 0700). No process of the task's, one its end missed among
+         them, can list, write or move anything there, nor signal or trace what runs there;
+       - its objects taken from the clone through `index-pack`, each hashed as it comes, so the copy is that tree
+         whatever the clone holds or does meanwhile. With no repository, the folder is copied, and each copy must hash to
+         what it was as the gates began;
+       - with a HOME and a temporary folder of its own, nothing of the VM's environment but a PATH of its read-only
+         folders, and of the login profiles only the image's own (`/etc/profile`): never a profile, a `~/.local/bin` or
+         a `~/.npmrc` the task wrote;
+       - and nothing a gate before it left there.
+
+       Every other command of the node's in its VM runs in a shell that reads no profile. The handed helper and its end
+       run as `/usr/bin/python3 -I`, named by its path. The task's own commands keep their login shell, inside the helper.
+       In Kata and in runc, the review's PoC (a profile whose python3 says each gate passed) and a process that ended its
+       own helper and writes the gate's file while a gate looks for it both come back not verified, their gate failing
+       as it does (`handed-real.integration.test.ts`); before, both came back verified.
+     - **What a gate gets is what CI gives a job: a checkout of the tree that comes back.**
+       - Nothing the task installed or built in its worktree that isn't in that tree: a gate that needs `node_modules`
+         makes them (`bun install && bun test`).
+       - No lease (no model), and nothing of the task's HOME.
+       - A `.git` of its own, whose HEAD is a commit of that tree with no history.
+
+       A link in the tree that points out of it is refused. Its copy's time counts in its gates' 15 minutes, and a copy is
+       at most 2 GiB. A gate whose command runs the task's code (`bun test`) runs that code as the gates' user, for its
+       own run alone: its verdict is that code's, as ever, and the review reads what it is.
      - The VM goes as the task ends, however it ends (done, failed, stopped, its agent paused), and with it everything
        the task started there. When its work ends (a revocation among its ends: your brake), its lease ends and the VM
        is removed at once, the command in flight there with it, never once that command returns (the fifth re-review's
@@ -226,7 +252,7 @@ transport keys carries all of it:
        in a process group of its own under its own deadline, its `desktop` verbs too (the third re-review's R3-3). What
        a gate starts ends with the gate, and what its other commands leave running is listed and ended with the task
        (R3-5). A command that ends or stops its own helper, or a process that double-forks out of it, escapes that
-       bound, but not the task's VM, which goes as the task ends.
+       bound, but not the task's VM, which goes as the task ends, and nothing of what escapes reaches its gates (above).
      - The runner stops it at its call's deadline or after 24 hours, whichever comes first, waiting for your approval
        included. A stop that can't be written (the node stopping, or a write that fails) ends its call all the same,
        answered as failed (the third re-review's R3-2). A task you take up again by its id lives no longer than the
