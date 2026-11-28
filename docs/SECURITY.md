@@ -906,27 +906,62 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       evidence on a copy of its folder as its gates' are made, or with no gates in its VM, and ships nothing. Before each
       run of its gates everything of the task's in its VM is ended and the tree they judge read, its clone's (or its
       folder's), and the review's tree must be that one, or the task isn't verified, so nothing of the task's changes a
-      file under its gates and ships. Its gates' verdict is theirs, never the task's (the eighth re-review's R8-3,
-      `handed-real.integration.test.ts` in Kata and runc, `handed-repo.test.ts`, `handed-process.test.ts`,
-      `team-runtime.test.ts`, `governed-host.test.ts`): each gate, and each check of the node's on what they judge,
-      runs on a copy of that tree of its own, made by the gates' own user (nobody, never the VMs' user the task runs
-      as) in their own folder, a filesystem in memory of theirs alone (`/gates`, 0700), its objects hashed as they come
-      from the clone (`index-pack`), with a HOME and temporary folder of its own, `env -i` but a PATH of the VM's
-      read-only folders, and of the login profiles only the image's own `/etc/profile`. No process of the task's user,
-      one its end missed among them, can list, write or move what is there, or signal or trace what runs there. Nor
-      can a process a gate before it left behind: a gate's command runs the task's code as the gates' user, and that
-      code could end the gate's helper and leave a process that writes a later gate's file into its copy (the ninth
-      re-review's R9-2: a first gate of `bun test` so passed a second of `test -f`, verified, in Kata and runc). So each
-      copy begins, and each gate ends, by ending every process of the gates' user but the sweep's own until none is
-      left; no gate runs while one is, and a gate whose own processes couldn't all be ended doesn't pass. With no
-      repository, a file its gates' user can't read, or one that won't fit, fails the copy and says which, rather than
-      being left out (I-2). Every other command of the node's in that VM reads no profile (`bash --noprofile
-      --norc`), and the handed helper and its end run as `/usr/bin/python3 -I` by its path; the task's own commands get
-      their login shell inside the helper. A gate gets the tree that comes back, as CI's job gets a checkout: what the
-      task installed or built in its worktree outside that tree, its lease and its HOME are not there, and a link out of
-      the tree is refused. A gate whose command runs the task's code runs it as the gates' user, for that run alone. A
-      gate shares the VM's network, `/dev/shm` and `/tmp` with the task's processes: one that talks to a local port, an
-      abstract socket or a fixed `/tmp` path talks to what the task may have left there (I-1). The
+      file under its gates and ships. Its gates' verdict is theirs, never the task's (the eighth re-review's R8-3 and the
+      eleventh's ruling, `handed-real.integration.test.ts` in Kata and runc, `gate-sweep.integration.test.ts`,
+      `handed-repo.test.ts`, `handed-process.test.ts`, `team-runtime.test.ts`, `task-vms.test.ts`,
+      `governed-host.test.ts`):
+      - Each run of them is a round of its own, in a VM of the round's own. It is made from the task's VM's image, as big
+        as it, with no network and no lease, and removed with the next round or the task. Nothing of the task's ever runs
+        there.
+      - It is given the tree once, through the node. In a repository, the tree's objects are packed in the task's VM and
+        taken by the round VM's own user (`index-pack`), each hashed as it comes, and every object of the tree is checked
+        to be there. With no repository, the folder's tar is taken: files, folders and links inside it alone, nothing
+        written through a link, and its tree hashed. The store is that user's: the gates' user reads it and never writes
+        it.
+      - Each gate, each check of the node's on what they judge and, with no repository, the review's evidence then run
+        there as the gates' own user (nobody), each on a copy of that store of its own in their own folder (`/gates`,
+        0700). Each has a HOME and temporary folder of its own, `env -i` but a PATH of the VM's read-only folders, and
+        of the login profiles only the image's own `/etc/profile`.
+      - Before each copy, every process of the gates' user there is ended by `kill(-1, SIGKILL)` as that user, from an
+        exec of its own, until `/proc` shows none with a thread alive. The kernel signals them all at once and refuses
+        a fork once its parent has the signal, so a chain of forks can't outrun it, and a thread group whose leader
+        thread has exited is ended with the rest.
+        - Before, the ninth re-review's R9-2 and the eleventh's R11-1 came back verified, in Kata and runc. A first
+          gate's run of the task's code left a process (one that ended its helper, a zombie-led group, a fork chain)
+          that wrote a later gate's file into its copy.
+        - What that user left in the VM's `/tmp` and `/dev/shm` is removed too. A round whose sweep can't end them fails
+          its gates.
+      - A check that can't be made sends the work back, never "no change" (R11-2). Before any work it ends the run, as
+        nothing could be locked.
+      - With no repository, a file the task's VM's user can't read fails the round and says which, rather than being
+        left out (I-2).
+      - Every other command of the node's in the task's VM reads no profile (`bash --noprofile --norc`), and the handed
+        helper and its end run as `/usr/bin/python3 -I` by its path; the task's own commands get their login shell
+        inside the helper.
+      - A gate gets the tree that comes back, offline, as CI's job gets a checkout: what the task installed or built in
+        its worktree outside that tree, its lease, its HOME and the network are not there. A link out of the tree, by
+        its words or by where it resolves through other links, is refused.
+      - Its packages come from the node's install cache, mounted read-only (`/cache/bun`, `install-cache.test.ts`,
+        `install-cache.integration.test.ts`).
+        - The node fills it before the round's VM is made, in a filler container of its own (no capability, a read-only
+          root, its own user, the cache its one writable mount, Docker's default bridge), given the tree's `bun.lock`
+          and the `package.json` files it names and nothing else of the tree.
+        - The filler refuses anything but the default registry's packages and the workspace's own, and a key twice,
+          before bun reads them. Bun then checks each tarball against the lockfile's hash as it downloads it, and runs
+          no script.
+        - A gate that needs a package that wasn't filled fails offline, saying why.
+        - The cache holds the registry's tarballs alone (bun keys it by name and version and checks nothing on reading,
+          so the filler's download check is the one), and it is shared by every task's rounds on the node.
+        - The filler runs bun on the tree's lockfile and manifests: a flaw in bun's reading of them would be the
+          filler's to contain, and the cache is its one writable mount.
+      - A gate whose command runs the task's code runs it as the gates' user, for that run alone.
+      - What a process the task's end missed can still do:
+        - In a repository, it can make the round fail; whatever it does to the clone after the tree is read, the
+          round's tree is that tree, hashed, and the review's must be the same.
+        - With no repository, it can change what is tarred for a round. Its gates and its evidence then both read
+          that, the same, and nothing is shipped.
+      - Within a round, its gates share its VM's System V and POSIX IPC objects. One that a gate's run of the task's
+        code made reaches only a later gate whose command reads it, which is the task's code again. The
       VM goes as the task ends, however it ends, and with it everything the task started there. When its task's work
       ends (a revocation among its ends: your brake), its lease ends and its VM is removed at once, the command in
       flight there with it, never once that command returns (the fifth re-review's I-1, `task-vms.test.ts`). Its lease
@@ -947,7 +982,9 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       In the VM (Linux) the helper is the command's subreaper while it lives. What a gate starts ends with the gate;
       what its other commands leave running, its coding tool's included, is listed and ended with the task however it
       ends (R3-5). A command that ends or stops its own helper, or a process that double-forks out of it, escapes that
-      bound, but not the task's VM (R3-1, closed), and reaches none of its gates (R8-3 and R9-2, above).
+      bound, but not the task's VM (R3-1, closed), and reaches none of its gates, which run in a VM of each round's own
+      (R11-1, above). What a gate leaves running, a zombie-led thread group among it, is ended before the next gate's
+      copy.
     - The runner stops it at its call's deadline or after 24 hours, whichever comes first. A stop that can't be
       written (the node stopping, or a write that fails) ends its call all the same, answered as failed (the third
       re-review's R3-2). A task you take up again by its id is held to 24 hours from then (R3-6).
