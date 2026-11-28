@@ -1,10 +1,17 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BranchName } from "@invincible/core";
 import { actionDone, BRANCH_SCRIPT, CLONE_SCRIPT, COMMIT_SCRIPT, GIT_SCRIPT, gitView } from "../src/project-git.ts";
 import { LookError } from "../src/workspace-look.ts";
+
+// Each script here runs as its computer runs it, Python 3 and git as processes of their own, so its time is the
+// machine's to give: the slowest, "a filter, Git LFS's, its own or one it includes", took 1.8 s on the Mac mini at a
+// load of 25 on 18 cores and 68.5 s with 2 % of a core (what each of about 585 runnable tasks gets of 12); the first
+// clone and the held-off settings ran past bun's 5 s on main at load (28 November 2026). The limit is how long a busy
+// machine may take, never what a test checks.
+setDefaultTimeout(180_000);
 
 /*
  * The Build view's git scripts, run here as they run in its computer (Python 3, the checkout and what's asked as
