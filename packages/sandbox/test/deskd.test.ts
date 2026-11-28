@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateSync } from "node:zlib";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * deskd, the one desktop process of an agent's VM, and `desktop`, its client (sandbox/desktop: deskd.py and
@@ -26,10 +27,10 @@ let built: string | null = null;
  */
 const BUSY = (secondsAt2: number) => Math.max(5_000, Math.ceil(secondsAt2 * 3) * 1_000);
 
-beforeAll(() => {
+beforeAll(async () => {
   let why: string;
   try {
-    const cc = Bun.spawnSync(["cc", "-O2", "-Wall", "-Wextra", "-Werror", "-o", client, join(desktopDir, "desktop.c")], { stderr: "pipe" });
+    const cc = await spawned(["cc", "-O2", "-Wall", "-Wextra", "-Werror", "-o", client, join(desktopDir, "desktop.c")], { stderr: "pipe" });
     built = cc.exitCode === 0 ? client : null;
     why = cc.stderr.toString();
   } catch (error) {
@@ -83,9 +84,9 @@ async function deskd(env: Record<string, string> = {}): Promise<Running> {
 }
 
 /** The VM's command, as an agent runs it. */
-function desktop(r: Running, args: string[], extra: Record<string, string> = {}, cwd = r.run) {
+async function desktop(r: Running, args: string[], extra: Record<string, string> = {}, cwd = r.run) {
   const t0 = performance.now();
-  const p = Bun.spawnSync([built!, ...args], { env: { ...r.env, ...extra }, cwd, stdout: "pipe", stderr: "pipe" });
+  const p = await spawned([built!, ...args], { env: { ...r.env, ...extra }, cwd, stdout: "pipe", stderr: "pipe" });
   return { code: p.exitCode, out: p.stdout.toString(), err: p.stderr.toString(), ms: performance.now() - t0 };
 }
 
@@ -203,7 +204,7 @@ describe("deskd's held session (the node's): toolset actions in, answers out", (
     // And no longer, on a clock of the test's own that a busy machine can't stretch: on a screen that never changes, the
     // action waits its grace (60 ms) in its 2 ms looks, and answers. (Read on the real clock, "under a second" got
     // 1,002 and 1,029 ms at 2 % of a core, 28 November 2026.)
-    const clocked = py(`
+    const clocked = await py(`
 clock = [50.0]
 waited = []
 def sleep(s):
@@ -292,7 +293,7 @@ print(json.dumps({"changed": answer["changed"], "waited_ms": sum(waited) * 1000}
     // And no longer than that, on a clock of the test's own that a busy machine can't stretch: the settle ends as the
     // screen has been quiet for 150 ms, having waited just that, and on a screen that never stops it ends at its cap.
     // (Read on the real clock, "under 400 ms" got 1,020 and 920 ms at 10 % of a core, 28 November 2026.)
-    const clocked = py(`
+    const clocked = await py(`
 import threading
 clock = [50.0]
 waited = []
@@ -482,7 +483,7 @@ describe("the desktop command: deskd's thin client", () => {
     const bin = r.env.PATH!.split(":")[0]!;
     writeFileSync(join(bin, "desktop-stream"), "#!/bin/sh\nprintf 'FRAMES'\n");
     chmodSync(join(bin, "desktop-stream"), 0o755);
-    const streamed = desktop(r, ["stream"]);
+    const streamed = await desktop(r, ["stream"]);
     expect(streamed).toMatchObject({ code: 0, out: "FRAMES" });
     // (What `desktop start` says, on stderr: the desktop is up before the encoder runs.)
     expect(streamed.err).toContain("The desktop is up");
@@ -491,14 +492,14 @@ describe("the desktop command: deskd's thin client", () => {
   test("a click is one short command: it prints what happened, and exits 0", async () => {
     if (!needs()) return;
     const r = await deskd();
-    const click = desktop(r, ["click", "640", "450"]);
+    const click = await desktop(r, ["click", "640", "450"]);
     expect(click).toMatchObject({ code: 0, err: "" });
     expect(click.out).toMatch(/^clicked at 640,450 · the screen changed \(\d+ ms\) · focus: Chromium "about:blank - Chromium"\n$/);
     expect(calls(r.trace(), "button")).toHaveLength(2);
     // The verbs as the toolset names them work too.
-    expect(desktop(r, ["left_click", "10", "20"]).out).toStartWith("clicked at 10,20");
-    expect(desktop(r, ["double_click", "10", "20"]).out).toStartWith("double-clicked at 10,20");
-    expect(desktop(r, ["cursor_position"]).out).toBe("X=10, Y=20\n");
+    expect((await desktop(r, ["left_click", "10", "20"])).out).toStartWith("clicked at 10,20");
+    expect((await desktop(r, ["double_click", "10", "20"])).out).toStartWith("double-clicked at 10,20");
+    expect((await desktop(r, ["cursor_position"])).out).toBe("X=10, Y=20\n");
   }, BUSY(10.5));
 
   test("the hardware image's apps (C1 step 11): KiCad and FreeCAD start on the screen where the image has them, a file named whole; elsewhere, they're not said", async () => {
@@ -510,22 +511,22 @@ describe("the desktop command: deskd's thin client", () => {
       chmodSync(join(tools, name), 0o755);
     }
     const r = await deskd({ PATH: `${tools}:${process.env.PATH}` });
-    const started = desktop(r, ["app", "pcbnew", "/work/board.kicad_pcb"]);
+    const started = await desktop(r, ["app", "pcbnew", "/work/board.kicad_pcb"]);
     expect(started).toMatchObject({ code: 0, out: "Started pcbnew on /work/board.kicad_pcb.\n" });
-    expect(desktop(r, ["app", "freecad"])).toMatchObject({ code: 0, out: "Started freecad.\n" });
+    expect(await desktop(r, ["app", "freecad"])).toMatchObject({ code: 0, out: "Started freecad.\n" });
     expect(r.trace().filter((t) => t.call === "spawn").map((t) => t.argv)).toEqual([["pcbnew", "/work/board.kicad_pcb"], ["freecad"]]);
     // (In /tmp: KiCad's API server makes its socket in TMPDIR, and kipy looks for it in /tmp/kicad, whatever TMPDIR a
     // command of the agent's had.)
     expect(r.trace().filter((t) => t.call === "spawn").map((t) => t.env)).toEqual([{ TMPDIR: "/tmp" }, { TMPDIR: "/tmp" }]);
     // A file by its whole path, and one: anything else is refused before anything starts.
-    for (const args of [["app", "pcbnew", "board.kicad_pcb"], ["app", "freecad", "/work/a.FCStd", "/work/b.FCStd"]]) expect(desktop(r, args)).toMatchObject({ code: 2, err: expect.stringContaining("by its whole path") });
+    for (const args of [["app", "pcbnew", "board.kicad_pcb"], ["app", "freecad", "/work/a.FCStd", "/work/b.FCStd"]]) expect(await desktop(r, args)).toMatchObject({ code: 2, err: expect.stringContaining("by its whole path") });
     expect(r.trace().filter((t) => t.call === "spawn")).toHaveLength(2);
-    expect(desktop(r, ["help"]).out).toContain("desktop app <kicad|pcbnew|eeschema|freecad> [file]");
-    expect(desktop(r, ["app", "inkscape"]).err).toContain("desktop app <terminal|editor|kicad|pcbnew|eeschema|freecad>");
+    expect((await desktop(r, ["help"])).out).toContain("desktop app <kicad|pcbnew|eeschema|freecad> [file]");
+    expect((await desktop(r, ["app", "inkscape"])).err).toContain("desktop app <terminal|editor|kicad|pcbnew|eeschema|freecad>");
     // On the desktop's own image, none of them is there, nor said.
     const plain = await deskd();
-    expect(desktop(plain, ["app", "pcbnew"])).toMatchObject({ code: 2, err: expect.stringContaining("desktop app <terminal|editor>") });
-    expect(desktop(plain, ["help"]).out).not.toContain("kicad");
+    expect(await desktop(plain, ["app", "pcbnew"])).toMatchObject({ code: 2, err: expect.stringContaining("desktop app <terminal|editor>") });
+    expect((await desktop(plain, ["help"])).out).not.toContain("kicad");
     expect(plain.trace().filter((t) => t.call === "spawn")).toEqual([]);
   }, BUSY(33.2));
 
@@ -533,7 +534,7 @@ describe("the desktop command: deskd's thin client", () => {
     if (!needs()) return;
     const r = await deskd();
     for (const args of [["click", "10", "x"], ["click", "-5", "10"], ["click", "10", "20", "sideways"], ["key", "ctrl+l; reboot"], ["key"], ["scroll", "sideways"], ["open", "javascript:alert(1)"], ["type"], ["dance"]]) {
-      expect({ args, code: desktop(r, args).code }).toEqual({ args, code: 2 });
+      expect({ args, code: (await desktop(r, args)).code }).toEqual({ args, code: 2 });
     }
     expect(r.trace().filter((t) => ["motion", "button", "key"].includes(String(t.call)))).toEqual([]);
   }, BUSY(9.4));
@@ -541,9 +542,9 @@ describe("the desktop command: deskd's thin client", () => {
   test("a screenshot is a file it names, relative to where the command ran, with the pointer drawn in", async () => {
     if (!needs()) return;
     const r = await deskd();
-    desktop(r, ["move", "50", "60"]);
+    await desktop(r, ["move", "50", "60"]);
     const here = realpathSync(join(r.run, ".."));
-    const shot = desktop(r, ["shot", "mine.png"], {}, here);
+    const shot = await desktop(r, ["shot", "mine.png"], {}, here);
     expect(shot).toMatchObject({ code: 0, out: `${join(here, "mine.png")}\n` });
     expect(decodePng(readFileSync(join(here, "mine.png"))).at(50, 60)).toEqual([255, 0, 0]);
   }, BUSY(10.4));
@@ -551,40 +552,40 @@ describe("the desktop command: deskd's thin client", () => {
   test("a screenshot or a zoom with --base64 is printed as a data address on one line, for a loop to hand its model: no file is written", async () => {
     if (!needs()) return;
     const r = await deskd();
-    desktop(r, ["mouse_move", "50", "60"]);
-    const before = Bun.spawnSync(["ls", "-A", r.run]).stdout.toString();
-    const shot = desktop(r, ["screenshot", "--base64"]);
+    await desktop(r, ["mouse_move", "50", "60"]);
+    const before = (await spawned(["ls", "-A", r.run])).stdout.toString();
+    const shot = await desktop(r, ["screenshot", "--base64"]);
     expect(shot).toMatchObject({ code: 0, err: "" });
     const [, data] = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})\n$/.exec(shot.out) ?? [];
     const png = decodePng(Buffer.from(data!, "base64"));
     expect([png.width, png.height, ...png.at(50, 60)]).toEqual([1280, 800, 255, 0, 0]);
-    const zoom = desktop(r, ["zoom", "0", "0", "640", "400", "--base64"]);
+    const zoom = await desktop(r, ["zoom", "0", "0", "640", "400", "--base64"]);
     const [, zoomed] = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})\n$/.exec(zoom.out) ?? [];
     expect(decodePng(Buffer.from(zoomed!, "base64")).width).toBe(1280);
-    expect(Bun.spawnSync(["ls", "-A", r.run]).stdout.toString()).toBe(before);
+    expect((await spawned(["ls", "-A", r.run])).stdout.toString()).toBe(before);
   }, BUSY(9.4));
 
   test("a printed picture can be kept as well (--keep): its own bytes in the folder named, under their SHA-256, so the trail's hash names its file", async () => {
     if (!needs()) return;
     const r = await deskd();
     const kept = join(realpathSync(join(r.run, "..")), "evidence");
-    const shot = desktop(r, ["screenshot", "--base64", "--keep", kept]);
+    const shot = await desktop(r, ["screenshot", "--base64", "--keep", kept]);
     expect(shot).toMatchObject({ code: 0, err: "" });
     const bytes = Buffer.from(/^data:image\/png;base64,(\S+)\n$/.exec(shot.out)![1]!, "base64");
     const sha = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
     expect(readFileSync(join(kept, `${sha}.png`)).equals(bytes)).toBe(true);
     // A folder that isn't absolute is refused, and so is keeping a picture that isn't printed.
-    expect(desktop(r, ["screenshot", "--base64", "--keep", "evidence"]).code).toBe(2);
-    expect(desktop(r, ["screenshot", "--keep", kept]).code).toBe(2);
+    expect((await desktop(r, ["screenshot", "--base64", "--keep", "evidence"])).code).toBe(2);
+    expect((await desktop(r, ["screenshot", "--keep", kept])).code).toBe(2);
   }, BUSY(9.4));
 
   test("a click, a drag or a scroll holds the keys it is given (--hold) while it acts, as the toolset's own text asks", async () => {
     if (!needs()) return;
     const r = await deskd();
-    expect(desktop(r, ["left_click", "10", "20", "--hold", "shift"])).toMatchObject({ code: 0, err: "" });
-    expect(desktop(r, ["click", "30", "40", "right", "--hold", "ctrl"]).code).toBe(0);
-    expect(desktop(r, ["left_click_drag", "10", "20", "30", "40", "--hold", "alt"]).code).toBe(0);
-    expect(desktop(r, ["scroll", "down", "2", "100", "200", "--hold", "ctrl+shift"]).code).toBe(0);
+    expect(await desktop(r, ["left_click", "10", "20", "--hold", "shift"])).toMatchObject({ code: 0, err: "" });
+    expect((await desktop(r, ["click", "30", "40", "right", "--hold", "ctrl"])).code).toBe(0);
+    expect((await desktop(r, ["left_click_drag", "10", "20", "30", "40", "--hold", "alt"])).code).toBe(0);
+    expect((await desktop(r, ["scroll", "down", "2", "100", "200", "--hold", "ctrl+shift"])).code).toBe(0);
     const t = r.trace().filter((e) => e.call === "key" || e.call === "button");
     const said = t.map((e) => (e.call === "key" ? `${e.down ? "+" : "-"}${e.key}` : `${e.down ? "+" : "-"}b${e.button}`));
     expect(said).toEqual([
@@ -595,8 +596,8 @@ describe("the desktop command: deskd's thin client", () => {
     ]);
     // A key it can't hold is refused before anything is touched.
     const before = r.trace().length;
-    expect(desktop(r, ["left_click", "10", "20", "--hold", "ctrl;reboot"]).code).toBe(2);
-    expect(desktop(r, ["left_click", "10", "20", "--hold"]).code).toBe(2);
+    expect((await desktop(r, ["left_click", "10", "20", "--hold", "ctrl;reboot"])).code).toBe(2);
+    expect((await desktop(r, ["left_click", "10", "20", "--hold"])).code).toBe(2);
     expect(r.trace().slice(before).filter((e) => ["motion", "button", "key"].includes(String(e.call)))).toEqual([]);
   }, BUSY(11.4));
 
@@ -606,7 +607,7 @@ describe("the desktop command: deskd's thin client", () => {
     const gateway = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: async (req) => { asked = { auth: req.headers.get("authorization"), body: await req.json() }; return Response.json({ choices: [{ message: { content: "640,400" } }] }); } });
     try {
       const r = await deskd();
-      const blind = desktop(r, ["look", "Where is it?"]);
+      const blind = await desktop(r, ["look", "Where is it?"]);
       expect(blind.code).toBe(3);
       const eyes = { INVINCIBLE_EYES: "vision/model-1", INVINCIBLE_GATEWAY: `http://127.0.0.1:${gateway.port}/gw`, INVINCIBLE_TOKEN: "gw_test-only" };
       // (Run without blocking this process: the stand-in gateway answers from it.)
@@ -676,7 +677,7 @@ describe("the desktop command: deskd's thin client", () => {
       await Bun.sleep(300);
       expect(existsSync(join(run, "deskd.sock"))).toBe(false);
       // The agent's own command starts deskd (as the node's session for the agent does), and the owner's is answered.
-      expect(Bun.spawnSync([built!, "status"], { env, stdout: "pipe", stderr: "pipe" }).exitCode).toBe(0);
+      expect((await spawned([built!, "status"], { env, stdout: "pipe", stderr: "pipe" })).exitCode).toBe(0);
       const reader = owner.stdout.getReader();
       let said = "";
       while (!said.includes("\n")) {
@@ -699,10 +700,10 @@ describe("the desktop command: deskd's thin client", () => {
     const trace = join(dir, "trace");
     writeFileSync(trace, "");
     const env = { PATH: `${bin(join(dir, "bin"), trace)}:${process.env.PATH}`, HOME: dir, INVINCIBLE_DESKTOP_RUN: run, DESKD_TRACE: trace, INVINCIBLE_DESKD: harness };
-    const help = Bun.spawnSync([built!, "help"], { env, stdout: "pipe" });
+    const help = await spawned([built!, "help"], { env, stdout: "pipe" });
     expect(help.stdout.toString()).toContain("desktop click <x> <y>");
     expect(existsSync(join(run, "deskd.sock"))).toBe(false);
-    const first = Bun.spawnSync([built!, "click", "1", "2"], { env, stdout: "pipe", stderr: "pipe" });
+    const first = await spawned([built!, "click", "1", "2"], { env, stdout: "pipe", stderr: "pipe" });
     try {
       expect(first.stdout.toString()).toStartWith("clicked at 1,2");
       expect(first.exitCode).toBe(0);
@@ -717,16 +718,16 @@ describe("the desktop command: deskd's thin client", () => {
 });
 
 /** deskd's own classes driven by a few lines of Python, with stand-ins set on them: what they print, as JSON. */
-function py(lines: string): unknown {
+async function py(lines: string): Promise<unknown> {
   const script = `import importlib.util, json, sys, time\nsys.dont_write_bytecode = True\nspec = importlib.util.spec_from_file_location("deskd", sys.argv[1]); d = importlib.util.module_from_spec(spec); spec.loader.exec_module(d)\n${lines}`;
-  const ran = Bun.spawnSync(["python3", "-c", script, join(desktopDir, "deskd.py")], { stdout: "pipe", stderr: "pipe" });
+  const ran = await spawned(["python3", "-c", script, join(desktopDir, "deskd.py")], { stdout: "pipe", stderr: "pipe" });
   if (ran.exitCode !== 0) throw new Error(ran.stderr.toString());
   return JSON.parse(ran.stdout.toString());
 }
 
 describe("deskd's browser and the desk that holds it", () => {
-  test("the tab read and navigated is the one in front: the window's title names it, else the one that is visible, else the newest; never merely the first listed (C0's F5)", () => {
-    expect(py(`
+  test("the tab read and navigated is the one in front: the window's title names it, else the one that is visible, else the newest; never merely the first listed (C0's F5)", async () => {
+    expect(await py(`
 b = d.Browser(); b.ws = True
 b.pages = {"t1": {"session": "s1", "title": "first tab", "opened": 1}, "t2": {"session": "s2", "title": "color 0", "opened": 2}}
 seen = {"window": "color 0 - Chromium", "visible": "s2"}
@@ -739,8 +740,8 @@ seen["visible"] = None; out.append(b.front()[0])
 print(json.dumps(out))`)).toEqual(["t2", "t1", "t1", "t2"]);
   }, BUSY(3.2));
 
-  test("a browser that isn't running (killed, or its last tab closed) is started again by the next command that needs it, and spoken to afresh", () => {
-    expect(py(`
+  test("a browser that isn't running (killed, or its last tab closed) is started again by the next command that needs it, and spoken to afresh", async () => {
+    expect(await py(`
 class P:
     running = False; starts = 0
     def start(self): P.starts += 1; P.running = True
@@ -754,11 +755,11 @@ again = desk.browser_ready()
 print(json.dumps({"starts": P.starts, "new": fresh is not old, "kept": again is fresh}))`)).toEqual({ starts: 1, new: true, kept: true });
   }, BUSY(3.2));
 
-  test("a screen isn't settled while a page is loading, however still it looks: the picture after a click that navigates is the new page's (C0's F6)", () => {
+  test("a screen isn't settled while a page is loading, however still it looks: the picture after a click that navigates is the new page's (C0's F6)", async () => {
     // On a clock of the test's own, which a busy machine can't stretch: the page loads for 300 ms on a screen quiet for
     // 10 s, and the settle ends as the load does, never sooner and no more than one of its 10 ms looks after. (Read on
     // the real clock, "under a second" got 1,008 ms at 2 % of a core, 28 November 2026.)
-    const got = py(`
+    const got = await py(`
 import threading
 clock = [50.0]
 waited = []
@@ -803,8 +804,8 @@ ws = WS()
 b = d.Browser(connect=lambda: ws)
 `;
 
-  test("the first read of a page connects, finds the browser's pages (not its own UI's) and attaches to them", () => {
-    expect(py(`${CHROMIUM}
+  test("the first read of a page connects, finds the browser's pages (not its own UI's) and attaches to them", async () => {
+    expect(await py(`${CHROMIUM}
 got = b.evaluate("document.title")
 print(json.dumps({"got": got, "pages": list(b.pages), "sent": ws.sent[:3]}))`)).toEqual({ got: "on S1", pages: ["T1"], sent: ["Target.setDiscoverTargets", "Target.attachToTarget", "Page.enable"] });
   }, BUSY(3.2));
@@ -831,15 +832,15 @@ describe("the desk's focus and clicks, as a window manager takes its time", () =
   test("a window named is brought forward with the keyboard's focus, the way between apps a full-screen browser hides", async () => {
     if (!built) return;
     const r = await deskd();
-    const moved = desktop(r, ["focus", "Mousepad"]);
+    const moved = await desktop(r, ["focus", "Mousepad"]);
     expect(moved).toMatchObject({ code: 0, out: 'focus: Mousepad "Untitled 1 - Mousepad"\n' });
     expect(calls(r.trace(), "activate")).toEqual([{ call: "activate", window: "0x600001" }]);
-    expect(desktop(r, ["focus", "Nothing like it"]).code).toBe(1);
+    expect((await desktop(r, ["focus", "Nothing like it"])).code).toBe(1);
   }, BUSY(10.4));
 
-  test("a window that appears is brought to the front with the focus: an app an agent starts is the one it then works in", () => {
+  test("a window that appears is brought to the front with the focus: an app an agent starts is the one it then works in", async () => {
     // The watcher's own listing, with a stand-in display: the second listing has a new window.
-    expect(py(`
+    expect(await py(`
 w = d.Watch.__new__(d.Watch)
 import threading; w.lock = threading.Lock(); w.known = {}; w.appeared = []; w.gone = []; w.started = False
 lists = [[1], [1, 2]]
@@ -853,11 +854,11 @@ w._list(); w.started = True; w._list()
 print(json.dumps({"activated": D.activated, "appeared": [a["id"] for _, a in w.appeared]}))`)).toEqual({ activated: [2], appeared: ["0x1", "0x2"] });
   }, BUSY(3.2));
 
-  test("the browser's first window, from the desktop's own start, never takes the focus from a window the agent opened after that start", () => {
+  test("the browser's first window, from the desktop's own start, never takes the focus from a window the agent opened after that start", async () => {
     // (Fresh Kata VMs on Ultra, 28 November 2026, 3 of 3: `desktop app editor` as the first command, the browser the
     // desktop's start launched came up a second later, full screen, and the editor lost the focus to it: the agent's
     // next `desktop type` found nothing that takes text.)
-    const watched = (lists: { id: number; app: string }[][]) => py(`
+    const watched = async (lists: { id: number; app: string }[][]) => await py(`
 w = d.Watch.__new__(d.Watch)
 import threading; w.lock = threading.Lock(); w.known = {}; w.appeared = []; w.gone = []; w.started = False
 lists = ${JSON.stringify(lists)}
@@ -875,16 +876,16 @@ print(json.dumps(D.activated))`) as number[];
     const browser = { id: 2, app: "Chromium" };
     // The editor first, then the start's browser: the editor keeps the focus (given back to it, as the window manager
     // gives a new window the focus of its own accord); a browser window after that one is brought forward as any is.
-    expect(watched([[], [editor], [editor, browser], [editor, browser, { id: 3, app: "Chromium" }]])).toEqual([1, 1, 3]);
+    expect(await watched([[], [editor], [editor, browser], [editor, browser, { id: 3, app: "Chromium" }]])).toEqual([1, 1, 3]);
     // The start's browser alone, or before any window of the agent's: brought forward, as before.
-    expect(watched([[], [browser], [browser, editor]])).toEqual([2, 1]);
+    expect(await watched([[], [browser], [browser, editor]])).toEqual([2, 1]);
     // A browser up before the watcher began (deskd started again beside it) is no start's window to come: later apps
     // and browser windows are brought forward as any is.
-    expect(watched([[browser], [browser, editor], [browser, editor, { id: 3, app: "Chromium" }]])).toEqual([1, 3]);
+    expect(await watched([[browser], [browser, editor], [browser, editor, { id: 3, app: "Chromium" }]])).toEqual([1, 3]);
   }, BUSY(9.3));
 
-  test("a browser whose process lingers after it was killed, but whose port doesn't answer, is not running: it is started again", () => {
-    expect(py(`
+  test("a browser whose process lingers after it was killed, but whose port doesn't answer, is not running: it is started again", async () => {
+    expect(await py(`
 p = d.Pieces(home="/work")
 d._own = lambda comm: [4242]
 p.browser_up = lambda: False
@@ -893,8 +894,8 @@ print(json.dumps(p.browser_running()))`)).toBe(false);
 });
 
 describe("deskd when the browser has no page, and after it opens one", () => {
-  test("a browser whose last tab was closed (C0's F10) is given a page by the next read, not answered with none", () => {
-    expect(py(`
+  test("a browser whose last tab was closed (C0's F10) is given a page by the next read, not answered with none", async () => {
+    expect(await py(`
 import queue
 class WS:
     def __init__(self): self.q = queue.Queue()
@@ -918,7 +919,7 @@ print(json.dumps(b.front()[0]))`)).toBe("T2");
   test("an address opened is answered once the page has loaded and the screen has settled, so the picture after it is the page's at once", async () => {
     if (!built) return;
     const busy = await deskd({ DESKD_BUSY: "1" });
-    const opened = desktop(busy, ["open", "https://example.test/"]);
+    const opened = await desktop(busy, ["open", "https://example.test/"]);
     expect(opened).toMatchObject({ code: 0, out: "Example · https://example.test/\n" });
     // (A screen that never stops: the open waits its settle out, a second at most.)
     expect(opened.ms).toBeGreaterThan(900);
@@ -942,11 +943,11 @@ describe("text that arrives exactly (step 4): typed by what has the focus, never
   test("with nothing that takes text focused (C0's F1: the page, its body), it is an error, not exit 0, and nothing is typed", async () => {
     if (!built) return;
     const r = await deskd({ DESKD_FOCUS: "body" });
-    const blind = desktop(r, ["type", "typed-blind"]);
+    const blind = await desktop(r, ["type", "typed-blind"]);
     expect(blind.code).toBe(1);
     expect(blind.err).toContain("nothing that takes text has the keyboard's focus");
     const none = await deskd({ DESKD_FOCUS: "none" });
-    expect(desktop(none, ["type", "x"]).code).toBe(1);
+    expect((await desktop(none, ["type", "x"])).code).toBe(1);
     for (const run of [r, none]) expect(run.trace().filter((t) => ["key", "xdotool", "own"].includes(String(t.call)) || (t.call === "cdp" && t.method === "Input.insertText"))).toEqual([]);
   }, BUSY(18.7));
 
@@ -955,20 +956,20 @@ describe("text that arrives exactly (step 4): typed by what has the focus, never
     // (On Ultra, 28 November 2026, a page opened while the editor had the focus loaded behind it, and the agent's next
     // typing would have gone to the editor.) The editor has the keyboard, as after `desktop app editor`.
     const r = await deskd({ DESKD_FOCUS: "mousepad" });
-    expect(desktop(r, ["open", "http://127.0.0.1:8000/type.html"]).code).toBe(0);
+    expect((await desktop(r, ["open", "http://127.0.0.1:8000/type.html"])).code).toBe(0);
     expect(calls(r.trace(), "activate").map((c) => c.window)).toEqual(["0x400001"]);
     // (And the keyboard in the page, not the browser's own bar: its tab brought to the front, its contents focused, before
     // it navigates. Brought forward alone, on Ultra, the browser kept the keyboard in its bar, 5 of 5.)
     const methods = calls(r.trace(), "cdp").map((c) => c.method);
     expect(methods.filter((m) => m === "Page.bringToFront" || m === "Page.navigate")).toEqual(["Page.bringToFront", "Page.navigate"]);
-    expect(desktop(r, ["windows"]).out).toMatch(/^\* Chromium "about:blank - Chromium"/m);
-    const typed = desktop(r, ["type", "into the page"]);
+    expect((await desktop(r, ["windows"])).out).toMatch(/^\* Chromium "about:blank - Chromium"/m);
+    const typed = await desktop(r, ["type", "into the page"]);
     expect([typed.code, typed.err]).toEqual([0, ""]);
     expect(typed.out).toContain("typed 13 characters into the page");
     expect(calls(r.trace(), "cdp").filter((c) => c.method === "Input.insertText")).toEqual([{ call: "cdp", method: "Input.insertText", params: { text: "into the page" } }]);
     // A browser that has the keyboard already is left as it is: nothing activated.
     const browsing = await deskd({ DESKD_FOCUS: "field" });
-    expect(desktop(browsing, ["open", "http://127.0.0.1:8000/type.html"]).code).toBe(0);
+    expect((await desktop(browsing, ["open", "http://127.0.0.1:8000/type.html"])).code).toBe(0);
     expect(calls(browsing.trace(), "activate")).toEqual([]);
   }, BUSY(19.7));
 
@@ -984,10 +985,10 @@ describe("text that arrives exactly (step 4): typed by what has the focus, never
     for (const run of [term, editor]) expect(calls(run.trace(), "xdotool")).toEqual([]);
   }, BUSY(20.8));
 
-  test("a paste takes only the selection its keys read: CLIPBOARD for ctrl+v, never PRIMARY too, so the text an app has selected stays selected and the paste replaces it", () => {
+  test("a paste takes only the selection its keys read: CLIPBOARD for ctrl+v, never PRIMARY too, so the text an app has selected stays selected and the paste replaces it", async () => {
     // (Taking PRIMARY from a GTK app unselects its text: KiCad's field, ctrl+a then a pasted name, got the name after
     // the one selected, 27 November 2026. deskd's own Watch, its display a stand-in that writes down what is taken.)
-    expect(py(`
+    expect(await py(`
 import threading
 w = d.Watch.__new__(d.Watch)
 w.lock = threading.Lock(); w.given = threading.Event(); w.win = 7; w.clip = None
@@ -1012,11 +1013,11 @@ print(json.dumps({"ctrl+v": ctrl_v, "shift+Insert": shift_insert, "held": w.clip
 });
 
 describe("what deskd starts and doesn't keep, an app the agent asked for, ends as itself", () => {
-  test("waited on as it quits: never a zombie under deskd, which a look at the processes takes for one still running", () => {
+  test("waited on as it quits: never a zombie under deskd, which a look at the processes takes for one still running", async () => {
     // (KiCad quit by its own key closed its window at once, and stayed in the process table under deskd, a zombie, until
     // deskd next started anything: Ultra, 27 November 2026.)
     expect(
-      py(`
+      await py(`
 import os, tempfile
 d.RUN = tempfile.mkdtemp()
 p = d.Pieces(home=tempfile.mkdtemp())
@@ -1110,8 +1111,8 @@ class P:
 desk = d.Desk(pieces=P(), display=object(), watch=object(), browser=b)
 `;
 
-  test("a JavaScript alert is reported within a second, with its words and its buttons, never waited out (C0's F4)", () => {
-    const got = py(`${ALERT}
+  test("a JavaScript alert is reported within a second, with its words and its buttons, never waited out (C0's F4)", async () => {
+    const got = await py(`${ALERT}
 t0 = time.monotonic(); code, out, err = d.cli(desk, ["text"])
 print(json.dumps({"code": code, "err": err, "ms": (time.monotonic() - t0) * 1000}))`) as { code: number; err: string; ms: number };
     expect(got.ms).toBeLessThan(1000);
@@ -1127,8 +1128,8 @@ print(json.dumps({"code": code, "err": err, "ms": (time.monotonic() - t0) * 1000
     expect(click.text).toContain('a JavaScript confirm is open on the page: "Delete the draft?" [OK] [Cancel]. desktop dialog accept answers it (or Return), desktop dialog dismiss cancels it (or Escape)');
   }, BUSY(9.3));
 
-  test("the dialog is answered by its own verb, as the page's own buttons would", () => {
-    const got = py(`${ALERT}
+  test("the dialog is answered by its own verb, as the page's own buttons would", async () => {
+    const got = await py(`${ALERT}
 d.cli(desk, ["text"])
 code, out, err = d.cli(desk, ["dialog", "accept"])
 time.sleep(0.1)
@@ -1184,11 +1185,11 @@ desk = d.Desk(pieces=P(), display=Browsing(), watch=Settled(), browser=b)
 desk.settle = lambda cap=None, since=None: None
 `;
 
-  test("a page that puts up an alert as it loads: desktop open answers at once, the page opened and its alert said, never the 30 s of a load that waits on it", () => {
+  test("a page that puts up an alert as it loads: desktop open answers at once, the page opened and its alert said, never the 30 s of a load that waits on it", async () => {
     // "At once" counted, not timed (timed, "under a second" got 1,039 ms at 5 % of a core, 28 November 2026): each read
     // of the page the open waited on was answered by the alert, none at its 2 s bound, and its wait for the load paced
     // itself (50 ms a look) once at most: it ended at the alert, never at its 30 s deadline.
-    const got = py(`${ALERT_AS_IT_LOADS}
+    const got = await py(`${ALERT_AS_IT_LOADS}
 asked = []
 _send = b._send
 def send(message, reply=None):
@@ -1210,11 +1211,11 @@ print(json.dumps({"code": code, "out": out, "err": err, "reads": reads, "paced":
     expect(got.out).toContain('a JavaScript alert is open on the page: "Hello from the page" [OK]');
   }, BUSY(5.2));
 
-  test("a read already waiting when the alert goes up is answered then, with the alert: not at its 2 s bound", () => {
+  test("a read already waiting when the alert goes up is answered then, with the alert: not at its 2 s bound", async () => {
     // Already waiting: the alert goes up as the read comes, never a guessed time after the navigation, which a busy
     // machine's read could come after. Answered by the alert, never at its bound: its reply says which. (Timed, "under a
     // second" got 1,018 ms at 5 % of a core, 28 November 2026.)
-    const got = py(`${ALERT_AS_IT_LOADS}
+    const got = await py(`${ALERT_AS_IT_LOADS}
 alert_with[0] = "read"
 asked = []
 _send = b._send
@@ -1233,8 +1234,8 @@ print(json.dumps({"code": code, "err": err, "reads": reads}))`) as { code: numbe
     expect(got.err).toContain('a JavaScript alert is open on the page: "Hello from the page" [OK]');
   }, BUSY(3.1));
 
-  test("deskd keeps the browser and the window manager running: one that ends is started again as it ends, not at the next command (C0's F9), and not once it is stopping", () => {
-    expect(py(`
+  test("deskd keeps the browser and the window manager running: one that ends is started again as it ends, not at the next command (C0's F9), and not once it is stopping", async () => {
+    expect(await py(`
 class P:
     starts = 0; asked = 0; ended = None
     def start(self): P.starts += 1
@@ -1251,8 +1252,8 @@ pieces.ended("browser")
 print(json.dumps({"starts": P.starts}))`)).toEqual({ starts: 1 });
   }, BUSY(3.1));
 
-  test("the keeper waits on what deskd started, and asks nothing at rest: a piece's end is known as it happens (C1: asking four times a second cost the idle desktop 0.7 % of a core)", () => {
-    const got = py(`
+  test("the keeper waits on what deskd started, and asks nothing at rest: a piece's end is known as it happens (C1: asking four times a second cost the idle desktop 0.7 % of a core)", async () => {
+    const got = await py(`
 import os, signal, tempfile
 d.RUN = tempfile.mkdtemp()
 p = d.Pieces(home=d.RUN)
@@ -1273,7 +1274,7 @@ print(json.dumps({"ended": [n for n, _ in ended], "first": first, "second": seco
     expect(got.second).toBeLessThan(1300);
     expect(got.threads).toEqual([]);
     // Nothing asked at rest: no piece is polled.
-    expect(py(`
+    expect(await py(`
 class P:
     asked = 0
     def start(self): pass
@@ -1286,8 +1287,8 @@ desk.supervise(); time.sleep(0.6)
 print(json.dumps(P.asked))`)).toBe(0);
   }, BUSY(11.4));
 
-  test("the keeper and a command that both find the browser gone start one browser, not two", () => {
-    expect(py(`
+  test("the keeper and a command that both find the browser gone start one browser, not two", async () => {
+    expect(await py(`
 import tempfile, threading
 p = d.Pieces(home=tempfile.mkdtemp())
 spawned = []
@@ -1307,7 +1308,7 @@ print(json.dumps(spawned))`)).toEqual(["chromium"]);
   test("stopping the desktop closes each window as a person would (WM_DELETE_WINDOW) before any process is ended: no restore question next time", async () => {
     if (!built) return;
     const r = await deskd();
-    expect(desktop(r, ["stop"])).toMatchObject({ code: 0, out: "The desktop is stopped.\n" });
+    expect(await desktop(r, ["stop"])).toMatchObject({ code: 0, out: "The desktop is stopped.\n" });
     for (let i = 0; i < 50 && !calls(r.trace(), "stop").length; i++) await Bun.sleep(20);
     const order = r.trace().filter((t) => t.call === "close" || t.call === "stop").map((t) => (t.call === "close" ? `close ${t.window}` : "stop"));
     expect(order.at(-1)).toBe("stop");
@@ -1338,27 +1339,27 @@ describe("light by default (C1 step 10): an unused desktop stops, and the next c
   test("left unused, it stops as `desktop stop` does, each window closed first; the agent's next command starts it again and is told, once", async () => {
     if (!built) return;
     const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: IDLE });
-    expect(desktop(r, ["click", "10", "20"]).code).toBe(0);
+    expect((await desktop(r, ["click", "10", "20"])).code).toBe(0);
     expect(await stopped(r, STOPS_WITHIN)).toBe(true);
     const order = r.trace().filter((t) => t.call === "close" || t.call === "stop").map((t) => (t.call === "close" ? "close" : "stop"));
     expect(order.at(-1)).toBe("stop");
     expect(order.filter((o) => o === "close").length).toBeGreaterThan(0);
     // (The next deskd keeps it up this time: its own word is the one asked of.)
-    const next = desktop(r, ["click", "10", "20"], { INVINCIBLE_DESKTOP_IDLE: "60" });
+    const next = await desktop(r, ["click", "10", "20"], { INVINCIBLE_DESKTOP_IDLE: "60" });
     expect(next.code).toBe(0);
     expect(next.err).toMatch(/^desktop: this desktop was stopped after 3\.0 s with nothing done on it and no one watching, its windows closed as a person closes them; this command started it again, a fresh screen \(the browser's profile, and what is signed in there, are kept in \/work\)\.\n/);
-    expect(desktop(r, ["click", "10", "20"]).err).not.toContain("was stopped");
+    expect((await desktop(r, ["click", "10", "20"])).err).not.toContain("was stopped");
     expect(existsSync(join(r.run, "idle-stopped"))).toBe(false);
   }, LIMIT);
 
   test("started and never used after (the node's start, as a desktop task's work begins), it stops as any unused desktop does, and the agent's first command is told", async () => {
     if (!built) return;
     const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: IDLE });
-    expect(desktop(r, ["start"]).code).toBe(0);
+    expect((await desktop(r, ["start"])).code).toBe(0);
     expect(await stopped(r, STOPS_WITHIN)).toBe(true);
     const order = r.trace().filter((t) => t.call === "close" || t.call === "stop").map((t) => (t.call === "close" ? "close" : "stop"));
     expect(order.at(-1)).toBe("stop");
-    const next = desktop(r, ["click", "10", "20"], { INVINCIBLE_DESKTOP_IDLE: "60" });
+    const next = await desktop(r, ["click", "10", "20"], { INVINCIBLE_DESKTOP_IDLE: "60" });
     expect(next.code).toBe(0);
     expect(next.err).toContain("this desktop was stopped after 3.0 s with nothing done on it and no one watching");
   }, LIMIT);
@@ -1366,11 +1367,11 @@ describe("light by default (C1 step 10): an unused desktop stops, and the next c
   test("a deskd the client started on its own, after an idle stop, ends with its test as the one the test started does", async () => {
     if (!built) return;
     const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: IDLE });
-    expect(desktop(r, ["click", "10", "20"]).code).toBe(0);
+    expect((await desktop(r, ["click", "10", "20"])).code).toBe(0);
     expect(await stopped(r, STOPS_WITHIN)).toBe(true);
     // (The next one the client starts itself, apart from it, as in a VM: asked only whether the desktop is up, it never
     // brings it up, so it never stops for being unused either. Every run of this file left one running, for hours.)
-    expect(desktop(r, ["status"], { INVINCIBLE_DESKTOP_IDLE: "60" }).code).toBe(0);
+    expect((await desktop(r, ["status"], { INVINCIBLE_DESKTOP_IDLE: "60" })).code).toBe(0);
     const trace = join(dirname(r.run), "trace");
     // (A deskd that left at once, another holding the lock, never served: the client may start one again as it waits.)
     const said = readFileSync(trace, "utf8").trim().split("\n").map((line) => JSON.parse(line));
@@ -1406,11 +1407,11 @@ describe("light by default (C1 step 10): an unused desktop stops, and the next c
     const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: IDLE, INVINCIBLE_DESKTOP_OWNER_UID: me, DESKD_WATCHED: watched });
     // Each for 4 s, longer than it sits unused before it stops. (Its stops are counted from its first command: one a
     // starved machine made before it came isn't one while it was used.)
-    expect(desktop(r, ["windows"]).code).toBe(0);
+    expect((await desktop(r, ["windows"])).code).toBe(0);
     const before = calls(r.trace(), "stop").length;
     // Used: a command every 0.1 s.
     for (let i = 0; i < 40; i++) {
-      expect(desktop(r, ["windows"]).code).toBe(0);
+      expect((await desktop(r, ["windows"])).code).toBe(0);
       await Bun.sleep(100);
     }
     expect(calls(r.trace(), "stop")).toHaveLength(before);
@@ -1440,7 +1441,7 @@ describe("light by default (C1 step 10): an unused desktop stops, and the next c
     r.stop();
     const holding = Bun.spawn(["python3", "-I", "-c", "import fcntl, sys, time\nf = open(sys.argv[1], 'w')\nfcntl.flock(f, fcntl.LOCK_EX)\nprint('held', flush=True)\ntime.sleep(2)", join(r.run, "deskd.lock")], { stdout: "pipe" });
     expect(new TextDecoder().decode((await holding.stdout.getReader().read()).value)).toBe("held\n");
-    const asked = desktop(r, ["status"], { INVINCIBLE_DESKTOP_WAIT: "20" });
+    const asked = await desktop(r, ["status"], { INVINCIBLE_DESKTOP_WAIT: "20" });
     expect({ code: asked.code, err: asked.err }).toEqual({ code: 0, err: "" });
     await holding.exited;
     // (The command's first deskd left while the lock was held; one started again served it, after the test's own.)
@@ -1453,12 +1454,12 @@ describe("light by default (C1 step 10): an unused desktop stops, and the next c
   test("asking only whether it is up keeps it from nothing; and the owner's look that starts it again leaves the agent's word for the agent", async () => {
     if (!built) return;
     const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: IDLE, INVINCIBLE_DESKTOP_OWNER_UID: me });
-    expect(desktop(r, ["click", "10", "20"]).code).toBe(0);
+    expect((await desktop(r, ["click", "10", "20"])).code).toBe(0);
     // (The stop that comes while it is asked only whether it is up: one a starved machine made before the click isn't it.)
     const before = calls(r.trace(), "stop").length;
     let stoppedWhileAsked = false;
     for (const until = Date.now() + STOPS_WITHIN; Date.now() < until && !stoppedWhileAsked; ) {
-      desktop(r, ["status"]);
+      await desktop(r, ["status"]);
       stoppedWhileAsked = calls(r.trace(), "stop").length > before;
       await Bun.sleep(100);
     }
@@ -1466,14 +1467,14 @@ describe("light by default (C1 step 10): an unused desktop stops, and the next c
     // The owner looks first (their app, after it): the node asks `status` on the agent's session, which starts deskd, and
     // their look starts the desktop again. The word waits for the agent's own command.
     await Bun.sleep(100);
-    const status = desktop(r, ["status"], { INVINCIBLE_DESKTOP_IDLE: "60" });
+    const status = await desktop(r, ["status"], { INVINCIBLE_DESKTOP_IDLE: "60" });
     expect(status.code).toBe(0);
     expect(status.err).not.toContain("was stopped");
     const node = await opened(r, true);
     const look = await node.ask({ id: 1, name: "screenshot", input: {} });
     expect(JSON.stringify(look)).not.toContain("was stopped");
     await node.close();
-    expect(desktop(r, ["click", "10", "20"]).err).toContain("this desktop was stopped after 3.0 s");
+    expect((await desktop(r, ["click", "10", "20"])).err).toContain("this desktop was stopped after 3.0 s");
   }, LIMIT);
 });
 
@@ -1572,8 +1573,8 @@ def origin(pid, title):
 t = d.Tree(call=call, window_origin=origin)
 `;
 
-  test("the window with the focus, as what can be acted on in it: each node a line with its ref, role, name, centre and size; nothing off the screen, hidden, inert or behind", () => {
-    const got = py(`${BUS}
+  test("the window with the focus, as what can be acted on in it: each node a line with its ref, role, name, centre and size; nothing off the screen, hidden, inert or behind", async () => {
+    const got = await py(`${BUS}
 said = t.actable(pid=300, title="Form - Chromium")
 print(json.dumps({"lines": [d.say_node(r, n, b) for r, n, b in said], "refs": sorted(t.refs), "matches": calls.count("GetMatches"), "walked": calls.count("GetChildren")}))`) as { lines: string[]; refs: number[]; matches: number; walked: number };
     expect(got.lines).toEqual([
@@ -1590,10 +1591,10 @@ print(json.dumps({"lines": [d.say_node(r, n, b) for r, n, b in said], "refs": so
     expect(got).toMatchObject({ matches: 1, walked: 3 });
   }, BUSY(4.2));
 
-  test("a node keeps its ref from one tree to the next, one that appears gets the next, and a ref whose node is gone fails: never another node's", () => {
+  test("a node keeps its ref from one tree to the next, one that appears gets the next, and a ref whose node is gone fails: never another node's", async () => {
     // (On Ultra, 28 November 2026: a select's options appeared in the second tree, before the check box, and took its
     // ref; a click on the first tree's ref clicked an option, and said nothing was wrong.)
-    const got = py(`${BUS}
+    const got = await py(`${BUS}
 first = {r: n["name"] for r, n, b in t.actable(pid=300, title="Form - Chromium")}
 NODES["/o1"] = (":1.5", "/n3", "menu item", "Free", ON, (100, 304, 200, 24))
 NODES["/o2"] = (":1.5", "/n3", "menu item", "Team", ON, (100, 328, 200, 24))
@@ -1617,10 +1618,10 @@ print(json.dumps({"first": first, "second": second, "terms": terms, "found": fou
     expect(got.gone).toEqual(['ref=7 (menu item "Free") is gone: desktop tree, again', 'ref=8 (menu item "Team") is gone: desktop tree, again']);
   }, BUSY(3.2));
 
-  test("a field says what it holds beside its name: an entry its text, a combo box its chosen option; a password field never", () => {
+  test("a field says what it holds beside its name: an entry its text, a combo box its chosen option; a password field never", async () => {
     // (Every model run of the form, 28 November 2026, asked its eyes whether the form was filled: 1 to 3 looks a run,
     // each a model call, as the tree said only a field's name.)
-    const got = py(`${BUS}
+    const got = await py(`${BUS}
 NODES["/n3m"] = (":1.5", "/n3", "menu", "", VISIBLE, (100, 304, 200, 0))
 NODES["/n3a"] = (":1.5", "/n3m", "menu item", "Free", VISIBLE, (100, 304, 200, 0))
 NODES["/n3b"] = (":1.5", "/n3m", "menu item", "Team", VISIBLE | 1 << d.STATE["selected"], (100, 328, 200, 0))
@@ -1718,8 +1719,8 @@ def filled(args, **kw):
     return {"code": code, "out": out, "err": err, "did": desk.did, "texts": dict(TEXTS), "plan": [n for p, n in OPTIONS if NODES[p][4] & SELECTED], "terms": bool(NODES["/n4"][4] & CHECKED), "open": bool(NODES["/n3"][4] & EXPANDED)}
 `;
 
-  test("desktop fill: a form in one command, each field by its ref or its name, each read back from the tree before the next; never sent", () => {
-    const got = py(`${BUS}${FORM}
+  test("desktop fill: a form in one command, each field by its ref or its name, each read back from the tree before the next; never sent", async () => {
+    const got = await py(`${BUS}${FORM}
 print(json.dumps(filled(["Name", "Ada Lovelace", "ref=2", "ada@example.test", "plan", "Team", "I agree to the terms", "on", "Password", "fake-pass-0000"]), ensure_ascii=False))`) as Record<string, any>;
     expect(got.code).toBe(0);
     expect(got.out.split("\n")).toEqual([
@@ -1743,22 +1744,22 @@ print(json.dumps(filled(["Name", "Ada Lovelace", "ref=2", "ada@example.test", "p
     ]);
     expect(JSON.stringify(got.out + got.err)).not.toContain("fake-pass");
     // A field that holds it already is left as it is.
-    const again = py(`${BUS}${FORM}
+    const again = await py(`${BUS}${FORM}
 filled(["Plan", "Team", "I agree to the terms", "on"])
 print(json.dumps(filled(["Plan", "team", "I agree to the terms", "on"])))`) as Record<string, any>;
     expect(again.out).toBe('chose ref=3 combo box "Plan" = "Team" (it held it already)\nchecked ref=4 check box "I agree to the terms" (it was already)\n');
     expect(again.did).toEqual([]);
   }, BUSY(7.3));
 
-  test("desktop fill stops at the first field that doesn't hold what it was given, saying what it holds: nothing after it is done", () => {
-    const frozen = py(`${BUS}${FORM}
+  test("desktop fill stops at the first field that doesn't hold what it was given, saying what it holds: nothing after it is done", async () => {
+    const frozen = await py(`${BUS}${FORM}
 print(json.dumps(filled(["Name", "Ada Lovelace", "Email", "ada@example.test", "I agree to the terms", "on"], frozen=["/n2"])))`) as Record<string, any>;
     expect(frozen.code).toBe(1);
     expect(frozen.out).toBe('filled ref=1 entry "Name" = "Ada Lovelace"\n');
     expect(frozen.err).toBe('desktop: ref=2 entry "Email" holds "", not "ada@example.test": the fields after it weren\'t filled\n');
     expect(frozen.terms).toBe(false);
     // An option the select hasn't: it is closed again, and said with the options it has.
-    const option = py(`${BUS}${FORM}
+    const option = await py(`${BUS}${FORM}
 print(json.dumps(filled(["Plan", "Teams", "I agree to the terms", "on"])))`) as Record<string, any>;
     expect(option.code).toBe(1);
     expect(option.err).toBe('desktop: ref=3 combo box "Plan" has no option "Teams" (it has "Free", "Team", "Enterprise"): the fields after it weren\'t filled\n');
@@ -1766,25 +1767,25 @@ print(json.dumps(filled(["Plan", "Teams", "I agree to the terms", "on"])))`) as 
     expect(option.did.filter((a: any[]) => a[0] !== "settle")).toEqual([["left_click", [200, 292]], ["key", "Escape"]]);
   }, BUSY(7.3));
 
-  test("desktop fill refuses before doing anything: a field it can't find or tell apart, one that isn't a field, a value that doesn't fit", () => {
-    const tried = (args: string[]) => py(`${BUS}${FORM}
+  test("desktop fill refuses before doing anything: a field it can't find or tell apart, one that isn't a field, a value that doesn't fit", async () => {
+    const tried = async (args: string[]) => await py(`${BUS}${FORM}
 print(json.dumps(filled(${JSON.stringify(args)})))`) as Record<string, any>;
-    const refused = (args: string[]) => {
-      const got = tried(args);
+    const refused = async (args: string[]) => {
+      const got = await tried(args);
       expect(got.did).toEqual([]);
       expect(got.code).toBe("refused");
       return got.err;
     };
-    expect(refused(["Name", "Ada", "Nickname", "Ada"])).toBe('no field named like "Nickname" is in the window with the focus (desktop tree lists them)');
-    expect(refused(["e", "Ada"])).toBe('more than one field is named like "e": ref=1 entry "Name", ref=2 entry "Email", ref=4 check box "I agree to the terms"; give its ref');
-    expect(refused(["Send", "x"])).toBe('ref=5 push button "Send" isn\'t a field: fill takes text fields, combo boxes, check boxes and radio buttons (a button is clicked: desktop click ref=5)');
-    expect(refused(["I agree to the terms", "maybe"])).toBe('ref=4 check box "I agree to the terms" takes on or off, not "maybe"');
-    expect(refused(["Name"])).toContain("fill takes each field and its value");
-    expect(refused(["ref=99", "x"])).toBe("there is no ref=99: desktop tree (or find) gives them");
+    expect(await refused(["Name", "Ada", "Nickname", "Ada"])).toBe('no field named like "Nickname" is in the window with the focus (desktop tree lists them)');
+    expect(await refused(["e", "Ada"])).toBe('more than one field is named like "e": ref=1 entry "Name", ref=2 entry "Email", ref=4 check box "I agree to the terms"; give its ref');
+    expect(await refused(["Send", "x"])).toBe('ref=5 push button "Send" isn\'t a field: fill takes text fields, combo boxes, check boxes and radio buttons (a button is clicked: desktop click ref=5)');
+    expect(await refused(["I agree to the terms", "maybe"])).toBe('ref=4 check box "I agree to the terms" takes on or off, not "maybe"');
+    expect(await refused(["Name"])).toContain("fill takes each field and its value");
+    expect(await refused(["ref=99", "x"])).toBe("there is no ref=99: desktop tree (or find) gives them");
   }, BUSY(18.7));
 
-  test("desktop fill stops when the owner takes the desktop over: the fields after it wait for another command", () => {
-    const got = py(`${BUS}${FORM}
+  test("desktop fill stops when the owner takes the desktop over: the fields after it wait for another command", async () => {
+    const got = await py(`${BUS}${FORM}
 print(json.dumps(filled(["Name", "Ada Lovelace", "Email", "ada@example.test"], hold_after=3)))`) as Record<string, any>;
     expect(got.code).toBe(75);
     expect(got.out).toBe('filled ref=1 entry "Name" = "Ada Lovelace"\n');
@@ -1792,10 +1793,10 @@ print(json.dumps(filled(["Name", "Ada Lovelace", "Email", "ada@example.test"], h
     expect(got.texts["/n2"]).toBeUndefined();
   }, BUSY(3.2));
 
-  test("desktop find reaches what is below or above the screen: the page scrolled to it its own way (AT-SPI's ScrollTo), and the answer says so", () => {
+  test("desktop find reaches what is below or above the screen: the page scrolled to it its own way (AT-SPI's ScrollTo), and the answer says so", async () => {
     // (Every settings run of the models, 28 November 2026, 6 of 6: `desktop find combobox "Font size"` said nothing like
     // it was on the screen, the control below its edge, and each run scrolled blind and looked again.)
-    const got = py(`${BUS}
+    const got = await py(`${BUS}
 NODES["/n13"] = (":1.5", "/d1", "entry", "Comment", VISIBLE | SENSITIVE | EDITABLE, (100, 1200, 300, 24))
 before = [n["name"] for r, n, b in t.actable(pid=300, title="Form - Chromium")]
 ref, node, box = t.find("entry", "comment", pid=300)
@@ -1825,12 +1826,12 @@ print(json.dumps({"before": before, "box": list(box), "scrolled": bool(node.get(
     expect(got.edge[1]).toBeLessThan(800);
   }, BUSY(3.2));
 
-  test("desktop open takes the browser's own settings, chrome://settings and its pages, and refuses every other chrome:// page, javascript: and data:", () => {
+  test("desktop open takes the browser's own settings, chrome://settings and its pages, and refuses every other chrome:// page, javascript: and data:", async () => {
     // (Every settings run of the models, 28 November 2026, 6 of 6, first asked for
     // `desktop open chrome://settings/appearance` and was refused: 1 to 3 calls lost, the refused one with them, before
     // it typed the address another way. The browser itself is never weakened from here: its flags, its extensions and
     // every other page of its own stay out of reach.)
-    const got = py(`
+    const got = await py(`
 opened = []
 d.open_address = lambda desk, address: (opened.append(address), "opened " + address)[1]
 def tried(a):
@@ -1845,8 +1846,8 @@ print(json.dumps({"ok": {a: tried(a) for a in ok}, "no": {a: tried(a) for a in n
     expect(got.opened).toEqual(Object.keys(got.ok));
   }, BUSY(3.2));
 
-  test("desktop tree ends with one line counting what can be acted on off the screen, which desktop find reaches; nothing when there is none", () => {
-    const got = py(`${BUS}
+  test("desktop tree ends with one line counting what can be acted on off the screen, which desktop find reaches; nothing when there is none", async () => {
+    const got = await py(`${BUS}
 del NODES["/n6"]
 class Desk:
     tree = t
@@ -1864,8 +1865,8 @@ print(json.dumps({"on": on, "off": off}))`) as { on: string; off: string };
     expect(got.off.trimEnd().split("\n").slice(0, -1).join("\n")).toBe(got.on.trimEnd());
   }, BUSY(3.2));
 
-  test("desktop click ref=N on a node the page has scrolled away brings it back into view its own way, clicks it there, and says so; never a click past the screen's edge", () => {
-    const got = py(`${BUS}
+  test("desktop click ref=N on a node the page has scrolled away brings it back into view its own way, clicks it there, and says so; never a click past the screen's edge", async () => {
+    const got = await py(`${BUS}
 listed = t.actable(pid=300, title="Form - Chromium")
 name = next(r for r, n, b in listed if n["name"] == "Name")
 # The page scrolls on: to the far link, the Name field above the screen now.
@@ -1890,8 +1891,8 @@ print(json.dumps({"moved": moved, "clicks": clicks, "code": code, "out": out, "e
     expect(got.out).toMatch(/\(ref=1, entry "Name", scrolled into view\)/);
   }, BUSY(3.2));
 
-  test("desktop fill fills a field below the screen: scrolled into view its own way first, and said", () => {
-    const got = py(`${BUS}${FORM}
+  test("desktop fill fills a field below the screen: scrolled into view its own way first, and said", async () => {
+    const got = await py(`${BUS}${FORM}
 NODES["/n13"] = (":1.5", "/d1", "entry", "Comment", VISIBLE | SENSITIVE | EDITABLE, (100, 1200, 300, 24))
 print(json.dumps(filled(["Name", "Ada Lovelace", "Comment", "Below the fold"]) | {"asked": scrolled}, ensure_ascii=False))`) as Record<string, any>;
     expect(got.code).toBe(0);
@@ -1899,7 +1900,7 @@ print(json.dumps(filled(["Name", "Ada Lovelace", "Comment", "Below the fold"]) |
     expect(got.texts["/n13"]).toBe("Below the fold");
     expect(got.asked).toEqual(["/n13"]);
     // A field across the screen's bottom edge is scrolled into view before its click, as one below it is.
-    const edge = py(`${BUS}${FORM}
+    const edge = await py(`${BUS}${FORM}
 NODES["/n16"] = (":1.5", "/d1", "entry", "City", ON | EDITABLE, (100, 790, 300, 24))
 listed = t.actable(pid=300, title="Form - Chromium")
 print(json.dumps(filled(["City", "Aarhus"]) | {"asked": scrolled}, ensure_ascii=False))`) as Record<string, any>;
@@ -1910,8 +1911,8 @@ print(json.dumps(filled(["City", "Aarhus"]) | {"asked": scrolled}, ensure_ascii=
     expect(got.did.filter((a: any[]) => a[0] === "left_click").at(-1)[1][1]).toBe(768);
   }, BUSY(6.3));
 
-  test("an app that can't search its own tree (no Collection) is walked, many calls in flight, never below what isn't showing: the same nodes", () => {
-    const got = py(`${BUS}
+  test("an app that can't search its own tree (no Collection) is walked, many calls in flight, never below what isn't showing: the same nodes", async () => {
+    const got = await py(`${BUS}
 COLLECTION = False
 said = t.actable(pid=300, title="Form - Chromium")
 print(json.dumps({"lines": [d.say_node(r, n, b) for r, n, b in said]}))`) as { lines: string[] };
@@ -1925,20 +1926,20 @@ print(json.dumps({"lines": [d.say_node(r, n, b) for r, n, b in said]}))`) as { l
     ]);
   }, BUSY(4.2));
 
-  test("GTK 4 says 0,0 for every place on the screen: it is asked for its window's, and that window's place on the screen (from X) is added, by its process and title; others' are the screen's already", () => {
-    const got = py(`${BUS}
+  test("GTK 4 says 0,0 for every place on the screen: it is asked for its window's, and that window's place on the screen (from X) is added, by its process and title; others' are the screen's already", async () => {
+    const got = await py(`${BUS}
 said = t.actable(app="notes")
 print(json.dumps({"lines": [d.say_node(r, n, b) for r, n, b in said], "origins": origins, "spaces": spaces}))`) as { lines: string[]; origins: unknown[]; spaces: unknown[] };
     expect(got.lines).toEqual(['[1] push button "Save" at 240,175 (60x30)']);
     expect(got.origins).toEqual([[400, "Notes"]]);
     expect(got.spaces).toEqual([["/g1", 1]]);
-    expect(py(`${BUS}
+    expect(await py(`${BUS}
 t.actable(pid=300, title="Form - Chromium")
 print(json.dumps(origins))`)).toEqual([]);
   }, BUSY(7.2));
 
-  test("find: the role in a model's words, the name in any case, the app with the focus first; its centre and a ref", () => {
-    const got = py(`${BUS}
+  test("find: the role in a model's words, the name in any case, the app with the focus first; its centre and a ref", async () => {
+    const got = await py(`${BUS}
 ref, node, box = t.find("button", "send", pid=300)
 miss = t.find("checkbox", "nothing like it", pid=300)
 try:
@@ -1949,8 +1950,8 @@ print(json.dumps({"ref": ref, "role": node["role"], "box": box, "miss": miss, "l
     expect(got).toEqual({ ref: 1, role: "push button", box: [100, 360, 60, 24], miss: null, line: '[1] push button "Send" at 130,372 (60x24)', bad: 'there is no role "gizmo" (desktop tree shows the roles on the screen)' });
   }, BUSY(3.2));
 
-  test("a ref is clicked where its node is at that moment, not where it was said; one that's gone says so", () => {
-    const got = py(`${BUS}
+  test("a ref is clicked where its node is at that moment, not where it was said; one that's gone says so", async () => {
+    const got = await py(`${BUS}
 t.actable(pid=300, title="Form - Chromium")
 NODES["/n5"] = NODES["/n5"][:5] + ((100, 500, 60, 24),)
 node, box = t.at(5)
@@ -1967,8 +1968,8 @@ print(json.dumps({"box": box, "gone": gone, "unknown": unknown}))`) as Record<st
     expect(got).toEqual({ box: [100, 500, 60, 24], gone: 'ref=5 (push button "Send") is gone: desktop tree, again', unknown: "there is no ref=99: desktop tree (or find) gives them" });
   }, BUSY(3.2));
 
-  test("an app that isn't on the bus is named among those that are", () => {
-    expect(py(`${BUS}
+  test("an app that isn't on the bus is named among those that are", async () => {
+    expect(await py(`${BUS}
 try:
     t.actable(app="kicad"); said = None
 except d.Failed as e:
@@ -1976,8 +1977,8 @@ except d.Failed as e:
 print(json.dumps(said))`)).toBe("no app named like kicad is on the accessibility bus (on it: Chromium, notes)");
   }, BUSY(3.1));
 
-  test("the tree reads what is before the caret of the field with the focus, in the window with the focus; a password field, or an app not on the bus, it can't say", () => {
-    expect(py(`${BUS}
+  test("the tree reads what is before the caret of the field with the focus, in the window with the focus; a password field, or an app not on the bus, it can't say", async () => {
+    expect(await py(`${BUS}
 got = t.caret_text(pid=300, title="Form - Chromium")
 NODES["/n1"] = NODES["/n1"][:2] + ("password text",) + NODES["/n1"][3:]
 hidden = t.caret_text(pid=300, title="Form - Chromium")
@@ -2003,8 +2004,8 @@ print(json.dumps({"got": got, "hidden": hidden, "elsewhere": t.caret_text(pid=99
     expect(calls(term.trace(), "caret_text")).toEqual([]);
   }, BUSY(33.3));
 
-  test("the bus's resident listener starts with the first lookup, once, off the answer's path: not at the desktop's start, where it slowed the browser's first page", () => {
-    expect(py(`
+  test("the bus's resident listener starts with the first lookup, once, off the answer's path: not at the desktop's start, where it slowed the browser's first page", async () => {
+    expect(await py(`
 class FakeTree:
     listened = 0
     def listen(self, session_bus): FakeTree.listened += 1
@@ -2017,8 +2018,8 @@ desk.tree; desk.tree; time.sleep(0.1)
 print(json.dumps({"before": before, "after": FakeTree.listened}))`)).toEqual({ before: 0, after: 1 });
   }, BUSY(3.1));
 
-  test("the accessibility bus starts before the browser, which is started with its accessibility on", () => {
-    const got = py(`
+  test("the accessibility bus starts before the browser, which is started with its accessibility on", async () => {
+    const got = await py(`
 import tempfile
 p = d.Pieces(home=tempfile.mkdtemp())
 order = []

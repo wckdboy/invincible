@@ -4,6 +4,7 @@ import type { ExecResult } from "@invincible/core";
 import { AGENT_DIR, AGENTS, type AgentEvent, chooseAgentModels, OPENCODE, OWN_SIGN_IN, runAgent } from "../src/harnesses.ts";
 import { ENGRAM_ENV, engramArgv, engramBriefing } from "../src/engram.ts";
 import { type RunEvent, type RunRole, runLoop } from "../src/run.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * Coding agents: OpenCode's event stream as the primary reads it (lines captured from a
@@ -295,7 +296,7 @@ describe("running an agent", () => {
     const kinds = new Set(box.commands.map((c) => c.split(" ")[0]));
     expect([...kinds].sort()).toEqual(["mkdir", "python3", "stat"]);
     for (const command of box.commands) {
-      const check = Bun.spawnSync(["bash", "-n", "-c", command]);
+      const check = await spawned(["bash", "-n", "-c", command]);
       expect({ command: command.slice(0, 120), stderr: check.stderr.toString() }).toEqual({ command: command.slice(0, 120), stderr: "" });
     }
   });
@@ -439,7 +440,7 @@ describe("a run with a coding agent", () => {
     expect(second).toContain("Also add a test for negative numbers.");
     // The reviewer saw the evidence from the sandbox.
     expect(commands).toContain("cd /work/repo && git diff --stat");
-    for (const command of commands) expect(Bun.spawnSync(["bash", "-n", "-c", command]).stderr.toString()).toBe("");
+    for (const command of commands) expect((await spawned(["bash", "-n", "-c", command])).stderr.toString()).toBe("");
     expect(events.some((e) => e.type === "command" && e.command === "shell: python3 test_calc.py")).toBe(true);
   });
 });
@@ -480,7 +481,7 @@ describe("a run with the notes store", () => {
     expect(given.config.mcp).toEqual({ servers: { engram: { type: "local", command: engramArgv("you-project"), environment: { ...ENGRAM_ENV } } } });
     expect(given.message).toContain(engramBriefing("you-project", "tools"));
     expect(given.message).not.toContain("engram search");
-    for (const command of given.commands) expect(Bun.spawnSync(["bash", "-n", "-c", command]).stderr.toString()).toBe("");
+    for (const command of given.commands) expect((await spawned(["bash", "-n", "-c", command])).stderr.toString()).toBe("");
     const plain = await run();
     expect(plain.config.mcp).toBeUndefined();
     expect(plain.message).not.toMatch(/Notes store|engram/i);
@@ -615,7 +616,7 @@ describe("Python started isolated", () => {
     try {
       for (const name of ["select", "json", "signal", "selectors"]) writeFileSync(join(dir, `${name}.py`), `raise SystemExit("the repository's own ${name}.py was imported")\n`);
       for (const name of ["claude", "codex"] as const) {
-        const ran = Bun.spawnSync(["bash", "-c", AGENTS[name]!.check], { cwd: dir, env: { PATH: "/usr/bin:/bin", HOME: dir } });
+        const ran = await spawned(["bash", "-c", AGENTS[name]!.check], { cwd: dir, env: { PATH: "/usr/bin:/bin", HOME: dir } });
         expect([name, ran.stdout.toString()]).toEqual([name, expect.stringContaining('"type": "status"')]);
         expect([name, ran.stderr.toString()]).toEqual([name, expect.not.stringContaining("was imported")]);
       }

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { spawned } from "../../../bench/spawned.ts";
 /*
  * What does opening the PWA cost? One measurement, the same for any checkout, so a change to the
  * app is shown with its number before and after.
@@ -524,8 +525,8 @@ try {
   // The app's places, by its own list: every one is shot and watched for shifts.
   const places = (await from("apps/web/src/lib/nav.ts")).PLACES as readonly { id: string; label: string }[];
   const routes = core.routes as Record<string, { method: string; path: string }>;
-  const revision = new TextDecoder().decode(Bun.spawnSync(["git", "-C", REPO, "rev-parse", "--short", "HEAD"]).stdout).trim() || "not a git checkout";
-  const dirty = new TextDecoder().decode(Bun.spawnSync(["git", "-C", REPO, "status", "--porcelain", "--", "apps/web/src", "packages"]).stdout).trim() ? " + uncommitted changes" : "";
+  const revision = new TextDecoder().decode((await spawned(["git", "-C", REPO, "rev-parse", "--short", "HEAD"])).stdout).trim() || "not a git checkout";
+  const dirty = new TextDecoder().decode((await spawned(["git", "-C", REPO, "status", "--porcelain", "--", "apps/web/src", "packages"])).stdout).trim() ? " + uncommitted changes" : "";
 
   // ---------- a throwaway node ----------
   const home = new Home(join(tmp, "home"));

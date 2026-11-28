@@ -8,6 +8,7 @@ import { buildImages } from "./images.ts";
 import { dollarsOf, gatewayAlone, modelsContext, MODEL, recording, throughGateway } from "./loop.ts";
 import { runTask, TASKS, type TaskName, type TaskRun } from "./tasks.ts";
 import { bench, BenchVm, cannotRunHere, clearLeftovers, IN_VM } from "./vm.ts";
+import { spawned } from "../spawned.ts";
 
 /*
  * The four tasks through an agent's own tool loop with a real model (C1 step 7: "on the four tasks with a real model,
@@ -251,9 +252,9 @@ export function recordOf(report: { at: string; commit: string; model: string; ro
   };
 }
 
-const meter = (): number | null => {
+const meter = async (): Promise<number | null> => {
   if (!label) return null;
-  const r = Bun.spawnSync(["invincible", "usage", "--days", "2"], { stdout: "pipe", stderr: "pipe" });
+  const r = await spawned(["invincible", "usage", "--days", "2"], { stdout: "pipe", stderr: "pipe" });
   return r.exitCode === 0 ? (meterDollars(r.stdout.toString(), label) ?? 0) : null;
 };
 
@@ -299,7 +300,7 @@ async function main(): Promise<void> {
           break;
         }
         const stop = new AbortController();
-        const before = meter();
+        const before = await meter();
         const t0 = performance.now();
         const count: EyesCount = { calls: 0, input: 0, output: 0, ms: 0, failed: 0 };
         const limited = (why: string) => {
@@ -335,7 +336,7 @@ async function main(): Promise<void> {
         // A plan's calls are paid for already: no dollars by the token.
         const dollars = onPlan ? 0 : dollarsOf(usage);
         spent += dollars;
-        const after = meter();
+        const after = await meter();
         const one: RunRecord = { ...r, dollars: Number(dollars.toFixed(4)), meter: before !== null && after !== null ? Number((after - before).toFixed(4)) : null, minutes: Number(((performance.now() - t0) / 60_000).toFixed(2)), ...(eyes ? { eyes: { ...count, ms: Math.round(count.ms) } } : {}) };
         done.push(one);
         if (!r.pass && r.why.startsWith("the loop failed:") && limitAnswer(r.why)) stopped ??= `a limit answer: ${r.why.slice(0, 240)}`;

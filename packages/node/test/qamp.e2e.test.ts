@@ -11,6 +11,7 @@ import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
 import { freePort } from "./ports.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * The primary's tools for an agent on another machine, end to end with Q-AMP's real, pinned binary and a real node in a
@@ -179,7 +180,7 @@ describe.skipIf(missing !== null)("an agent on another machine, over Q-AMP's rea
     expect(fresh.out).toBe("");
     expect(await admin<{ grants: QampGrantView[] }>("qampGrants")).toEqual({ grants: [] });
     // Its bridge and its MCP server are gone, not left running.
-    const ps = Bun.spawnSync(["ps", "-ax", "-o", "command"], { stdout: "pipe" }).stdout.toString();
+    const ps = (await spawned(["ps", "-ax", "-o", "command"], { stdout: "pipe" })).stdout.toString();
     expect(ps).not.toContain(`--arm qamp.${made.id}`);
     const ended = daemon.store.ledger(50).map((e) => e.body).filter((b) => b.target === `qamp.${made.id}` && b.class === "delete");
     expect(ended.map((b) => b.reason)).toEqual(["the grant ended (you revoked it): its bridge stopped", "the grant ended (you revoked it): its arm is deleted, so the agent's next call is refused"]);

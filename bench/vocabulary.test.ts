@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findOldWords, IMPORTER, IMPORTER_TESTS, NAMES, STEMS, THEIRS, trackedFiles, wordsIn } from "./vocabulary.ts";
+import { spawned } from "./spawned.ts";
 
 /*
  * The vocabulary check (vocabulary.ts) catches every word of the old theme however it is written, lets ordinary
@@ -83,12 +84,12 @@ describe("what it reads", () => {
 // nothing to ask, and the commit it came from was checked by CI's Vocabulary job before it could land. So there it says
 // so and is skipped, rather than failing a deploy on a missing tool.
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const inGit = Bun.spawnSync(["git", "rev-parse", "--is-inside-work-tree"], { cwd: repoRoot, stdout: "pipe", stderr: "pipe" }).stdout.toString().trim() === "true";
+const inGit = (await spawned(["git", "rev-parse", "--is-inside-work-tree"], { cwd: repoRoot, stdout: "pipe", stderr: "pipe" })).stdout.toString().trim() === "true";
 if (!inGit) console.warn("vocabulary: not a git work tree (a deployed tree?): the repository-wide check is CI's, skipped here");
 
-test.skipIf(!inGit)("nothing in this repository says any of them", () => {
+test.skipIf(!inGit)("nothing in this repository says any of them", async () => {
   const root = repoRoot;
-  const files = trackedFiles(root);
+  const files = await trackedFiles(root);
   expect(files.length).toBeGreaterThan(500);
   expect(findOldWords(files).map((f) => `${f.path}:${f.line}: ${f.word}`)).toEqual([]);
 });

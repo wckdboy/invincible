@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +13,7 @@ import { Home } from "../src/home.ts";
 import { TeamStore } from "../src/team-store.ts";
 import { fakeDocker } from "./fake-docker.ts";
 import { freePort } from "./ports.ts";
+import { spawnText } from "../../../bench/spawned.ts";
 
 /*
  * What tasks other nodes handed over left running in an agent's VM is ended as the node comes back (fabric/handoff.ts
@@ -127,18 +127,18 @@ test("as the node comes back, what runs of handed tasks cut off left on an agent
   const repo = join(vm, "repo");
   const keep = join(vm, ".agent/handed");
   const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: "/nonexistent", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t.invalid" };
-  const git = (...a: string[]) => spawnSync("git", ["-C", repo, ...a], { env, encoding: "utf8" });
+  const git = async (...a: string[]) => await spawnText("git", ["-C", repo, ...a], { env, encoding: "utf8" });
   mkdirSync(keep, { recursive: true });
-  spawnSync("git", ["init", "-q", repo], { env });
+  await spawnText("git", ["init", "-q", repo], { env });
   writeFileSync(join(repo, "README.md"), "Noa's repository\n");
-  git("add", ".");
-  git("commit", "-q", "-m", "first");
+  await git("add", ".");
+  await git("commit", "-q", "-m", "first");
   const nonce = handedNonce();
   const leftBy = (task: string) => [`${task}.${nonce}.patch`, `${task}.${nonce}.apply-index`, `${task}.give-index`, `${task}.tree-index`, `${task}.patch`];
   // (Beside them, the list endLeftovers reads, and a name that is no task's: neither is the sweep's.)
   const others = [`${ended}.jsonl`, "not a task.patch"];
   for (const name of [...leftBy(ended), `${unknown}.${nonce}.patch`, ...leftBy(open), ...others]) writeFileSync(join(keep, name), "left\n");
-  for (const task of [ended, unknown, open]) git("update-ref", `refs/invincible/give/${task}`, "HEAD");
+  for (const task of [ended, unknown, open]) await git("update-ref", `refs/invincible/give/${task}`, "HEAD");
 
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
   const here = (command: string): string | null => {
@@ -146,11 +146,18 @@ test("as the node comes back, what runs of handed tasks cut off left on an agent
     const mapped = command.replace(/ '\/work\/repo'(?= |$)/g, ` ${q(repo)}`).replace(/ '\/work\/\.agent\/handed'(?= |$)/g, ` ${q(keep)}`);
     return mapped.includes("/work/") ? null : mapped;
   };
-  docker.onExec = (container, cmd) => {
+  // (Each command runs as the node sends it, and ends on its own time: a sweep sent is a sweep under way.)
+  let running = 0;
+  docker.onExec = async (container, cmd) => {
     const command = container === containerName(workspace.id) && cmd[0] === "bash" && cmd[1] === "-lc" ? here(cmd[2] ?? "") : null;
     if (command === null) return { code: 0, stdout: "" };
-    const ran = spawnSync("bash", ["-c", command], { env: { PATH: env.PATH, HOME: "/nonexistent" }, encoding: "utf8" });
-    return { code: ran.status ?? 1, stdout: ran.stdout, stderr: ran.stderr };
+    running += 1;
+    try {
+      const ran = await spawnText("bash", ["-c", command], { env: { PATH: env.PATH, HOME: "/nonexistent" }, encoding: "utf8" });
+      return { code: ran.status ?? 1, stdout: ran.stdout, stderr: ran.stderr };
+    } finally {
+      running -= 1;
+    }
   };
   docker.execs.length = 0;
   said.length = 0;
@@ -158,9 +165,9 @@ test("as the node comes back, what runs of handed tasks cut off left on an agent
   // The node comes back.
   daemon = await start();
   const sent = (command: string) => docker.execs.some((e) => e.container === containerName(workspace.id) && e.cmd[2] === command);
-  await until(() => sent(handedSweep("/work/repo", unknown)));
+  await until(() => sent(handedSweep("/work/repo", unknown)) && running === 0);
   // What the task that ended left, and the one the node doesn't know, is gone; the one that may still run keeps its own.
-  const left = { files: readdirSync(keep).sort(), refs: git("for-each-ref", "--format=%(refname)", "refs/invincible").stdout.trim().split("\n") };
+  const left = { files: readdirSync(keep).sort(), refs: (await git("for-each-ref", "--format=%(refname)", "refs/invincible")).stdout.trim().split("\n") };
   expect(left).toEqual({ files: [...leftBy(open), ...others].sort(), refs: [`refs/invincible/give/${open}`] });
   expect([sent(handedSweep("/work/repo", ended)), sent(handedSweep("/work/repo", open))]).toEqual([true, false]);
   expect(said.filter((line) => line.startsWith("fabric:") && line.includes("Noa"))).toEqual([]);

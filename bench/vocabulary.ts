@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawned } from "./spawned.ts";
 
 /*
  * Invincible keeps none of the words of the theme it was carried from (docs/ARCHITECTURE.md §10, where they are named
@@ -108,8 +109,8 @@ export function findOldWords(files: readonly { path: string; text: string }[]): 
 }
 
 /** The repository's tracked files, as text. */
-export function trackedFiles(root: string): { path: string; text: string }[] {
-  const listed = Bun.spawnSync(["git", "ls-files", "-z"], { cwd: root });
+export async function trackedFiles(root: string): Promise<{ path: string; text: string }[]> {
+  const listed = await spawned(["git", "ls-files", "-z"], { cwd: root });
   if (listed.exitCode !== 0) throw new Error(`git ls-files failed: ${listed.stderr.toString().trim()}`);
   return listed.stdout
     .toString()
@@ -126,7 +127,7 @@ export function trackedFiles(root: string): { path: string; text: string }[] {
 
 if (import.meta.main) {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-  const files = trackedFiles(root);
+  const files = await trackedFiles(root);
   const findings = findOldWords(files);
   for (const f of findings) console.log(`${f.path}:${f.line}: ${f.word}  ${f.text}`);
   if (findings.length) {

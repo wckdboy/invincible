@@ -1,9 +1,9 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { endLeftovers, HANDED_LISTS_COMMAND, HANDED_PROCESS_PY, handedCommand, handedEndCommand } from "../src/handed-process.ts";
+import { spawnText } from "../../../bench/spawned.ts";
 
 // Every test here runs the real helper, a shell and its processes, so its time is the machine's to give: "the 127" took
 // 0.34 s on the Mac mini at a load of 50 on 18 cores, failed in a full run at a load of 77 (27 November 2026), and ran
@@ -37,13 +37,13 @@ function scratch() {
   const dir = mkdtempSync(join(tmpdir(), "handed-"));
   return { path: (name: string) => join(dir, name), done: () => rmSync(dir, { recursive: true, force: true }) };
 }
-const shell = (command: string) => spawnSync("bash", ["-c", command], { encoding: "utf8", timeout: 30_000 });
+const shell = async (command: string) => await spawnText("bash", ["-c", command], { encoding: "utf8", timeout: 30_000 });
 const pidIn = (path: string) => Number(readFileSync(path, "utf8").trim());
 
-test("without it, what a gate starts in the background outlives the gate", () => {
+test("without it, what a gate starts in the background outlives the gate", async () => {
   const s = scratch();
   try {
-    expect(shell(`sleep 30 >/dev/null 2>&1 & echo $! > ${s.path("pid")}`).status).toBe(0);
+    expect((await shell(`sleep 30 >/dev/null 2>&1 & echo $! > ${s.path("pid")}`)).status).toBe(0);
     const pid = pidIn(s.path("pid"));
     expect(alive(pid)).toBe(true);
     process.kill(pid, "SIGKILL");
@@ -56,7 +56,7 @@ test("a gate's processes end with it, and its exit code and output pass through"
   const s = scratch();
   try {
     const gate = `sleep 30 >/dev/null 2>&1 & echo $! > ${s.path("bg")}; nohup sleep 30 >/dev/null 2>&1 & echo $! > ${s.path("nohup")}; echo said; exit 3`;
-    const ran = shell(handedCommand(gate, { task: "task-test", limitSec: 20, ends: "gate" }));
+    const ran = await shell(handedCommand(gate, { task: "task-test", limitSec: 20, ends: "gate" }));
     expect(ran.status).toBe(3);
     expect(ran.stdout).toContain("said");
     expect(await gone(pidIn(s.path("bg")))).toBe(true);
@@ -80,9 +80,9 @@ function heldUntil(said: string, gate: string): string {
   return command.replace(run, `${clock}${run}`);
 }
 
-test("a gate whose time runs out is ended, exit 137, on its own clock: whatever it got to do", () => {
+test("a gate whose time runs out is ended, exit 137, on its own clock: whatever it got to do", async () => {
   const began = Date.now();
-  const ran = shell(handedCommand("sleep 30", { task: "task-test", limitSec: 1, ends: "gate" }));
+  const ran = await shell(handedCommand("sleep 30", { task: "task-test", limitSec: 1, ends: "gate" }));
   expect(ran.status).toBe(137);
   expect(ran.stderr).toContain("time ran out after 1 s");
   expect(Date.now() - began).toBeLessThan(15_000);
@@ -92,7 +92,7 @@ test("a gate whose time runs out is ended with what it started, exit 137", async
   const s = scratch();
   try {
     const began = Date.now();
-    const ran = shell(heldUntil(s.path("bg"), `sleep 30 >/dev/null 2>&1 & echo $! > ${s.path("bg")}; sleep 30`));
+    const ran = await shell(heldUntil(s.path("bg"), `sleep 30 >/dev/null 2>&1 & echo $! > ${s.path("bg")}; sleep 30`));
     expect(ran.status).toBe(137);
     expect(ran.stderr).toContain("time ran out");
     expect(Date.now() - began).toBeLessThan(15_000);
@@ -103,10 +103,10 @@ test("a gate whose time runs out is ended with what it started, exit 137", async
 });
 
 /** A process's state, as ps says it ("T" stopped), or "" once it is gone. */
-const state = (pid: number) => spawnSync("ps", ["-o", "state=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
-async function until(what: () => boolean, ms = 10_000): Promise<void> {
+const state = async (pid: number) => (await spawnText("ps", ["-o", "state=", "-p", String(pid)], { encoding: "utf8" })).stdout.trim();
+async function until(what: () => boolean | Promise<boolean>, ms = 10_000): Promise<void> {
   const end = Date.now() + ms;
-  while (!what()) {
+  while (!(await what())) {
     if (Date.now() > end) throw new Error("it never came");
     await Bun.sleep(10);
   }
@@ -120,7 +120,7 @@ test("a gate whose time runs out is ended with what it started, even when its sh
     const run = Bun.spawn(["bash", "-c", heldUntil(s.path("bg"), gate)], { stdout: "pipe", stderr: "pipe" });
     await until(() => existsSync(s.path("shell")) && readFileSync(s.path("shell"), "utf8").endsWith("\n"));
     const shell_ = pidIn(s.path("shell"));
-    await until(() => state(shell_).startsWith("T") || state(shell_) === "");
+    await until(async () => (await state(shell_)).startsWith("T") || await state(shell_) === "");
     await Bun.sleep(1_500);
     try {
       process.kill(shell_, "SIGCONT");
@@ -149,10 +149,10 @@ function raced(said: string, gate: string): string {
   return command.replace(run, `${race}${run}`);
 }
 
-test("a gate's command makes its process group itself before it runs, so no call of its parent's can fail it (the 127)", () => {
+test("a gate's command makes its process group itself before it runs, so no call of its parent's can fail it (the 127)", async () => {
   const s = scratch();
   try {
-    const ran = shell(raced(s.path("parent-set"), "echo started; exit 4"));
+    const ran = await shell(raced(s.path("parent-set"), "echo started; exit 4"));
     expect([ran.status, ran.stdout.trim(), ran.stderr.trim()]).toEqual([4, "started", ""]);
     // (Its parent never set the child's group itself.)
     expect(existsSync(s.path("parent-set"))).toBe(false);
@@ -161,17 +161,17 @@ test("a gate's command makes its process group itself before it runs, so no call
   }
 });
 
-test("a command it can't start is said, and is 127", () => {
+test("a command it can't start is said, and is 127", async () => {
   // (No bash where its PATH looks, as an exec the kernel refuses would be: the helper's own python3 named by its path.)
   const command = handedCommand("exit 0", { task: "task-test", limitSec: 20, ends: "gate" });
-  const ran = spawnSync("/bin/bash", ["-c", command], { encoding: "utf8", timeout: 30_000, env: { PATH: "/nonexistent" } });
+  const ran = await spawnText("/bin/bash", ["-c", command], { encoding: "utf8", timeout: 30_000, env: { PATH: "/nonexistent" } });
   expect([ran.status, ran.stderr.trim()]).toEqual([127, "(Its command couldn't be started: No such file or directory.)"]);
 });
 
 test.skipIf(process.platform !== "linux")("on Linux a gate's process that left its group (setsid) is ended too: the helper is its subreaper", async () => {
   const s = scratch();
   try {
-    const ran = shell(handedCommand(`setsid sleep 30 >/dev/null 2>&1 & echo $! > ${s.path("bg")}`, { task: "task-test", limitSec: 20, ends: "gate" }));
+    const ran = await shell(handedCommand(`setsid sleep 30 >/dev/null 2>&1 & echo $! > ${s.path("bg")}`, { task: "task-test", limitSec: 20, ends: "gate" }));
     expect(ran.status).toBe(0);
     expect(await gone(pidIn(s.path("bg")))).toBe(true);
   } finally {
@@ -179,7 +179,7 @@ test.skipIf(process.platform !== "linux")("on Linux a gate's process that left i
   }
 });
 
-test("a command of the task keeps what it leaves running, by identity, and the task's end ends only that", () => {
+test("a command of the task keeps what it leaves running, by identity, and the task's end ends only that", async () => {
   // Signals are intercepted, so no real process can be killed by this test.
   const scenario = String.raw`
 import tempfile
@@ -231,7 +231,7 @@ with tempfile.TemporaryDirectory(prefix="handed-") as root:
     assert end_task("task-c") == 0
 print("ok")
 `;
-  const ran = spawnSync("python3", ["-c", `${HANDED_PROCESS_PY}\n${scenario}`], { encoding: "utf8" });
+  const ran = await spawnText("python3", ["-c", `${HANDED_PROCESS_PY}\n${scenario}`], { encoding: "utf8" });
   expect(ran.stderr).toBe("");
   expect(ran.stdout.trim()).toBe("ok");
 });
@@ -257,22 +257,22 @@ test("its commands are fixed: the command and the task are arguments, and a task
  * node runs there may take a program or a setting from either. The review's PoC wrote a ~/.bash_profile whose python3
  * said each gate passed; a json.py where the helper starts would do the same, imported before the helper's own.
  */
-test("a gate's helper is the VM's own python3, by its path: a python3 the task's login profile defines doesn't answer for it (R8-3)", () => {
+test("a gate's helper is the VM's own python3, by its path: a python3 the task's login profile defines doesn't answer for it (R8-3)", async () => {
   const s = scratch();
   try {
     writeFileSync(s.path(".bash_profile"), 'python3() { echo "passed, said the task"; return 0; }\n');
-    const ran = spawnSync("bash", ["-lc", handedCommand("echo ran; exit 3", { task: "task-test", limitSec: 20, ends: "gate" })], { encoding: "utf8", timeout: 30_000, env: { ...process.env, HOME: s.path("") } });
+    const ran = await spawnText("bash", ["-lc", handedCommand("echo ran; exit 3", { task: "task-test", limitSec: 20, ends: "gate" })], { encoding: "utf8", timeout: 30_000, env: { ...process.env, HOME: s.path("") } });
     expect([ran.status, ran.stdout.trim()]).toEqual([3, "ran"]);
   } finally {
     s.done();
   }
 });
 
-test("a module where its helper starts isn't run by it: it is python3 -I (R8-3)", () => {
+test("a module where its helper starts isn't run by it: it is python3 -I (R8-3)", async () => {
   const s = scratch();
   try {
     writeFileSync(s.path("json.py"), `import os\nopen(${JSON.stringify(s.path("planted-ran"))}, "w").close()\nos._exit(0)\n`);
-    const ran = spawnSync("bash", ["-c", handedCommand("echo ran; exit 3", { task: "task-test", limitSec: 20, ends: "gate" })], { cwd: s.path(""), encoding: "utf8", timeout: 30_000 });
+    const ran = await spawnText("bash", ["-c", handedCommand("echo ran; exit 3", { task: "task-test", limitSec: 20, ends: "gate" })], { cwd: s.path(""), encoding: "utf8", timeout: 30_000 });
     expect([ran.status, ran.stdout.trim(), existsSync(s.path("planted-ran"))]).toEqual([3, "ran", false]);
   } finally {
     s.done();
@@ -286,7 +286,7 @@ test("a module where its helper starts isn't run by it: it is python3 -I (R8-3)"
  * Here /proc is a procfs-shaped fixture and the signals are intercepted, as end_task's test does: no real process is
  * ended.
  */
-test("a process whose leader thread has exited while another runs is kept on its task's list, and ended with the task; a zombie isn't (R11-1)", () => {
+test("a process whose leader thread has exited while another runs is kept on its task's list, and ended with the task; a zombie isn't (R11-1)", async () => {
   const scenario = String.raw`
 import tempfile
 with tempfile.TemporaryDirectory(prefix="handed-") as root:
@@ -324,24 +324,24 @@ with tempfile.TemporaryDirectory(prefix="handed-") as root:
     assert killed == [401], killed
 print("ok")
 `;
-  const ran = spawnSync("python3", ["-I", "-c", `import shutil\n${HANDED_PROCESS_PY}\n${scenario}`], { encoding: "utf8" });
+  const ran = await spawnText("python3", ["-I", "-c", `import shutil\n${HANDED_PROCESS_PY}\n${scenario}`], { encoding: "utf8" });
   expect(ran.stderr).toBe("");
   expect(ran.stdout.trim()).toBe("ok");
 });
 
-test("a gate whose processes couldn't all be ended doesn't pass, whatever its command said (R9-2)", () => {
+test("a gate whose processes couldn't all be ended doesn't pass, whatever its command said (R9-2)", async () => {
   const run = "\nsys.exit(run(";
   const command = handedCommand("exit 0", { task: "task-test", limitSec: 20, ends: "gate" });
   expect(command.split(run).length).toBe(2);
   // (Its end held to say what it would where a process outlived it: the helper's group end fails.)
-  const ran = shell(command.replace(run, `\nend_command = lambda group: False${run}`));
+  const ran = await shell(command.replace(run, `\nend_command = lambda group: False${run}`));
   expect([ran.status, ran.stderr.trim()]).toEqual([1, "(Processes it started could not all be ended.)\n(So it doesn't pass.)"]);
   // A task's own command is as it was: its code is its own.
-  const task = shell(handedCommand("exit 0", { task: "task-test", limitSec: 20, ends: "task" }).replace(run, `\nend_command = lambda group: False\nkeep = lambda task, group: None${run}`));
+  const task = await shell(handedCommand("exit 0", { task: "task-test", limitSec: 20, ends: "task" }).replace(run, `\nend_command = lambda group: False\nkeep = lambda task, group: None${run}`));
   expect(task.status).toBe(0);
 });
 
-test("a gate on its copy keeps its VM's read-only PATH where the image's /etc/profile sets PATH afresh, as Debian's does (the lab image's /opt/lab/bin)", () => {
+test("a gate on its copy keeps its VM's read-only PATH where the image's /etc/profile sets PATH afresh, as Debian's does (the lab image's /opt/lab/bin)", async () => {
   const s = scratch();
   try {
     const on = realpathSync(s.path(""));
@@ -350,8 +350,8 @@ test("a gate on its copy keeps its VM's read-only PATH where the image's /etc/pr
     writeFileSync(join(on, "profile"), 'PATH="/usr/local/games"\nexport PATH\n');
     const helper = HANDED_PROCESS_PY.replaceAll("/etc/profile", join(on, "profile"));
     const env = { ...process.env, PATH: process.env.PATH ?? "/usr/bin:/bin" };
-    const held = spawnSync("python3", ["-I", "-c", `${helper}\nprint(held_path())`], { encoding: "utf8", env }).stdout.trim().split(":");
-    const ran = spawnSync("python3", ["-I", "-c", `${helper}\nsys.exit(run("gate", "task-test", 20.0, sys.argv[1], sys.argv[2]))`, 'printf "%s" "$PATH"', on], { encoding: "utf8", timeout: 30_000, env });
+    const held = (await spawnText("python3", ["-I", "-c", `${helper}\nprint(held_path())`], { encoding: "utf8", env })).stdout.trim().split(":");
+    const ran = await spawnText("python3", ["-I", "-c", `${helper}\nsys.exit(run("gate", "task-test", 20.0, sys.argv[1], sys.argv[2]))`, 'printf "%s" "$PATH"', on], { encoding: "utf8", timeout: 30_000, env });
     expect(ran.stderr).toBe("");
     const path = ran.stdout.split(":");
     // What the profile put first stays first; each of the VM's read-only folders comes after it, none lost.
@@ -362,7 +362,7 @@ test("a gate on its copy keeps its VM's read-only PATH where the image's /etc/pr
   }
 });
 
-test("a gate on its copy runs in the copy's tree, its HOME and TMPDIR the copy's own, with nothing else of the VM's environment (R8-3)", () => {
+test("a gate on its copy runs in the copy's tree, its HOME and TMPDIR the copy's own, with nothing else of the VM's environment (R8-3)", async () => {
   const s = scratch();
   try {
     // (handedCommand's `on` is a folder of GATES_DIR's, which only a task's VM has: here the helper's own run() is given a scratch one.)
@@ -374,7 +374,7 @@ test("a gate on its copy runs in the copy's tree, its HOME and TMPDIR the copy's
     writeFileSync(join(on, "bin", "ls"), "#!/bin/sh\necho planted\n", { mode: 0o755 });
     writeFileSync(join(on, "env.sh"), "ls() { echo bash_env; }\n");
     const gate = 'printf "%s\\n" "$PWD" "$HOME" "$TMPDIR" "$LANG" "${FOO-unset}" "${BASH_ENV-unset}"; type -t ls; command -v ls || echo none; case ":$PATH:" in *":' + join(on, "bin") + ':"*) echo "planted on PATH";; esac';
-    const ran = spawnSync("python3", ["-I", "-c", `${HANDED_PROCESS_PY}\nsys.exit(run("gate", "task-test", 20.0, sys.argv[1], sys.argv[2]))`, gate, on], {
+    const ran = await spawnText("python3", ["-I", "-c", `${HANDED_PROCESS_PY}\nsys.exit(run("gate", "task-test", 20.0, sys.argv[1], sys.argv[2]))`, gate, on], {
       encoding: "utf8",
       timeout: 30_000,
       env: { ...process.env, FOO: "bar", BASH_ENV: join(on, "env.sh"), HOME: join(on, "home"), PATH: `${join(on, "bin")}:${process.env.PATH}` },
@@ -386,9 +386,9 @@ test("a gate on its copy runs in the copy's tree, its HOME and TMPDIR the copy's
     expect(said.slice(6).filter((line) => /profile|rc|bash_env|planted/.test(line))).toEqual([]);
     expect(said[6]).not.toBe("function");
     // The node's install cache alone is passed on, where its round's VM names it, as the node mounts it (core's VM_BUN_CACHE).
-    const cache = (value: string) => spawnSync("python3", ["-I", "-c", `${HANDED_PROCESS_PY}\nsys.exit(run("gate", "task-test", 20.0, sys.argv[1], sys.argv[2]))`, 'printf "%s" "${BUN_INSTALL_CACHE_DIR-unset}"', on], { encoding: "utf8", timeout: 30_000, env: { ...process.env, BUN_INSTALL_CACHE_DIR: value } }).stdout;
-    expect(cache("/cache/bun")).toBe("/cache/bun");
-    expect(cache(join(on, "home"))).toBe("unset");
+    const cache = async (value: string) => (await spawnText("python3", ["-I", "-c", `${HANDED_PROCESS_PY}\nsys.exit(run("gate", "task-test", 20.0, sys.argv[1], sys.argv[2]))`, 'printf "%s" "${BUN_INSTALL_CACHE_DIR-unset}"', on], { encoding: "utf8", timeout: 30_000, env: { ...process.env, BUN_INSTALL_CACHE_DIR: value } })).stdout;
+    expect(await cache("/cache/bun")).toBe("/cache/bun");
+    expect(await cache(join(on, "home"))).toBe("unset");
   } finally {
     s.done();
   }
@@ -400,7 +400,7 @@ test("a gate on its copy runs in the copy's tree, its HOME and TMPDIR the copy's
  * no bare repository it isn't named (safe.bareRepository=explicit, from its environment, which no repository's config
  * overrides), and looks for none above its copy (GIT_CEILING_DIRECTORIES).
  */
-test("a gate's git takes no repository it wasn't given: a bare layout as its tree, or a repository above its copy, runs nothing of its config (I-13a)", () => {
+test("a gate's git takes no repository it wasn't given: a bare layout as its tree, or a repository above its copy, runs nothing of its config (I-13a)", async () => {
   const s = scratch();
   // (Where what a config names would leave its mark: outside the copy.)
   const marks = scratch();
@@ -414,9 +414,9 @@ test("a gate's git takes no repository it wasn't given: a bare layout as its tre
     expect(git).not.toBeNull();
     writeFileSync(marks.path("profile"), `PATH="${dirname(git!)}:/usr/bin:/bin"\nexport PATH\n`);
     const helper = HANDED_PROCESS_PY.replaceAll("/etc/profile", marks.path("profile"));
-    const gate = (command: string) => spawnSync("python3", ["-I", "-c", `${helper}\nsys.exit(run("gate", "task-test", 20.0, sys.argv[1], sys.argv[2]))`, command, on], { encoding: "utf8", timeout: 30_000, env: { ...process.env } });
+    const gate = async (command: string) => await spawnText("python3", ["-I", "-c", `${helper}\nsys.exit(run("gate", "task-test", 20.0, sys.argv[1], sys.argv[2]))`, command, on], { encoding: "utf8", timeout: 30_000, env: { ...process.env } });
     // (The gate's own git, a real one: what follows is about what it takes for a repository, never whether it runs.)
-    const found = gate('command -v git; git --version');
+    const found = await gate('command -v git; git --version');
     expect([found.status, found.stdout.trim().split("\n")[1]]).toEqual([0, expect.stringMatching(/^git version /)]);
     // Its tree laid out as a bare git directory, whose config makes the tree its work tree and names a command.
     const bare = marks.path("BARE-RAN");
@@ -424,7 +424,7 @@ test("a gate's git takes no repository it wasn't given: a bare layout as its tre
     mkdirSync(join(on, "tree", "refs", "heads"), { recursive: true });
     writeFileSync(join(on, "tree", "HEAD"), "ref: refs/heads/main\n");
     writeFileSync(join(on, "tree", "config"), `[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = .\n\tfsmonitor = touch ${bare}; false\n`);
-    const one = gate("git status --porcelain; echo \"git $?\"");
+    const one = await gate("git status --porcelain; echo \"git $?\"");
     expect(existsSync(bare)).toBe(false);
     expect(one.stdout.trim().split("\n").at(-1)).not.toBe("git 0");
     expect(one.stderr).toContain("safe.bareRepository");
@@ -432,9 +432,9 @@ test("a gate's git takes no repository it wasn't given: a bare layout as its tre
     for (const name of ["HEAD", "config"]) rmSync(join(on, "tree", name));
     for (const name of ["objects", "refs"]) rmSync(join(on, "tree", name), { recursive: true });
     const above = marks.path("ABOVE-RAN");
-    expect(spawnSync("git", ["init", "-q", on], { encoding: "utf8" }).status).toBe(0);
-    expect(spawnSync("git", ["-C", on, "config", "core.fsmonitor", `touch ${above}; false`], { encoding: "utf8" }).status).toBe(0);
-    const two = gate("git status --porcelain; echo \"git $?\"");
+    expect((await spawnText("git", ["init", "-q", on], { encoding: "utf8" })).status).toBe(0);
+    expect((await spawnText("git", ["-C", on, "config", "core.fsmonitor", `touch ${above}; false`], { encoding: "utf8" })).status).toBe(0);
+    const two = await gate("git status --porcelain; echo \"git $?\"");
     expect(existsSync(above)).toBe(false);
     expect(two.stdout.trim().split("\n").at(-1)).not.toBe("git 0");
     expect(two.stderr).toContain("not a git repository");

@@ -2,6 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * The part of a deploy that runs on the server as the node's own user
@@ -19,7 +20,7 @@ const root = mkdtempSync(join(tmpdir(), "invincible-deploy-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 /** A server's home with one release deployed and running, and a commit staged to follow it (with Q-AMP's binary, if given). */
-function server(name: string, tests: "pass" | "fail", qamp?: string) {
+async function server(name: string, tests: "pass" | "fail", qamp?: string) {
   const home = join(root, name);
   const stage = join(root, `${name}-stage`);
   mkdirSync(join(home, ".bun/bin"), { recursive: true });
@@ -33,7 +34,7 @@ function server(name: string, tests: "pass" | "fail", qamp?: string) {
   // Bun, as far as the script asks it: its version, an install, the test suite (where it ran, and how it ended).
   writeFileSync(join(home, ".bun/bin/bun"), `#!/bin/sh\ncase "$1" in\n  --version) echo ${pinned} ;;\n  test) pwd > "$HOME/tested-in"; echo "1 ${tests}"; ${tests === "pass" ? "exit 0" : "exit 1"} ;;\nesac\n`);
   chmodSync(join(home, ".bun/bin/bun"), 0o755);
-  const run = Bun.spawnSync(["bash", script, stage, "bbbbbbbbbbbb", "update", "ultra", "-", "-", "7400", "0", "0", "0", "0", "0"], {
+  const run = await spawned(["bash", script, stage, "bbbbbbbbbbbb", "update", "ultra", "-", "-", "7400", "0", "0", "0", "0", "0"], {
     env: { HOME: home, PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", INVINCIBLE_USER_PHASE: "1" },
     stdout: "pipe",
     stderr: "pipe",
@@ -47,8 +48,8 @@ function server(name: string, tests: "pass" | "fail", qamp?: string) {
   };
 }
 
-test("Q-AMP's binary shipped with a deploy that isn't the pinned one refuses the deploy: nothing installed, nothing tested, app as it was", () => {
-  const deploy = server("impostor", "pass", "#!/bin/sh\necho not qamp\n");
+test("Q-AMP's binary shipped with a deploy that isn't the pinned one refuses the deploy: nothing installed, nothing tested, app as it was", async () => {
+  const deploy = await server("impostor", "pass", "#!/bin/sh\necho not qamp\n");
   expect(deploy.code).toBe(1);
   expect(deploy.said).toContain(`failed its checksum (it isn't Q-AMP ${qampPinned} for this machine): not installed`);
   expect(deploy.said).toContain("Q-AMP's binary wasn't installed: not deploying");
@@ -79,7 +80,7 @@ test("the deploy's LaunchAgent gives a Mac node the PATH the installer's and the
 // deploy wrote /usr/local/bin's invincible and inv (the mini, 28 November 2026: no invincible on its PATH). The setup
 // writes them where the installer does (scripts/install.sh: ~/.local/bin), each run as the node is.
 /** The setup's install_commands, run alone in a home of its own with a stand-in Bun that says what it was given. */
-function commands(name: string, opts: { path?: string; oldInvLink?: boolean } = {}) {
+async function commands(name: string, opts: { path?: string; oldInvLink?: boolean } = {}) {
   const home = join(root, name);
   const bin = join(home, ".local/bin");
   const app = join(home, "invincible/app");
@@ -94,44 +95,44 @@ function commands(name: string, opts: { path?: string; oldInvLink?: boolean } = 
   }
   const fn = /^install_commands\(\) \{\n[\s\S]*?\n\}$/m.exec(readFileSync(script, "utf8"))?.[0];
   if (!fn) throw new Error("scripts/remote-setup.sh has no install_commands");
-  const run = Bun.spawnSync(["bash", "-c", `set -euo pipefail\n${fn}\ninstall_commands`], {
+  const run = await spawned(["bash", "-c", `set -euo pipefail\n${fn}\ninstall_commands`], {
     env: { HOME: home, APP: app, BUN: bun, PATH: opts.path ?? "/usr/bin:/bin:/usr/sbin:/sbin" },
     stdout: "pipe",
     stderr: "pipe",
   });
   /** One of the commands it wrote, typed over ssh as a Mac runs it: launchd's PATH and nothing else. */
-  const typed = (command: string, ...args: string[]) => Bun.spawnSync([join(bin, command), ...args], { env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" }, stdout: "pipe" }).stdout.toString();
+  const typed = async (command: string, ...args: string[]) => (await spawned([join(bin, command), ...args], { env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" }, stdout: "pipe" })).stdout.toString();
   return { code: run.exitCode, said: `${run.stdout.toString()}${run.stderr.toString()}`, bin, app, typed };
 }
 
-test("a node deployed as its own user gets the invincible and inv commands where the installer puts them, each run as the node is", () => {
-  const deploy = commands("commands");
+test("a node deployed as its own user gets the invincible and inv commands where the installer puts them, each run as the node is", async () => {
+  const deploy = await commands("commands");
   expect(deploy.code).toBe(0);
   // Its CLI, on the deployed app (the link a deploy moves, so the next release is the one typed), with the file keystore.
-  expect(deploy.typed("invincible", "agents", "routing")).toBe(`keystore=file\n${deploy.app}/packages/node/src/cli.ts\nagents\nrouting\n`);
-  expect(deploy.typed("inv", "status")).toBe(`keystore=file\n${deploy.app}/packages/node/src/inv/main.ts\nstatus\n`);
+  expect(await deploy.typed("invincible", "agents", "routing")).toBe(`keystore=file\n${deploy.app}/packages/node/src/cli.ts\nagents\nrouting\n`);
+  expect(await deploy.typed("inv", "status")).toBe(`keystore=file\n${deploy.app}/packages/node/src/inv/main.ts\nstatus\n`);
   for (const command of ["invincible", "inv"]) expect(statSync(join(deploy.bin, command)).mode & 0o777).toBe(0o755);
   // Where ~/.local/bin isn't on the PATH, it says how to put it there, as the installer does; where it is, nothing.
   expect(deploy.said).toContain(`add ${deploy.bin} to your PATH to type invincible anywhere`);
-  expect(commands("commands-on-path", { path: `${join(root, "commands-on-path/.local/bin")}:/usr/bin:/bin` }).said).toBe("");
+  expect((await commands("commands-on-path", { path: `${join(root, "commands-on-path/.local/bin")}:/usr/bin:/bin` })).said).toBe("");
 });
 
-test("an inv that was a link to invincible is replaced, never written through: invincible stays the CLI", () => {
-  const deploy = commands("commands-old-link", { oldInvLink: true });
+test("an inv that was a link to invincible is replaced, never written through: invincible stays the CLI", async () => {
+  const deploy = await commands("commands-old-link", { oldInvLink: true });
   expect(deploy.code).toBe(0);
   expect(lstatSync(join(deploy.bin, "inv")).isSymbolicLink()).toBe(false);
-  expect(deploy.typed("invincible")).toBe(`keystore=file\n${deploy.app}/packages/node/src/cli.ts\n`);
-  expect(deploy.typed("inv")).toBe(`keystore=file\n${deploy.app}/packages/node/src/inv/main.ts\n`);
+  expect(await deploy.typed("invincible")).toBe(`keystore=file\n${deploy.app}/packages/node/src/cli.ts\n`);
+  expect(await deploy.typed("inv")).toBe(`keystore=file\n${deploy.app}/packages/node/src/inv/main.ts\n`);
 });
 
-test("the commands are written for a node deployed as its own user, before its service starts; a root deploy's user phase writes none", () => {
+test("the commands are written for a node deployed as its own user, before its service starts; a root deploy's user phase writes none", async () => {
   const text = readFileSync(script, "utf8");
   const rootPhaseEnds = text.indexOf("[[ -n ${INVINCIBLE_USER_PHASE:-} ]] && exit 0");
   const written = text.indexOf("\ninstall_commands\n");
   const services = text.indexOf("if [[ $(uname) == Linux ]] && command -v systemctl");
   expect([rootPhaseEnds > 0, written > rootPhaseEnds, services > written]).toEqual([true, true, true]);
   // (The root phase writes /usr/local/bin's; the service user's home gets none.)
-  const deploy = server("root-user-phase", "pass");
+  const deploy = await server("root-user-phase", "pass");
   expect(deploy.code).toBe(0);
   expect(existsSync(join(deploy.home, ".local/bin"))).toBe(false);
 });
@@ -157,8 +158,8 @@ test("no piped command substitution in the setup can end the deploy: each that o
   expect(fragile.map(({ n, line }) => `${n}: ${line.trim().slice(0, 80)}`)).toEqual([]);
 });
 
-test("a release whose tests fail on the host never becomes app: the node's code on disk stays the release it runs", () => {
-  const deploy = server("refused", "fail");
+test("a release whose tests fail on the host never becomes app: the node's code on disk stays the release it runs", async () => {
+  const deploy = await server("refused", "fail");
   expect(deploy.code).toBe(1);
   expect(deploy.said).toContain("tests failed on this host");
   // What was tested is the new release, in its own directory.
@@ -166,8 +167,8 @@ test("a release whose tests fail on the host never becomes app: the node's code 
   expect(deploy.app).toBe("aaaaaaaaaaaa");
 });
 
-test("a release that passes its tests on the host becomes app", () => {
-  const deploy = server("taken", "pass");
+test("a release that passes its tests on the host becomes app", async () => {
+  const deploy = await server("taken", "pass");
   expect(deploy.said).toContain("existing node kept");
   expect(deploy.code).toBe(0);
   expect(deploy.testedIn).toBe("bbbbbbbbbbbb");

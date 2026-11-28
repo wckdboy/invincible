@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { spawned } from "../../../bench/spawned.ts";
 
 // (Each case runs its gates in sh beside git, as the node does: real processes, which take more than bun's default
 // 5 s on a loaded machine. Bun then ends the test and kills the gate it was waiting on, "1 dangling process".)
@@ -18,28 +19,28 @@ import { GATES, widgetsCase, WIDGETS, YoursStandIn } from "./yours-standin.ts";
  * it left in them.
  */
 
-const git = (dir: string, ...args: string[]) => {
-  const run = Bun.spawnSync(["git", "-C", dir, "-c", "user.email=k@example.invalid", "-c", "user.name=agent", ...args]);
+const git = async (dir: string, ...args: string[]) => {
+  const run = await spawned(["git", "-C", dir, "-c", "user.email=k@example.invalid", "-c", "user.name=agent", ...args]);
   if (run.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${run.stderr.toString()}`);
   return run.stdout.toString().trim();
 };
 
 /** An invented repository at a base commit, and the agent's change as a patch (the working tree back at base). */
-function repoOf(base: Record<string, string>, agent: Record<string, string>): { dir: string; base: string; patch: Uint8Array; remove(): void } {
+async function repoOf(base: Record<string, string>, agent: Record<string, string>): Promise<{ dir: string; base: string; patch: Uint8Array; remove(): void }> {
   const dir = mkdtempSync(join(tmpdir(), "invincible-heldout-"));
   const write = (path: string, content: string) => {
     mkdirSync(join(dir, ...path.split("/").slice(0, -1)), { recursive: true });
     writeFileSync(join(dir, path), content);
   };
   for (const [p, c] of Object.entries(base)) write(p, c);
-  git(dir, "init", "-q");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
-  const baseSha = git(dir, "rev-parse", "HEAD");
+  await git(dir, "init", "-q");
+  await git(dir, "add", "-A");
+  await git(dir, "commit", "-qm", "base");
+  const baseSha = await git(dir, "rev-parse", "HEAD");
   for (const [p, c] of Object.entries(agent)) write(p, c);
-  git(dir, "add", "-A");
-  const patch = Bun.spawnSync(["git", "-C", dir, "diff", "--binary", "--cached", baseSha]).stdout;
-  git(dir, "reset", "--hard", "-q", baseSha);
+  await git(dir, "add", "-A");
+  const patch = (await spawned(["git", "-C", dir, "diff", "--binary", "--cached", baseSha])).stdout;
+  await git(dir, "reset", "--hard", "-q", baseSha);
   return { dir, base: baseSha, patch: new Uint8Array(patch), remove: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
@@ -146,7 +147,7 @@ describe("held-out tests", () => {
   });
 
   test("a case whose kept patch adds tests to a test file its gate runs now counts that gate", async () => {
-    const repo = keep(repoOf({ "total.sh": TOTAL_POSITIVE, "test/total_test.sh": TEST_SUM }, { "total.sh": TOTAL_ALL, "test/total_test.sh": TEST_NEGATIVE }));
+    const repo = keep(await repoOf({ "total.sh": TOTAL_POSITIVE, "test/total_test.sh": TEST_SUM }, { "total.sh": TOTAL_ALL, "test/total_test.sh": TEST_NEGATIVE }));
     const node = standIn(repo, FIX_SUM_ALL);
     const record = (await attemptCase(node, widgetsCase(repo.base, { gates: [GATES.test] }), job()))!;
     valid(record);
@@ -160,7 +161,7 @@ describe("held-out tests", () => {
   });
 
   test("an engineer's patch that edits those tests is graded by the agent's version of them", async () => {
-    const repo = keep(repoOf({ "total.sh": TOTAL_POSITIVE, "test/total_test.sh": TEST_SUM }, { "total.sh": TOTAL_ALL, "test/total_test.sh": TEST_NEGATIVE }));
+    const repo = keep(await repoOf({ "total.sh": TOTAL_POSITIVE, "test/total_test.sh": TEST_SUM }, { "total.sh": TOTAL_ALL, "test/total_test.sh": TEST_NEGATIVE }));
     const node = standIn(repo, WEAKEN);
     const record = (await attemptCase(node, widgetsCase(repo.base, { gates: [GATES.test] }), job()))!;
     valid(record);
@@ -173,7 +174,7 @@ describe("held-out tests", () => {
     // git apply reads --include and --exclude as patterns: unescaped, [n] would match only "n", the agent's test would
     // never be put in place, and the gate would pass before any work and not count.
     const named = "test/[n]_total_test.sh";
-    const repo = keep(repoOf({ "total.sh": TOTAL_POSITIVE, [named]: TEST_SUM }, { "total.sh": TOTAL_ALL, [named]: TEST_NEGATIVE }));
+    const repo = keep(await repoOf({ "total.sh": TOTAL_POSITIVE, [named]: TEST_SUM }, { "total.sh": TOTAL_ALL, [named]: TEST_NEGATIVE }));
     const node = standIn(repo, FIX_SUM_ALL);
     const record = (await attemptCase(node, widgetsCase(repo.base, { gates: [`sh '${named}'`] }), job()))!;
     valid(record);
@@ -183,7 +184,7 @@ describe("held-out tests", () => {
   });
 
   test("a case whose kept change is only tests, which pass on the commit as it was, still isn't graded and says why", async () => {
-    const repo = keep(repoOf({ "total.sh": TOTAL_ALL, "test/total_test.sh": TEST_SUM }, { "test/total_test.sh": TEST_MORE_PASSING }));
+    const repo = keep(await repoOf({ "total.sh": TOTAL_ALL, "test/total_test.sh": TEST_SUM }, { "test/total_test.sh": TEST_MORE_PASSING }));
     const node = standIn(repo);
     const record = (await attemptCase(node, widgetsCase(repo.base, { gates: [GATES.test] }), job()))!;
     valid(record);

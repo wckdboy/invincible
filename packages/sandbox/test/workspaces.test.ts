@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { budgetProblem, parseStats, WorkspaceHelper, type WorkspaceStats } from "../src/index.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * Sandbox disk limits: the helper's answers, the budget rule, and the client that
@@ -167,7 +168,7 @@ describe.skipIf(!unixSockets)("talking to the helper", () => {
 });
 
 describe.skipIf(!unixSockets)("the installed helper's retention rules", () => {
-  test("remount preserves existing data; retained data requires remove-owned", () => {
+  test("remount preserves existing data; retained data requires remove-owned", async () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-helper-"));
     const root = join(dir, "workspaces");
     const bin = join(dir, "bin");
@@ -182,8 +183,8 @@ describe.skipIf(!unixSockets)("the installed helper's retention rules", () => {
     const source = readFileSync(new URL("../../../sandbox/invincible-workspace", import.meta.url), "utf8");
     expect(source.match(/^ROOT=\/var\/lib\/invincible-workspaces$/gm)).toHaveLength(1);
     const isolated = source.replace(/^ROOT=\/var\/lib\/invincible-workspaces$/m, 'ROOT="$TEST_WORKSPACE_ROOT"');
-    const ask = (command: string) => {
-      const result = Bun.spawnSync(["sh", "-c", isolated], {
+    const ask = async (command: string) => {
+      const result = await spawned(["sh", "-c", isolated], {
         env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_WORKSPACE_ROOT: root, TEST_WORKSPACE_TRACE: trace },
         stdin: Buffer.from(`${command}\n`),
       });
@@ -191,19 +192,19 @@ describe.skipIf(!unixSockets)("the installed helper's retention rules", () => {
       return result.stdout.toString().trim();
     };
     try {
-      expect(ask(`mount ${id}`)).toBe("error existing workspace is missing");
+      expect(await ask(`mount ${id}`)).toBe("error existing workspace is missing");
       expect(existsSync(join(root, `${id}.img`))).toBe(false);
       writeFileSync(join(root, `${id}.img`), "existing agent work");
       mkdirSync(join(root, id));
-      expect(ask(`mount ${id}`)).toBe("ok");
+      expect(await ask(`mount ${id}`)).toBe("ok");
       expect(readFileSync(trace, "utf8")).toBe(`-o loop,nodev,nosuid,discard ${root}/${id}.img ${root}/${id}\n`);
       expect(readFileSync(join(root, `${id}.img`), "utf8")).toBe("existing agent work");
-      expect(ask(`retain ${id}`)).toBe("ok");
+      expect(await ask(`retain ${id}`)).toBe("ok");
       expect(existsSync(join(root, `${id}.keep`))).toBe(true);
-      expect(ask(`remove ${id}`)).toBe("error retained workspace needs owner-approved removal");
+      expect(await ask(`remove ${id}`)).toBe("error retained workspace needs owner-approved removal");
       expect(readFileSync(join(root, `${id}.img`), "utf8")).toBe("existing agent work");
       expect(existsSync(join(root, id))).toBe(true);
-      expect(ask(`remove-owned ${id}`)).toBe("ok");
+      expect(await ask(`remove-owned ${id}`)).toBe("ok");
       expect([id, `${id}.img`, `${id}.keep`].some((name) => existsSync(join(root, name)))).toBe(false);
 
       // Recovery must not follow a substituted image into another workspace.
@@ -211,14 +212,14 @@ describe.skipIf(!unixSockets)("the installed helper's retention rules", () => {
       writeFileSync(other, "unrelated data");
       symlinkSync(other, join(root, `${id}.img`));
       mkdirSync(join(root, id));
-      expect(ask(`mount ${id}`)).toBe("error existing workspace is missing");
-      expect(ask(`retain ${id}`)).toBe("error existing workspace is missing");
+      expect(await ask(`mount ${id}`)).toBe("error existing workspace is missing");
+      expect(await ask(`retain ${id}`)).toBe("error existing workspace is missing");
       expect(readFileSync(other, "utf8")).toBe("unrelated data");
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
   // (It runs the installed helper's shell, which starts processes: 30 s, not bun's 5, for a busy machine; on 19 November 2026 it ran past 5 s under load.)
-  test("a workspace grows where it is mounted, or unmounted after a check, and never shrinks or grows another's disk", () => {
+  test("a workspace grows where it is mounted, or unmounted after a check, and never shrinks or grows another's disk", async () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-helper-"));
     const root = join(dir, "workspaces");
     const bin = join(dir, "bin");
@@ -236,9 +237,9 @@ describe.skipIf(!unixSockets)("the installed helper's retention rules", () => {
     writeFileSync(join(bin, "stat"), '#!/bin/sh\necho "$TEST_SIZE"\n', { mode: 0o700 });
     const source = readFileSync(new URL("../../../sandbox/invincible-workspace", import.meta.url), "utf8");
     const isolated = source.replace(/^ROOT=\/var\/lib\/invincible-workspaces$/m, 'ROOT="$TEST_WORKSPACE_ROOT"');
-    const ask = (command: string, env: { mounted: boolean; source?: string; size?: number; backing?: string }) => {
+    const ask = async (command: string, env: { mounted: boolean; source?: string; size?: number; backing?: string }) => {
       rmSync(trace, { force: true });
-      const result = Bun.spawnSync(["sh", "-c", isolated], {
+      const result = await spawned(["sh", "-c", isolated], {
         env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_WORKSPACE_ROOT: root, TEST_WORKSPACE_TRACE: trace, TEST_MOUNTED: env.mounted ? "1" : "0", TEST_SOURCE: env.source ?? "/dev/loop7", TEST_SIZE: String(env.size ?? GIB), TEST_BACKING: env.backing ?? join(root, `${id}.img`) },
         stdin: Buffer.from(`${command}\n`),
       });
@@ -247,27 +248,27 @@ describe.skipIf(!unixSockets)("the installed helper's retention rules", () => {
     };
     const img = join(root, `${id}.img`);
     try {
-      expect(ask(`grow ${id} 3`, { mounted: true }).said).toBe("error existing workspace is missing");
+      expect((await ask(`grow ${id} 3`, { mounted: true })).said).toBe("error existing workspace is missing");
       writeFileSync(img, "agent work");
       mkdirSync(join(root, id));
       // Mounted: the image, its loop device, then the filesystem, while the sandbox runs.
-      expect(ask(`grow ${id} 3`, { mounted: true })).toEqual({ said: "ok", calls: [`truncate -s 3G ${img}`, "losetup -c /dev/loop7", "resize2fs /dev/loop7"] });
+      expect(await ask(`grow ${id} 3`, { mounted: true })).toEqual({ said: "ok", calls: [`truncate -s 3G ${img}`, "losetup -c /dev/loop7", "resize2fs /dev/loop7"] });
       // Not mounted: checked first, then grown.
-      expect(ask(`grow ${id} 3`, { mounted: false })).toEqual({ said: "ok", calls: [`truncate -s 3G ${img}`, `e2fsck -f -p ${img}`, `resize2fs ${img}`] });
+      expect(await ask(`grow ${id} 3`, { mounted: false })).toEqual({ said: "ok", calls: [`truncate -s 3G ${img}`, `e2fsck -f -p ${img}`, `resize2fs ${img}`] });
       // Never smaller, nor the same; never a disk that isn't a workspace's loop device.
-      expect(ask(`grow ${id} 1`, { mounted: true })).toEqual({ said: "error a workspace only grows", calls: [] });
-      expect(ask(`grow ${id} 3`, { mounted: true, size: 3 * GIB })).toEqual({ said: "error a workspace only grows", calls: [] });
-      expect(ask(`grow ${id} 3`, { mounted: true, source: "/dev/nvme0n1p2" })).toEqual({ said: "error not a workspace mount", calls: [] });
-      expect(ask(`grow ${id} 3`, { mounted: true, backing: join(root, "9876543210.img") })).toEqual({ said: "error not this workspace's disk", calls: [] });
+      expect(await ask(`grow ${id} 1`, { mounted: true })).toEqual({ said: "error a workspace only grows", calls: [] });
+      expect(await ask(`grow ${id} 3`, { mounted: true, size: 3 * GIB })).toEqual({ said: "error a workspace only grows", calls: [] });
+      expect(await ask(`grow ${id} 3`, { mounted: true, source: "/dev/nvme0n1p2" })).toEqual({ said: "error not a workspace mount", calls: [] });
+      expect(await ask(`grow ${id} 3`, { mounted: true, backing: join(root, "9876543210.img") })).toEqual({ said: "error not this workspace's disk", calls: [] });
       for (const [line, error] of [[`grow ../etc 3`, "bad id"], [`grow ${id} 0`, "bad size"], [`grow ${id} 9999`, "at most 4096 GiB"], [`grow ${id}`, "bad arguments"], [`grow ${id} 3 4`, "bad arguments"]] as const) {
-        expect(ask(line, { mounted: true })).toEqual({ said: `error ${error}`, calls: [] });
+        expect(await ask(line, { mounted: true })).toEqual({ said: `error ${error}`, calls: [] });
       }
       // A substituted image is never followed.
       rmSync(img);
       const other = join(root, "other.img");
       writeFileSync(other, "unrelated data");
       symlinkSync(other, img);
-      expect(ask(`grow ${id} 3`, { mounted: true })).toEqual({ said: "error existing workspace is missing", calls: [] });
+      expect(await ask(`grow ${id} 3`, { mounted: true })).toEqual({ said: "error existing workspace is missing", calls: [] });
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }, 30_000);
 });

@@ -17,6 +17,7 @@ import {
   engramEnv,
 } from "../src/engram.ts";
 import { OPENCODE } from "../src/harnesses.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * Engram in an agent's VM, as far as the primary says anything to it: where the binary and its store are, the four
@@ -97,13 +98,13 @@ describe("whether a VM has it", () => {
 });
 
 describe("the engineer's own shell", () => {
-  test("every command is given the store, its project and the binary's place, with the update check off", () => {
+  test("every command is given the store, its project and the binary's place, with the update check off", async () => {
     const prefix = engramShell("you-project");
     expect(prefix).toBe(`export PATH=/opt/engram/bin:"$PATH" ENGRAM_DATA_DIR=/work/.memory/engram ENGRAM_NO_UPDATE_CHECK=1 ENGRAM_PROJECT='you-project' && `);
     for (const command of ["engram search build commands --limit 5", "cat > f <<'EOF'\nx\nEOF", "true"]) {
-      expect(Bun.spawnSync(["bash", "-n", "-c", `${prefix}${command}`]).stderr.toString()).toBe("");
+      expect((await spawned(["bash", "-n", "-c", `${prefix}${command}`])).stderr.toString()).toBe("");
     }
-    const ran = Bun.spawnSync(["bash", "-c", `${prefix}printf '%s|%s|%s|%s' "$ENGRAM_PROJECT" "$ENGRAM_DATA_DIR" "$ENGRAM_NO_UPDATE_CHECK" "\${PATH%%:*}"`]);
+    const ran = await spawned(["bash", "-c", `${prefix}printf '%s|%s|%s|%s' "$ENGRAM_PROJECT" "$ENGRAM_DATA_DIR" "$ENGRAM_NO_UPDATE_CHECK" "\${PATH%%:*}"`]);
     expect(ran.stdout.toString()).toBe("you-project|/work/.memory/engram|1|/opt/engram/bin");
   });
 });

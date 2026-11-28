@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { type ChatStreamEvent, type RouteName, routes, type TeamSnapshot, type TeamTask, type TeamTaskRecord, type Agent, EvalRecord, evalProblem, type EvalView } from "@invincible/core";
 import type { YourCase } from "../src/eval-yours.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * A stand-in node for evals of your own work. Its sandboxes are temporary directories where every command really
@@ -21,8 +22,8 @@ export const GATES = { test: "sh test/total_test.sh", readme: "test -f README.md
 /** What fixes it, and what doesn't. */
 export const FIX = "sed -i.orig 's/print s + 1/print s/' total.sh && rm -f total.sh.orig";
 
-const git = (dir: string, ...args: string[]) => {
-  const run = Bun.spawnSync(["git", "-C", dir, "-c", "user.email=agent@example.invalid", "-c", "user.name=agent", ...args]);
+const git = async (dir: string, ...args: string[]) => {
+  const run = await spawned(["git", "-C", dir, "-c", "user.email=agent@example.invalid", "-c", "user.name=agent", ...args]);
   if (run.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${run.stderr.toString()}`);
   return run.stdout.toString().trim();
 };
@@ -31,22 +32,22 @@ const git = (dir: string, ...args: string[]) => {
  * The invented repository on disk: its first commit (where the task began) and the task's own change as a patch. The
  * change can add files besides its fix (`fixAlso`, path → text), as a large change does.
  */
-export function widgets(fixAlso: Record<string, string> = {}): { dir: string; base: string; fixed: string; patch: Uint8Array; remove(): void } {
+export async function widgets(fixAlso: Record<string, string> = {}): Promise<{ dir: string; base: string; fixed: string; patch: Uint8Array; remove(): void }> {
   const dir = mkdtempSync(join(tmpdir(), "invincible-widgets-"));
   mkdirSync(join(dir, "test"));
   writeFileSync(join(dir, "README.md"), "Widgets: counts what you give it.\n");
   writeFileSync(join(dir, "total.sh"), "#!/bin/sh\n# The sum of a file's numbers, one a line.\nawk '{ s += $1 } END { print s + 1 }' \"$1\"\n");
   writeFileSync(join(dir, "test", "total_test.sh"), '#!/bin/sh\n# 1 + 2 + 3 is 6.\nprintf \'1\\n2\\n3\\n\' > "${TMPDIR:-/tmp}/numbers.txt"\ngot=$(sh total.sh "${TMPDIR:-/tmp}/numbers.txt")\n[ "$got" = 6 ] || { echo "expected 6, got $got"; exit 1; }\n');
-  git(dir, "init", "-q");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "Widgets count");
-  const base = git(dir, "rev-parse", "HEAD");
+  await git(dir, "init", "-q");
+  await git(dir, "add", "-A");
+  await git(dir, "commit", "-qm", "Widgets count");
+  const base = await git(dir, "rev-parse", "HEAD");
   writeFileSync(join(dir, "total.sh"), "#!/bin/sh\n# The sum of a file's numbers, one a line.\nawk '{ s += $1 } END { print s }' \"$1\"\n");
   for (const [path, text] of Object.entries(fixAlso)) writeFileSync(join(dir, path), text);
-  if (Object.keys(fixAlso).length) git(dir, "add", "-A");
-  git(dir, "commit", "-qam", "The total is the sum, no more");
-  const fixed = git(dir, "rev-parse", "HEAD");
-  const patch = Bun.spawnSync(["git", "-C", dir, "diff", "--binary", base, fixed]).stdout;
+  if (Object.keys(fixAlso).length) await git(dir, "add", "-A");
+  await git(dir, "commit", "-qam", "The total is the sum, no more");
+  const fixed = await git(dir, "rev-parse", "HEAD");
+  const patch = (await spawned(["git", "-C", dir, "diff", "--binary", base, fixed])).stdout;
   return { dir, base, fixed, patch: new Uint8Array(patch), remove: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
@@ -192,19 +193,19 @@ export class YoursStandIn {
    */
   private readonly made = new Map<string, string>();
 
-  private checkedOut(repository: string, commit: string): string {
+  private async checkedOut(repository: string, commit: string): Promise<string> {
     const key = `${repository}@${commit}`;
     const made = this.made.get(key);
     if (made) return made;
     const root = mkdtempSync(join(tmpdir(), "invincible-yours-checkout-"));
-    Bun.spawnSync(["git", "-C", root, "init", "-q"]);
+    await spawned(["git", "-C", root, "init", "-q"]);
     const from = this.repositories[repository];
-    const fetched = from ? Bun.spawnSync(["git", "-C", root, "fetch", "-q", "--depth", "50", `file://${from}`, commit]) : null;
+    const fetched = from ? await spawned(["git", "-C", root, "fetch", "-q", "--depth", "50", `file://${from}`, commit]) : null;
     if (!fetched || fetched.exitCode !== 0) {
       rmSync(root, { recursive: true, force: true });
       throw new Error(`couldn't fetch ${commit.slice(0, 12)} of ${repository.replace("https://github.com/", "")}: fatal: remote error: not our ref`);
     }
-    Bun.spawnSync(["git", "-C", root, "-c", "advice.detachedHead=false", "checkout", "-q", "--detach", "FETCH_HEAD"]);
+    await spawned(["git", "-C", root, "-c", "advice.detachedHead=false", "checkout", "-q", "--detach", "FETCH_HEAD"]);
     this.made.set(key, root);
     return root;
   }
@@ -226,7 +227,7 @@ export class YoursStandIn {
         this.checkouts.push(input);
         const box = this.box(input.id);
         const root = local(box.dir, input.path);
-        const made = this.checkedOut(input.repository, input.commit);
+        const made = await this.checkedOut(input.repository, input.commit);
         mkdirSync(dirname(root), { recursive: true });
         cpSync(made, root, { recursive: true });
         return { commit: input.commit } as T;
@@ -235,7 +236,8 @@ export class YoursStandIn {
         routes.execSandbox.input.parse(input);
         const box = this.box(input.id);
         box.commands.push(input.cmd[2]);
-        const run = Bun.spawnSync(["bash", "-c", local(box.dir, input.cmd[2])], { cwd: join(box.dir, "work") });
+        // (Under the command's own deadline, as a sandbox's exec is: never the helper's own, which a starved gate may pass.)
+        const run = await spawned(["bash", "-c", local(box.dir, input.cmd[2])], { cwd: join(box.dir, "work"), timeout: (input.timeoutSec ?? 600) * 1000 });
         return { exitCode: run.exitCode ?? -1, stdout: run.stdout.toString(), stderr: run.stderr.toString(), durationMs: 1, truncated: false } as T;
       }
       case "saveArtifact": {

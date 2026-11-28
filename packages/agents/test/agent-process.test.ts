@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { AGENT_PROCESS_PY, agentCleanupCommand, SEAT_VM_CLEAR_PY, seatVmClearCommand } from "../src/agent-process.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
-test("worker cleanup verifies process start and boot identity, keeps another run's marker, and kills an ignoring child", () => {
+test("worker cleanup verifies process start and boot identity, keeps another run's marker, and kills an ignoring child", async () => {
   // Exercise the actual Python helper against temporary procfs-shaped fixtures;
   // signals are intercepted, so no real process can be killed by this test.
   const scenario = String.raw`
@@ -67,12 +68,12 @@ with tempfile.TemporaryDirectory(prefix="invincible-process-") as root:
     else: raise AssertionError("legacy PID-only cleanup must refuse")
     assert signals == []
 `;
-  const result = Bun.spawnSync(["python3", "-B", "-c", `${AGENT_PROCESS_PY}\n${scenario}`]);
+  const result = await spawned(["python3", "-B", "-c", `${AGENT_PROCESS_PY}\n${scenario}`]);
   expect({ exit: result.exitCode, stderr: result.stderr.toString() }).toEqual({ exit: 0, stderr: "" });
-  expect(Bun.spawnSync(["bash", "-n", "-c", agentCleanupCommand()]).exitCode).toBe(0);
+  expect((await spawned(["bash", "-n", "-c", agentCleanupCommand()])).exitCode).toBe(0);
 });
 
-test("cleanup never sends KILL when the process group was replaced during TERM grace", () => {
+test("cleanup never sends KILL when the process group was replaced during TERM grace", async () => {
   const scenario = String.raw`
 import tempfile
 with tempfile.TemporaryDirectory(prefix="invincible-process-reuse-") as root:
@@ -91,11 +92,11 @@ with tempfile.TemporaryDirectory(prefix="invincible-process-reuse-") as root:
     assert signals == [signal.SIGTERM]
     assert marker() == original
 `;
-  const result = Bun.spawnSync(["python3", "-B", "-c", `${AGENT_PROCESS_PY}\n${scenario}`]);
+  const result = await spawned(["python3", "-B", "-c", `${AGENT_PROCESS_PY}\n${scenario}`]);
   expect({ exit: result.exitCode, stderr: result.stderr.toString() }).toEqual({ exit: 0, stderr: "" });
 });
 
-test.skipIf(process.platform !== "linux")("a real Linux worker records its group before work and is stopped by the trusted helper", () => {
+test.skipIf(process.platform !== "linux")("a real Linux worker records its group before work and is stopped by the trusted helper", async () => {
   const scenario = String.raw`
 import shlex, subprocess, tempfile
 with tempfile.TemporaryDirectory(prefix="invincible-real-worker-") as root:
@@ -116,11 +117,11 @@ with tempfile.TemporaryDirectory(prefix="invincible-real-worker-") as root:
             child.wait(timeout=3)
 `;
   const script = `SOURCE = ${JSON.stringify(AGENT_PROCESS_PY)}\nexec(SOURCE)\n${scenario}`;
-  const result = Bun.spawnSync(["python3", "-B", "-c", script], { timeout: 15000 });
+  const result = await spawned(["python3", "-B", "-c", script], { timeout: 15000 });
   expect({ exit: result.exitCode, stderr: result.stderr.toString() }).toEqual({ exit: 0, stderr: "" });
 });
 
-test("a group whose leader has gone is ended as the run's own in its own boot and pid namespace; in another it names nothing here; an older marker still refuses", () => {
+test("a group whose leader has gone is ended as the run's own in its own boot and pid namespace; in another it names nothing here; an older marker still refuses", async () => {
   // (Linux never gives a group's number to another while the group has members: in the same boot and pid namespace,
   // members of the marker's group are the run's. A marker another VM sharing /work wrote names nothing here.)
   const scenario = String.raw`
@@ -174,11 +175,11 @@ with tempfile.TemporaryDirectory(prefix="invincible-process-ns-") as root:
     else: raise AssertionError("an older marker must refuse")
     assert signals == []
 `;
-  const result = Bun.spawnSync(["python3", "-B", "-c", `${AGENT_PROCESS_PY}\n${scenario}`]);
+  const result = await spawned(["python3", "-B", "-c", `${AGENT_PROCESS_PY}\n${scenario}`]);
   expect({ exit: result.exitCode, stderr: result.stderr.toString() }).toEqual({ exit: 0, stderr: "" });
 });
 
-test("a new marker says the pid namespace its run is in", () => {
+test("a new marker says the pid namespace its run is in", async () => {
   const scenario = String.raw`
 import tempfile, subprocess
 with tempfile.TemporaryDirectory(prefix="invincible-process-record-") as root:
@@ -194,7 +195,7 @@ with tempfile.TemporaryDirectory(prefix="invincible-process-record-") as root:
         assert b"own process group" in child.stderr or b"No such file" in child.stderr or b"proc" in child.stderr, child.stderr
 `;
   const script = `SOURCE = ${JSON.stringify(AGENT_PROCESS_PY)}\nexec(SOURCE)\n${scenario}`;
-  const result = Bun.spawnSync(["python3", "-B", "-c", script], { timeout: 15000 });
+  const result = await spawned(["python3", "-B", "-c", script], { timeout: 15000 });
   expect({ exit: result.exitCode, stderr: result.stderr.toString() }).toEqual({ exit: 0, stderr: "" });
 });
 
@@ -205,7 +206,7 @@ with tempfile.TemporaryDirectory(prefix="invincible-process-record-") as root:
  * start, everything in the VM ends but its init, its container's own command and the script's own line. Against
  * procfs-shaped fixtures, its signals intercepted: no real process is signalled by this test.
  */
-test("a seat's VM is cleared before each start: all but its init, its container's sleep and the script's own line end, a process forked meanwhile too", () => {
+test("a seat's VM is cleared before each start: all but its init, its container's sleep and the script's own line end, a process forked meanwhile too", async () => {
   const scenario = String.raw`
 import tempfile
 with tempfile.TemporaryDirectory(prefix="invincible-seat-vm-") as root:
@@ -266,8 +267,8 @@ with tempfile.TemporaryDirectory(prefix="invincible-seat-vm-") as root:
     process(7, 1, 2, [b"python3", b"pretends"])
     assert clear(PROC) == 2 and sorted(pid for pid, _ in signals) == [7, 61]
 `;
-  const result = Bun.spawnSync(["python3", "-B", "-c", `${SEAT_VM_CLEAR_PY}\n${scenario}`]);
+  const result = await spawned(["python3", "-B", "-c", `${SEAT_VM_CLEAR_PY}\n${scenario}`]);
   expect({ exit: result.exitCode, stderr: result.stderr.toString() }).toEqual({ exit: 0, stderr: "" });
-  expect(Bun.spawnSync(["bash", "-n", "-c", seatVmClearCommand()]).exitCode).toBe(0);
+  expect((await spawned(["bash", "-n", "-c", seatVmClearCommand()])).exitCode).toBe(0);
 });
 

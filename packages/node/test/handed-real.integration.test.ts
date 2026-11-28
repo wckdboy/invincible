@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,6 +7,7 @@ import { bodyFingerprint, type Calibration, ceilingThreads, type HandedView, KER
 import { DEFAULT_IMAGE, type DockerRunner, KATA_RUNTIME, LABEL } from "@invincible/sandbox";
 import type { Measure } from "../src/compute/service.ts";
 import { HAVE_QAMP, type Pair, sandboxCaps, startPair, until } from "./fabric-pair.ts";
+import { spawnText } from "../../../bench/spawned.ts";
 
 /*
  * Another node's task, end to end on real VMs: two nodes over real Q-AMP sidecars (fabric-pair.ts), alpha handing a task
@@ -40,27 +40,27 @@ setDefaultTimeout(600_000);
 const REAL = process.platform === "linux" ? (process.env.E2E_DOCKER ?? Bun.which("docker")) : null;
 /** Where such a stand-in first on PATH writes what reached it: nothing of a node's may, only the wrapper's own. */
 const STRAY = process.env.E2E_STRAY_LOG ?? null;
-const docker = (...args: string[]) => spawnSync(REAL!, args, { encoding: "utf8", timeout: 180_000 });
+const docker = async (...args: string[]) => await spawnText(REAL!, args, { encoding: "utf8", timeout: 180_000 });
 /** This run's own names: letters, digits and dashes, ending in a dash (`<prefix>sbx-<id>`, as the node's `invincible-sbx-<id>`). */
 const PREFIX = process.env.E2E_PREFIX ?? `e2e-${randomBytes(3).toString("hex")}-`;
 if (!/^[a-z][a-z0-9-]{2,30}-$/.test(PREFIX)) throw new Error(`E2E_PREFIX must be lowercase letters, digits and dashes, ending in a dash: ${PREFIX}`);
-const available = !!REAL && HAVE_QAMP && docker("version", "--format", "{{.Server.Version}}").status === 0 && docker("image", "inspect", DEFAULT_IMAGE).status === 0;
+const available = !!REAL && HAVE_QAMP && (await docker("version", "--format", "{{.Server.Version}}")).status === 0 && (await docker("image", "inspect", DEFAULT_IMAGE)).status === 0;
 if (!available) console.log(`${import.meta.file} SKIPPED, unverified: it needs Linux, a Docker it can reach, ${DEFAULT_IMAGE} and a Q-AMP binary (INVINCIBLE_QAMP_TEST_BIN).`);
-const kata = available && docker("run", "--rm", "--name", `${PREFIX}kata-probe`, "--runtime", KATA_RUNTIME, "--network", "none", DEFAULT_IMAGE, "true").status === 0;
+const kata = available && (await docker("run", "--rm", "--name", `${PREFIX}kata-probe`, "--runtime", KATA_RUNTIME, "--network", "none", DEFAULT_IMAGE, "true")).status === 0;
 if (available && !kata) console.log(`${import.meta.file}: its Kata half SKIPPED, unverified: the Docker host runs no Kata microVM.`);
 
 const dir = mkdtempSync(join(tmpdir(), PREFIX));
-afterAll(() => {
-  drop();
+afterAll(async () => {
+  await drop();
   rmSync(dir, { recursive: true, force: true });
 });
 
 /** Every container and volume of this run's, removed by its own name: never by a pattern. */
-function drop(): void {
+async function drop(): Promise<void> {
   if (!available) return;
   const named = (out: string) => out.split("\n").map((line) => line.trim()).filter((name) => name.startsWith(PREFIX));
-  for (const name of named(docker("ps", "-a", "--filter", `name=^${PREFIX}`, "--format", "{{.Names}}").stdout)) docker("rm", "-f", name);
-  for (const name of named(docker("volume", "ls", "--filter", `name=^${PREFIX}`, "--format", "{{.Name}}").stdout)) docker("volume", "rm", "-f", name);
+  for (const name of named((await docker("ps", "-a", "--filter", `name=^${PREFIX}`, "--format", "{{.Names}}")).stdout)) await docker("rm", "-f", name);
+  for (const name of named((await docker("volume", "ls", "--filter", `name=^${PREFIX}`, "--format", "{{.Name}}")).stdout)) await docker("volume", "rm", "-f", name);
 }
 
 /** The docker a node of this run runs (see above): its log, a line per call, and its refusals beside it. */
@@ -161,9 +161,8 @@ const WORK = {
   TASK_DAEMON: String.raw`# zz-work
 cat > zz.test.ts <<'ZZ'
 import { expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 test("the work", () => {
-  spawnSync("bash", ["zz-daemon.sh"], { stdio: "ignore" });
+  spawnText("bash", ["zz-daemon.sh"], { stdio: "ignore" });
   expect(1 + 1).toBe(2);
 });
 ZZ
@@ -190,9 +189,8 @@ echo written`,
   TASK_ZOMBIE: String.raw`# zz-work
 cat > zz.test.ts <<'ZZ'
 import { expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 test("the work", () => {
-  spawnSync("bash", ["zz-daemon.sh"], { stdio: "ignore" });
+  spawnText("bash", ["zz-daemon.sh"], { stdio: "ignore" });
   expect(1 + 1).toBe(2);
 });
 ZZ
@@ -240,8 +238,7 @@ libc.syscall(93 if platform.machine() == "aarch64" else 60, 0)' </dev/null >/dev
 sleep 0.5
 ZZ
 cat > app.ts <<'ZZ'
-import { spawnSync } from "node:child_process";
-spawnSync("bash", ["zz-daemon.sh"], { stdio: "ignore" });
+spawnText("bash", ["zz-daemon.sh"], { stdio: "ignore" });
 export const value = () => 1;
 ZZ
 echo written`,
@@ -250,9 +247,8 @@ echo written`,
   TASK_CHAIN: String.raw`# zz-work
 cat > zz.test.ts <<'ZZ'
 import { expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 test("the work", () => {
-  spawnSync("bash", ["zz-daemon.sh"], { stdio: "ignore" });
+  spawnText("bash", ["zz-daemon.sh"], { stdio: "ignore" });
   expect(1 + 1).toBe(2);
 });
 ZZ
@@ -277,9 +273,8 @@ echo written`,
   TASK_PTRACE: String.raw`# zz-work
 cat > zz.test.ts <<'ZZ'
 import { expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 test("the work", () => {
-  spawnSync("bash", ["zz-daemon.sh"], { stdio: "ignore" });
+  spawnText("bash", ["zz-daemon.sh"], { stdio: "ignore" });
   expect(1 + 1).toBe(2);
 });
 ZZ
@@ -353,9 +348,8 @@ echo written`,
   TASK_RESIDUE: String.raw`# zz-work
 cat > zz.test.ts <<'ZZ'
 import { expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 test("the work", () => {
-  spawnSync("bash", ["zz-daemon.sh"], { stdio: "ignore" });
+  spawnText("bash", ["zz-daemon.sh"], { stdio: "ignore" });
   expect(1 + 1).toBe(2);
 });
 ZZ
@@ -467,9 +461,9 @@ echo written`,
 const LATE: Record<string, string> = {};
 type Work = keyof typeof WORK | "TASK_DEPS" | "TASK_DEPS_GIT" | "TASK_DEPS_MANIFEST";
 /** A bun.lock made the honest way, by the image's bun in a scratch container of this run's on Docker's default bridge. */
-function lockfile(deps: Record<string, string>): { manifest: string; lock: string } {
+async function lockfile(deps: Record<string, string>): Promise<{ manifest: string; lock: string }> {
   const manifest = JSON.stringify({ name: "project", private: true, dependencies: deps });
-  const made = docker("run", "--rm", "--name", `${PREFIX}lock`, "--network", "bridge", "--user", "65534:65534", "--read-only", "--cap-drop", "ALL", "--tmpfs", "/tmp:rw,size=512m,mode=1777", "--entrypoint", "/usr/bin/env", DEFAULT_IMAGE, "-i", "PATH=/opt/bun/bin:/usr/local/bin:/usr/bin:/bin", "HOME=/tmp/h", "BUN_INSTALL_CACHE_DIR=/tmp/c", "/bin/bash", "--noprofile", "--norc", "-c", `mkdir -p /tmp/a && cd /tmp/a && printf '%s' '${manifest}' > package.json && bun install --ignore-scripts >/dev/null 2>&1 && cat bun.lock`);
+  const made = await docker("run", "--rm", "--name", `${PREFIX}lock`, "--network", "bridge", "--user", "65534:65534", "--read-only", "--cap-drop", "ALL", "--tmpfs", "/tmp:rw,size=512m,mode=1777", "--entrypoint", "/usr/bin/env", DEFAULT_IMAGE, "-i", "PATH=/opt/bun/bin:/usr/local/bin:/usr/bin:/bin", "HOME=/tmp/h", "BUN_INSTALL_CACHE_DIR=/tmp/c", "/bin/bash", "--noprofile", "--norc", "-c", `mkdir -p /tmp/a && cd /tmp/a && printf '%s' '${manifest}' > package.json && bun install --ignore-scripts >/dev/null 2>&1 && cat bun.lock`);
   if (made.status !== 0) throw new Error(`no lockfile could be made: ${made.stderr}`);
   return { manifest, lock: made.stdout };
 }
@@ -535,7 +529,7 @@ for (const runtime of ["kata", "runc"] as const) {
 
     afterAll(async () => {
       await pair?.stop();
-      drop();
+      await drop();
       if (socketBefore === undefined) delete process.env.INVINCIBLE_WORKSPACE_SOCKET;
       else process.env.INVINCIBLE_WORKSPACE_SOCKET = socketBefore;
     });
@@ -551,7 +545,7 @@ for (const runtime of ["kata", "runc"] as const) {
         const herVm = `${PREFIX}sbx-${workspace.id}`;
         // (With two tests of hers that the R11 cases' gates run, each failing until the work is done: check.test.ts until
         // app.ts says 2, locked.test.ts until app.txt says "two".)
-        const seeded = docker("exec", "--workdir", "/work", herVm, "bash", "-lc", "set -e; git init -q -b main /work/repo; cd /work/repo; printf 'the project\\n' > README.md; printf 'one\\n' > app.txt; printf '%s\\n' 'export const value = () => 1;' > app.ts; printf '%s\\n' 'import { expect, test } from \"bun:test\";' 'import { value } from \"./app.ts\";' 'test(\"the work\", () => expect(value()).toBe(2));' > check.test.ts; printf '%s\\n' 'import { expect, test } from \"bun:test\";' 'import { readFileSync } from \"node:fs\";' 'test(\"the work\", () => expect(readFileSync(\"app.txt\", \"utf8\")).toBe(\"two\\n\"));' > locked.test.ts; git add -A; git -c user.name=Owner -c user.email=owner@example.test commit -q -m first; git remote add origin https://github.com/you/project; git rev-parse HEAD");
+        const seeded = await docker("exec", "--workdir", "/work", herVm, "bash", "-lc", "set -e; git init -q -b main /work/repo; cd /work/repo; printf 'the project\\n' > README.md; printf 'one\\n' > app.txt; printf '%s\\n' 'export const value = () => 1;' > app.ts; printf '%s\\n' 'import { expect, test } from \"bun:test\";' 'import { value } from \"./app.ts\";' 'test(\"the work\", () => expect(value()).toBe(2));' > check.test.ts; printf '%s\\n' 'import { expect, test } from \"bun:test\";' 'import { readFileSync } from \"node:fs\";' 'test(\"the work\", () => expect(readFileSync(\"app.txt\", \"utf8\")).toBe(\"two\\n\"));' > locked.test.ts; git add -A; git -c user.name=Owner -c user.email=owner@example.test commit -q -m first; git remote add origin https://github.com/you/project; git rev-parse HEAD");
         expect([seeded.status, seeded.stderr.trim()]).toEqual([0, ""]);
         return { herVm, madeMs: made - began, seededMs: Date.now() - made };
       })());
@@ -612,7 +606,7 @@ for (const runtime of ["kata", "runc"] as const) {
       const workIn = calls.filter((c) => c.kind === "work" && c.at >= handedAt).map((c) => c.line);
       expect(workIn.length).toBeGreaterThan(0);
       expect(workIn.every((line) => !line.includes(herVm))).toBe(true);
-      expect(docker("ps", "-a", "--filter", `label=${LABEL}.node=${pair.b.identity.id}`, "--filter", `label=${LABEL}.task`, "--format", "{{.Names}}").stdout.trim()).toBe("");
+      expect((await docker("ps", "-a", "--filter", `label=${LABEL}.node=${pair.b.identity.id}`, "--filter", `label=${LABEL}.task`, "--format", "{{.Names}}")).stdout.trim()).toBe("");
       // Where each ran: the task's VM, and each round's VM (the eleventh review's ruling), by the names Docker was asked.
       const named = (line: string) => new RegExp(`${PREFIX}sbx-[0-9a-f]+`).exec(line)?.[0] ?? "";
       const taskName = named(taskVm!.line);
@@ -635,7 +629,7 @@ for (const runtime of ["kata", "runc"] as const) {
       // Its changes came back to her worktree, and were read and kept there.
       const there = (await pair.callB<TeamSnapshot>("team")).tasks.find((t) => t.id === done.task);
       expect(there).toMatchObject({ status: "done", verified: true, assignee: "ada" });
-      expect(docker("exec", herVm, "cat", `/work/tasks/${done.task}/result-real.txt`).stdout).toBe("real\n");
+      expect((await docker("exec", herVm, "cat", `/work/tasks/${done.task}/result-real.txt`)).stdout).toBe("real\n");
       expect(done.output).toContain("Changes: 1 file");
     });
 
@@ -656,7 +650,7 @@ for (const runtime of ["kata", "runc"] as const) {
       // (Checked against beta's signature, as any: what beta says is that its gate failed, so not verified.)
       expect(done.proof).toMatchObject({ state: "checked", verified: false, proof: { before: [1], after: [1] } });
       expect(gates.every((gate) => !gate.includes("as this task tells it"))).toBe(true);
-      expect(docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`).status).not.toBe(0);
+      expect((await docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`)).status).not.toBe(0);
     });
 
     test("R8-3: a process the freeze's end misses can't make a gate pass: the gates run as their own user, on a copy no process of the task's can reach", async () => {
@@ -664,7 +658,7 @@ for (const runtime of ["kata", "runc"] as const) {
       console.log(`  its gates, as its trail says them:\n    ${gates.join("\n    ")}`);
       // (Checked against beta's signature, as any: what beta says is that its gate failed, so not verified.)
       expect(done.proof).toMatchObject({ state: "checked", verified: false, proof: { before: [1], after: [1] } });
-      expect(docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`).status).not.toBe(0);
+      expect((await docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`)).status).not.toBe(0);
     });
 
     /*
@@ -679,7 +673,7 @@ for (const runtime of ["kata", "runc"] as const) {
       // (Checked against beta's signature: what beta says is that its second gate failed each time, so not verified.)
       expect(done.proof).toMatchObject({ state: "checked", verified: false });
       expect((done.proof as { proof: { after: number[] } }).proof.after[1]).not.toBe(0);
-      expect(docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`).status).not.toBe(0);
+      expect((await docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`)).status).not.toBe(0);
       placement();
     });
 
@@ -696,7 +690,7 @@ for (const runtime of ["kata", "runc"] as const) {
       console.log(`  ${runtime}, R11-1: proof ${JSON.stringify(done.proof)}`);
       expect(done.proof).toMatchObject({ state: "checked", verified: false });
       expect((done.proof as { proof: { after: number[] } }).proof.after[1]).not.toBe(0);
-      expect(docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`).status).not.toBe(0);
+      expect((await docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`)).status).not.toBe(0);
       placement();
     });
 
@@ -705,9 +699,9 @@ for (const runtime of ["kata", "runc"] as const) {
       console.log(`  its gates, as its trail says them:\n    ${gates.join("\n    ")}`);
       console.log(`  ${runtime}, R11-1 (one gate): proof ${JSON.stringify(done.proof)}`);
       expect(done.proof).toMatchObject({ state: "checked", verified: false });
-      const cat = (file: string) => docker("exec", herVm, "cat", `/work/tasks/${done.task}/${file}`).stdout;
-      expect(cat("app.ts")).toContain("value = () => 1");
-      expect(cat("check.test.ts")).toContain("toBe(2)");
+      const cat = async (file: string) => (await docker("exec", herVm, "cat", `/work/tasks/${done.task}/${file}`)).stdout;
+      expect(await cat("app.ts")).toContain("value = () => 1");
+      expect(await cat("check.test.ts")).toContain("toBe(2)");
       placement();
     });
 
@@ -717,7 +711,7 @@ for (const runtime of ["kata", "runc"] as const) {
       console.log(`  ${runtime}, R11-1 (chain): proof ${JSON.stringify(done.proof)}`);
       expect(done.proof).toMatchObject({ state: "checked", verified: false });
       expect((done.proof as { proof: { after: number[] } }).proof.after[1]).not.toBe(0);
-      expect(docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`).status).not.toBe(0);
+      expect((await docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`)).status).not.toBe(0);
       placement();
     });
 
@@ -734,7 +728,7 @@ for (const runtime of ["kata", "runc"] as const) {
       console.log(`  ${runtime}, R12-1: proof ${JSON.stringify(done.proof)}`);
       expect(done.proof).toMatchObject({ state: "checked", verified: false });
       expect((done.proof as { proof: { after: number[] } }).proof.after[1]).not.toBe(0);
-      expect(docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`).status).not.toBe(0);
+      expect((await docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`)).status).not.toBe(0);
       placement();
     });
 
@@ -775,7 +769,7 @@ for (const runtime of ["kata", "runc"] as const) {
      * review's R12-2). Either way its gate fails offline, saying why.
      */
     test("a gate that installs a dependency of the registry's takes it from the node's install cache, offline, and passes", async () => {
-      const { manifest, lock } = lockfile({ "is-odd": "3.0.1" });
+      const { manifest, lock } = await lockfile({ "is-odd": "3.0.1" });
       LATE.TASK_DEPS = written({ "package.json": manifest, "bun.lock": lock, "odd.test.ts": ODD_TEST });
       const { done, placement } = await handOff("TASK_DEPS", ["bun install --frozen-lockfile && bun test odd.test.ts"]);
       console.log(`  ${runtime}, the install cache: proof ${JSON.stringify(done.proof)}`);
@@ -787,7 +781,7 @@ for (const runtime of ["kata", "runc"] as const) {
     });
 
     test("a gate whose lockfile names a package from elsewhere than the registry fails offline, and says why", async () => {
-      const { lock } = lockfile({ "is-odd": "3.0.1" });
+      const { lock } = await lockfile({ "is-odd": "3.0.1" });
       const git = JSON.stringify({ name: "project", private: true, dependencies: { "is-odd": "github:someone/is-odd" } });
       // (Its lockfile as bun writes one for a GitHub dependency: the package, and the workspace's ask of it.)
       const named = lock.replace(/"is-odd@3\.0\.1", "",[^\n]*\]/, '"is-odd@github:someone/is-odd#abc", {}, "someone-is-odd-abc"]').replace('"is-odd": "3.0.1"', '"is-odd": "github:someone/is-odd"');
@@ -802,7 +796,7 @@ for (const runtime of ["kata", "runc"] as const) {
     });
 
     test("a gate whose manifest alone names a package from elsewhere fails offline, and says why: the filler, given the lockfile alone, fills the registry's", async () => {
-      const { lock } = lockfile({ "is-odd": "3.0.1" });
+      const { lock } = await lockfile({ "is-odd": "3.0.1" });
       const git = JSON.stringify({ name: "project", private: true, dependencies: { "is-odd": "github:someone/is-odd" } });
       LATE.TASK_DEPS_MANIFEST = written({ "package.json": git, "bun.lock": lock, "odd.test.ts": ODD_TEST });
       const { done } = await handOff("TASK_DEPS_MANIFEST", ["bun install --frozen-lockfile && bun test odd.test.ts"]);
@@ -817,7 +811,7 @@ for (const runtime of ["kata", "runc"] as const) {
       console.log(`  its gates, as its trail says them:\n    ${gates.join("\n    ")}`);
       console.log(`  ${runtime}, R11-2: proof ${JSON.stringify(done.proof)}; locked: ${done.trail.filter((t) => /changed locked\.test\.ts|Tests changed/.test(t.text)).length}`);
       expect(done.proof).toMatchObject({ state: "checked", verified: false });
-      expect(docker("exec", herVm, "cat", `/work/tasks/${done.task}/app.txt`).stdout).toBe("one\n");
+      expect((await docker("exec", herVm, "cat", `/work/tasks/${done.task}/app.txt`)).stdout).toBe("one\n");
       placement();
     });
   });

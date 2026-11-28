@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { cacheMount, FILL_CHECK_PY, FILLER_SCRIPT, fillerArgs, fillerEnv, LOCK_CHECK_PY, runArgs, type SandboxSpec } from "../src/index.ts";
+import { spawned, spawnText } from "../../../bench/spawned.ts";
 
 /*
  * The node's install cache for rounds of other nodes' tasks' gates (install-cache.ts). The filler's check of what it is
@@ -27,7 +27,7 @@ const temp = () => {
  * A folder of the filler's input: `files`, by path, and the check's exit, what it said, and what it wrote: the fill's own
  * manifest, and the hashes it asks for.
  */
-function checked(files: Record<string, string>, link?: [string, string]) {
+async function checked(files: Record<string, string>, link?: [string, string]) {
   const at = temp();
   const given = join(at, "m");
   mkdirSync(given);
@@ -36,7 +36,7 @@ function checked(files: Record<string, string>, link?: [string, string]) {
     writeFileSync(join(given, path), text);
   }
   if (link) symlinkSync(link[1], join(given, link[0]));
-  const ran = spawnSync("python3", ["-I", "-c", LOCK_CHECK_PY, join(at, "fill"), join(at, "hashes.json")], { cwd: given, encoding: "utf8" });
+  const ran = await spawnText("python3", ["-I", "-c", LOCK_CHECK_PY, join(at, "fill"), join(at, "hashes.json")], { cwd: given, encoding: "utf8" });
   const read = (path: string) => (existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null);
   return { code: ran.status, said: ran.stderr.trim(), manifest: read(join(at, "fill", "package.json")), hashes: read(join(at, "hashes.json")) as Record<string, string> | null };
 }
@@ -57,13 +57,13 @@ const REGISTRY = `"is-odd": ["is-odd@3.0.1", "", { "dependencies": { "is-number"
 const refusedFor = (said: string) => `${said}, so nothing is filled`;
 
 describe("the filler's check of what it is given (LOCK_CHECK_PY), and the manifest it writes from it", () => {
-  test("a lockfile of the default registry's packages, and a workspace's own, passes; the fill's own manifest asks for each of them by name and version, and for nothing else", () => {
-    const ran = checked({ "bun.lock": lock(REGISTRY) });
+  test("a lockfile of the default registry's packages, and a workspace's own, passes; the fill's own manifest asks for each of them by name and version, and for nothing else", async () => {
+    const ran = await checked({ "bun.lock": lock(REGISTRY) });
     expect([ran.code, ran.said]).toEqual([0, ""]);
     expect(ran.manifest).toEqual({ name: "fill", private: true, optionalDependencies: { p0: "npm:is-number@6.0.0", p1: "npm:is-odd@3.0.1" } });
     expect(ran.hashes).toEqual({ "is-number@6.0.0": NUMBER, "is-odd@3.0.1": ODD });
     // This repository's own: each of the registry's packages it names once, whatever its workspaces ask.
-    const own = checked({ "bun.lock": readFileSync("bun.lock", "utf8") });
+    const own = await checked({ "bun.lock": readFileSync("bun.lock", "utf8") });
     expect([own.code, own.said]).toEqual([0, ""]);
     const asked = Object.values(own.manifest.optionalDependencies as Record<string, string>);
     expect(asked.length).toBeGreaterThan(50);
@@ -71,11 +71,11 @@ describe("the filler's check of what it is given (LOCK_CHECK_PY), and the manife
     expect(asked.some((spec) => spec.includes("workspace:"))).toBe(false);
     expect(Object.keys(own.manifest).sort()).toEqual(["name", "optionalDependencies", "private"]);
     // Nothing of the registry's: nothing written, nothing to fill.
-    const none = checked({ "bun.lock": lock(`"lib": ["lib@workspace:packages/lib"],`) });
+    const none = await checked({ "bun.lock": lock(`"lib": ["lib@workspace:packages/lib"],`) });
     expect([none.code, none.manifest, none.hashes]).toEqual([0, null, null]);
   });
 
-  test("a package from anywhere but the default registry is refused, and nothing is filled: another registry, a git, GitHub, tarball, file or link one", () => {
+  test("a package from anywhere but the default registry is refused, and nothing is filled: another registry, a git, GitHub, tarball, file or link one", async () => {
     for (const entry of [
       `"is-odd": ["is-odd@3.0.1", "https://registry.example.test/", {}, "${ODD}"],`,
       `"is-odd": ["is-odd@git+https://example.test/x.git#abc", {}, "abc"],`,
@@ -86,25 +86,25 @@ describe("the filler's check of what it is given (LOCK_CHECK_PY), and the manife
       `"is-odd": ["is-odd@root:", {}],`,
       `"is-odd": ["is-odd@3.0.1", "", {}, "${ODD}", "more"],`,
     ]) {
-      const ran = checked({ "bun.lock": lock(entry) });
+      const ran = await checked({ "bun.lock": lock(entry) });
       expect([entry, ran.code, ran.manifest]).toEqual([entry, 1, null]);
       expect(ran.said).toEndWith("which isn't the default registry's, so nothing is filled");
     }
   });
 
-  test("every package of the registry's has a sha512 hash, one alone (the twelfth review's R12-2)", () => {
+  test("every package of the registry's has a sha512 hash, one alone (the twelfth review's R12-2)", async () => {
     for (const hash of ["", "sha1-2jmj7l5rSw0yVb/vlWAYkK/YBwk=", "sha512-short==", `sha512-${"A".repeat(86)}`, `sha256-${"A".repeat(43)}=`]) {
-      const ran = checked({ "bun.lock": lock(`"is-odd": ["is-odd@3.0.1", "", {}, "${hash}"],`) });
+      const ran = await checked({ "bun.lock": lock(`"is-odd": ["is-odd@3.0.1", "", {}, "${hash}"],`) });
       expect([hash, ran.code, ran.said]).toEqual([hash, 1, refusedFor("its bun.lock has no sha512 hash of is-odd@3.0.1")]);
     }
-    const two = checked({ "bun.lock": lock(`"is-odd": ["is-odd@3.0.1", "", {}, "${ODD}"],\n    "a/is-odd": ["is-odd@3.0.1", "", {}, "${NUMBER}"],`) });
+    const two = await checked({ "bun.lock": lock(`"is-odd": ["is-odd@3.0.1", "", {}, "${ODD}"],\n    "a/is-odd": ["is-odd@3.0.1", "", {}, "${NUMBER}"],`) });
     expect([two.code, two.said]).toEqual([1, refusedFor("its bun.lock has two hashes of is-odd@3.0.1")]);
     // The same package twice, by one hash, is asked for once.
-    const twice = checked({ "bun.lock": lock(`"is-odd": ["is-odd@3.0.1", "", {}, "${ODD}"],\n    "a/is-odd": ["is-odd@3.0.1", "", {}, "${ODD}"],`) });
+    const twice = await checked({ "bun.lock": lock(`"is-odd": ["is-odd@3.0.1", "", {}, "${ODD}"],\n    "a/is-odd": ["is-odd@3.0.1", "", {}, "${ODD}"],`) });
     expect([twice.code, twice.manifest?.optionalDependencies]).toEqual([0, { p0: "npm:is-odd@3.0.1" }]);
   });
 
-  test("what isn't an npm name, or an exact version, is refused: a name out of its folder, a URL in a name, a range for a version", () => {
+  test("what isn't an npm name, or an exact version, is refused: a name out of its folder, a URL in a name, a range for a version", async () => {
     for (const [ident, said] of [
       ["evil/-/evil-1.0.0.tgz?/../../../lodash@4.17.21", "which is no package's name"],
       ["../x@1.0.0", "which is no package's name"],
@@ -116,11 +116,11 @@ describe("the filler's check of what it is given (LOCK_CHECK_PY), and the manife
       ["is-odd@3.0", "which isn't the default registry's"],
       ["is-odd@latest", "which isn't the default registry's"],
     ] as const) {
-      const ran = checked({ "bun.lock": lock(`"x": ["${ident}", "", {}, "${ODD}"],`) });
+      const ran = await checked({ "bun.lock": lock(`"x": ["${ident}", "", {}, "${ODD}"],`) });
       expect([ident, ran.code, ran.said]).toEqual([ident, 1, refusedFor(`its bun.lock names ${ident}, ${said}`)]);
     }
     // A scoped name, a prerelease and a build are the registry's.
-    expect(checked({ "bun.lock": lock(`"@a/b": ["@a/b@1.0.0-rc.1+build.5", "", {}, "${ODD}"],`) }).code).toBe(0);
+    expect((await checked({ "bun.lock": lock(`"@a/b": ["@a/b@1.0.0-rc.1+build.5", "", {}, "${ODD}"],`) })).code).toBe(0);
   });
 
   /*
@@ -129,7 +129,7 @@ describe("the filler's check of what it is given (LOCK_CHECK_PY), and the manife
    * and asks for each of its packages by name and version: a catalog or an override of a manifest never reaches bun. The
    * lockfile's own catalogs, overrides and workspaces are checked as strictly as a dependency all the same.
    */
-  test("R12-2: a catalog or an override that names anything but the registry's is refused; one in a manifest never reaches bun, which asks for the lockfile's packages alone", () => {
+  test("R12-2: a catalog or an override that names anything but the registry's is refused; one in a manifest never reaches bun, which asks for the lockfile's packages alone", async () => {
     const evil = `"is-odd": ["is-odd@3.0.1", "", {}, "${ODD}"],`;
     const root = (deps: string) => `"": { "name": "root", "dependencies": { ${deps} } },`;
     for (const [what, more, deps, said] of [
@@ -141,7 +141,7 @@ describe("the filler's check of what it is given (LOCK_CHECK_PY), and the manife
       ["a workspace's own dependency", "", `"is-odd": "github:someone/is-odd"`, `its bun.lock's workspace of its own's dependencies asks is-odd from "github:someone/is-odd", which isn't the default registry`],
       ["a catalog's catalog", `\n  "catalog": { "is-odd": "catalog:" },`, `"is-odd": "catalog:"`, `its bun.lock's catalog asks is-odd from "catalog:", which isn't the default registry`],
     ] as const) {
-      const ran = checked({ "bun.lock": lock(evil, root(deps), more) });
+      const ran = await checked({ "bun.lock": lock(evil, root(deps), more) });
       expect([what, ran.code, ran.said, ran.manifest]).toEqual([what, 1, refusedFor(said), null]);
     }
     // t1b, t3, t4, t9 as the review gave them: the lockfile's catalogs the registry's, a manifest's not. The filler is given
@@ -149,12 +149,12 @@ describe("the filler's check of what it is given (LOCK_CHECK_PY), and the manife
     // a manifest names.
     const manifest = JSON.stringify({ name: "root", workspaces: { packages: [], catalog: { "is-odd": "http://192.0.2.7:47124/evil.tgz" }, catalogs: { x: { "is-odd": "git+http://192.0.2.7:47124/evil.git" } } }, catalog: { "is-odd": "http://192.0.2.7:47124/top.tgz" }, dependencies: { "is-odd": "catalog:" } });
     const caught = lock(evil, root(`"is-odd": "catalog:"`), `\n  "catalog": { "is-odd": "3.0.1" },\n  "catalogs": { "x": { "is-odd": "^3.0.0" } },`);
-    expect(checked({ "bun.lock": caught, "package.json": manifest }).said).toBe(refusedFor("what it was given holds package.json, and a fill is given its bun.lock alone"));
-    const alone = checked({ "bun.lock": caught });
+    expect((await checked({ "bun.lock": caught, "package.json": manifest })).said).toBe(refusedFor("what it was given holds package.json, and a fill is given its bun.lock alone"));
+    const alone = await checked({ "bun.lock": caught });
     expect([alone.code, alone.said, alone.manifest]).toEqual([0, "", { name: "fill", private: true, optionalDependencies: { p0: "npm:is-odd@3.0.1" } }]);
   });
 
-  test("a field that isn't a table of npm names is refused, though bun never reads it here", () => {
+  test("a field that isn't a table of npm names is refused, though bun never reads it here", async () => {
     for (const [more, said] of [
       [`\n  "catalog": ["is-odd"],`, "its bun.lock's catalog is no table of packages"],
       [`\n  "catalog": "http://192.0.2.7/",`, "its bun.lock's catalog is no table of packages"],
@@ -165,67 +165,67 @@ describe("the filler's check of what it is given (LOCK_CHECK_PY), and the manife
       [`\n  "overrides": { "is-odd": { "is-number": "1.0.0" } },`, `its bun.lock's overrides asks is-odd from {"is-number": "1.0.0"}, which isn't the default registry`],
       [`\n  "catalog": { "../x": "1.0.0" },`, "its bun.lock's catalog names ../x, which is no package's name"],
     ] as const) {
-      const ran = checked({ "bun.lock": lock(REGISTRY, undefined, more) });
+      const ran = await checked({ "bun.lock": lock(REGISTRY, undefined, more) });
       expect([more, ran.code, ran.said]).toEqual([more, 1, refusedFor(said)]);
     }
-    expect(checked({ "bun.lock": lock(REGISTRY, `"": { "name": "app", "dependencies": "is-odd" },`) }).said).toBe(refusedFor("its bun.lock's workspace of its own's dependencies is no table of packages"));
-    expect(checked({ "bun.lock": lock(REGISTRY, `"": "app",`) }).said).toBe(refusedFor("its bun.lock's workspace of its own is no table"));
-    expect(checked({ "bun.lock": `{ "lockfileVersion": 1, "workspaces": [], "packages": {} }` }).said).toBe(refusedFor("its bun.lock's workspaces are no table"));
-    expect(checked({ "bun.lock": `{ "lockfileVersion": 1, "packages": [] }` }).said).toBe(refusedFor("its bun.lock's packages are no table"));
+    expect((await checked({ "bun.lock": lock(REGISTRY, `"": { "name": "app", "dependencies": "is-odd" },`) })).said).toBe(refusedFor("its bun.lock's workspace of its own's dependencies is no table of packages"));
+    expect((await checked({ "bun.lock": lock(REGISTRY, `"": "app",`) })).said).toBe(refusedFor("its bun.lock's workspace of its own is no table"));
+    expect((await checked({ "bun.lock": `{ "lockfileVersion": 1, "workspaces": [], "packages": {} }` })).said).toBe(refusedFor("its bun.lock's workspaces are no table"));
+    expect((await checked({ "bun.lock": `{ "lockfileVersion": 1, "packages": [] }` })).said).toBe(refusedFor("its bun.lock's packages are no table"));
     // A version, a range, a tag, an npm: alias, the workspace's own and a catalog's are the registry's, for a dependency.
     const asks = `"": { "name": "app", "dependencies": { "a": "1.2.3", "b": "^1.0.0 || >=2.0.0 <3", "c": "latest", "d": "npm:is-odd@^3.0.1", "e": "workspace:*", "f": "catalog:", "g": "catalog:x" } },`;
-    expect(checked({ "bun.lock": lock(REGISTRY, asks, `\n  "catalogs": { "x": { "g": "^1.0.0" } },`) }).code).toBe(0);
+    expect((await checked({ "bun.lock": lock(REGISTRY, asks, `\n  "catalogs": { "x": { "g": "^1.0.0" } },`) })).code).toBe(0);
   });
 
-  test("what two readers could read two ways is refused: a key twice, a comment, a lockfile that isn't JSON", () => {
-    const twice = checked({ "bun.lock": lock(`${REGISTRY}\n    "is-odd": ["is-odd@github:someone/is-odd#abc", {}, "x"],`) });
+  test("what two readers could read two ways is refused: a key twice, a comment, a lockfile that isn't JSON", async () => {
+    const twice = await checked({ "bun.lock": lock(`${REGISTRY}\n    "is-odd": ["is-odd@github:someone/is-odd#abc", {}, "x"],`) });
     expect(twice).toMatchObject({ code: 1, said: "its bun.lock names is-odd twice, so nothing is filled" });
-    expect(checked({ "bun.lock": `// a comment\n${lock(REGISTRY)}` }).said).toStartWith("its bun.lock can't be read:");
-    expect(checked({ "bun.lock": "not json" }).code).toBe(1);
-    expect(checked({ "bun.lock": lock(REGISTRY, undefined, `\n  "catalog": { "is-odd": "3.0.1", "is-odd": "http://192.0.2.7/" },`) }).said).toBe("its bun.lock names is-odd twice, so nothing is filled");
+    expect((await checked({ "bun.lock": `// a comment\n${lock(REGISTRY)}` })).said).toStartWith("its bun.lock can't be read:");
+    expect((await checked({ "bun.lock": "not json" })).code).toBe(1);
+    expect((await checked({ "bun.lock": lock(REGISTRY, undefined, `\n  "catalog": { "is-odd": "3.0.1", "is-odd": "http://192.0.2.7/" },`) })).said).toBe("its bun.lock names is-odd twice, so nothing is filled");
   });
 
-  test("nothing of the tree but its bun.lock is taken: a package.json, a bunfig.toml, an .npmrc, any other file or folder, or a link, is refused", () => {
+  test("nothing of the tree but its bun.lock is taken: a package.json, a bunfig.toml, an .npmrc, any other file or folder, or a link, is refused", async () => {
     for (const extra of ["package.json", "bunfig.toml", ".npmrc", "sub/bunfig.toml", "notes.txt"]) {
-      const ran = checked({ "bun.lock": lock(REGISTRY), [extra]: `registry = "http://192.0.2.1/"\n` });
+      const ran = await checked({ "bun.lock": lock(REGISTRY), [extra]: `registry = "http://192.0.2.1/"\n` });
       expect([extra, ran.code, ran.said, ran.manifest]).toEqual([extra, 1, refusedFor(`what it was given holds ${extra.split("/")[0]}, and a fill is given its bun.lock alone`), null]);
     }
-    expect(checked({ "bun.lock": lock(REGISTRY) }, ["linked", "bun.lock"]).said).toBe(refusedFor("what it was given holds linked, and a fill is given its bun.lock alone"));
+    expect((await checked({ "bun.lock": lock(REGISTRY) }, ["linked", "bun.lock"])).said).toBe(refusedFor("what it was given holds linked, and a fill is given its bun.lock alone"));
     const at = temp();
     writeFileSync(join(at, "real.lock"), lock(REGISTRY));
-    expect(checked({}, ["bun.lock", join(at, "real.lock")]).said).toBe(refusedFor("its bun.lock is no file"));
-    expect(checked({}).said).toStartWith("its bun.lock can't be read (");
+    expect((await checked({}, ["bun.lock", join(at, "real.lock")])).said).toBe(refusedFor("its bun.lock is no file"));
+    expect((await checked({})).said).toStartWith("its bun.lock can't be read (");
   });
 
-  test("a workspace out of the tree, or a patch, is refused", () => {
-    expect(checked({ "bun.lock": lock(REGISTRY, `"": { "name": "app" },\n    "../out": { "name": "out" },`) }).said).toBe(refusedFor("its bun.lock names a workspace out of its tree, ../out"));
-    expect(checked({ "bun.lock": lock(REGISTRY, `"": { "name": "app" },\n    "/abs": { "name": "out" },`) }).said).toBe(refusedFor("its bun.lock names a workspace out of its tree, /abs"));
-    expect(checked({ "bun.lock": lock(REGISTRY).replace('"lockfileVersion": 1,', '"lockfileVersion": 1, "patchedDependencies": { "is-odd@3.0.1": "patches/x.patch" },') }).said).toBe(refusedFor("its bun.lock patches packages, which a fill can't"));
+  test("a workspace out of the tree, or a patch, is refused", async () => {
+    expect((await checked({ "bun.lock": lock(REGISTRY, `"": { "name": "app" },\n    "../out": { "name": "out" },`) })).said).toBe(refusedFor("its bun.lock names a workspace out of its tree, ../out"));
+    expect((await checked({ "bun.lock": lock(REGISTRY, `"": { "name": "app" },\n    "/abs": { "name": "out" },`) })).said).toBe(refusedFor("its bun.lock names a workspace out of its tree, /abs"));
+    expect((await checked({ "bun.lock": lock(REGISTRY).replace('"lockfileVersion": 1,', '"lockfileVersion": 1, "patchedDependencies": { "is-odd@3.0.1": "patches/x.patch" },') })).said).toBe(refusedFor("its bun.lock patches packages, which a fill can't"));
   });
 });
 
 describe("the filler's check of the lockfile bun resolved its own manifest to (FILL_CHECK_PY), before it fetches a tarball", () => {
   /** The fill's folder as bun left it, its lockfile's packages `packages`, and the hashes the tree's bun.lock asked for. */
-  function resolved(packages: string, hashes: Record<string, string> = { "is-number@6.0.0": NUMBER, "is-odd@3.0.1": ODD }) {
+  async function resolved(packages: string, hashes: Record<string, string> = { "is-number@6.0.0": NUMBER, "is-odd@3.0.1": ODD }) {
     const at = temp();
     mkdirSync(join(at, "fill"));
     writeFileSync(join(at, "fill", "bun.lock"), lock(packages, `"": { "name": "fill", "optionalDependencies": { "p0": "npm:is-number@6.0.0", "p1": "npm:is-odd@3.0.1" } },`));
     writeFileSync(join(at, "hashes.json"), JSON.stringify(hashes));
-    const ran = spawnSync("python3", ["-I", "-c", FILL_CHECK_PY, join(at, "fill"), join(at, "hashes.json")], { encoding: "utf8" });
+    const ran = await spawnText("python3", ["-I", "-c", FILL_CHECK_PY, join(at, "fill"), join(at, "hashes.json")], { encoding: "utf8" });
     return { code: ran.status, said: ran.stderr.trim() };
   }
   const p0 = `"p0": ["is-number@6.0.0", "", {}, "${NUMBER}"],`;
-  test("each package the tree's lockfile names, by its hash, passes; what the registry's resolution adds beside them is said", () => {
-    expect(resolved(`${p0}\n    "p1": ["is-odd@3.0.1", "", { "dependencies": { "is-number": "^6.0.0" } }, "${ODD}"],`)).toEqual({ code: 0, said: "" });
-    const more = resolved(`${p0}\n    "p1": ["is-odd@3.0.1", "", {}, "${ODD}"],\n    "kind-of": ["kind-of@6.0.3", "", {}, "${NUMBER}"],`);
+  test("each package the tree's lockfile names, by its hash, passes; what the registry's resolution adds beside them is said", async () => {
+    expect(await resolved(`${p0}\n    "p1": ["is-odd@3.0.1", "", { "dependencies": { "is-number": "^6.0.0" } }, "${ODD}"],`)).toEqual({ code: 0, said: "" });
+    const more = await resolved(`${p0}\n    "p1": ["is-odd@3.0.1", "", {}, "${ODD}"],\n    "kind-of": ["kind-of@6.0.3", "", {}, "${NUMBER}"],`);
     expect(more).toEqual({ code: 0, said: "the registry's resolution adds 1 package(s) its bun.lock doesn't name, the first kind-of@6.0.3" });
   });
 
-  test("a hash that isn't the registry's, a package the registry hasn't, or anything not of the registry's, is refused before any tarball is fetched", () => {
-    expect(resolved(`${p0}\n    "p1": ["is-odd@3.0.1", "", {}, "${NUMBER}"],`)).toEqual({ code: 1, said: refusedFor("its bun.lock's hash of is-odd@3.0.1 isn't the registry's") });
-    expect(resolved(p0)).toEqual({ code: 1, said: refusedFor("the registry has no is-odd@3.0.1, which its bun.lock names") });
-    expect(resolved(`${p0}\n    "p1": ["is-odd@3.0.1", "", {}, "${ODD}"],\n    "x": ["x@https://example.test/x.tgz", {}],`)).toEqual({ code: 1, said: refusedFor("bun would fetch x@https://example.test/x.tgz, which isn't the default registry's") });
-    expect(resolved(`${p0}\n    "p1": ["is-odd@3.0.1", "https://registry.example.test/", {}, "${ODD}"],`)).toEqual({ code: 1, said: refusedFor("bun would fetch is-odd@3.0.1, which isn't the default registry's") });
+  test("a hash that isn't the registry's, a package the registry hasn't, or anything not of the registry's, is refused before any tarball is fetched", async () => {
+    expect(await resolved(`${p0}\n    "p1": ["is-odd@3.0.1", "", {}, "${NUMBER}"],`)).toEqual({ code: 1, said: refusedFor("its bun.lock's hash of is-odd@3.0.1 isn't the registry's") });
+    expect(await resolved(p0)).toEqual({ code: 1, said: refusedFor("the registry has no is-odd@3.0.1, which its bun.lock names") });
+    expect(await resolved(`${p0}\n    "p1": ["is-odd@3.0.1", "", {}, "${ODD}"],\n    "x": ["x@https://example.test/x.tgz", {}],`)).toEqual({ code: 1, said: refusedFor("bun would fetch x@https://example.test/x.tgz, which isn't the default registry's") });
+    expect(await resolved(`${p0}\n    "p1": ["is-odd@3.0.1", "https://registry.example.test/", {}, "${ODD}"],`)).toEqual({ code: 1, said: refusedFor("bun would fetch is-odd@3.0.1, which isn't the default registry's") });
   });
 });
 
@@ -236,7 +236,7 @@ describe("the filler's check of the lockfile bun resolved its own manifest to (F
  * is bun's only for the checked install.
  */
 describe("the filler's steps (FILLER_SCRIPT), with a stand-in bun that says which cache each step wrote", () => {
-  test("I-13b: the resolve step writes a cache of its own in the filler's memory; only the install FILL_CHECK_PY passed writes the node's", () => {
+  test("I-13b: the resolve step writes a cache of its own in the filler's memory; only the install FILL_CHECK_PY passed writes the node's", async () => {
     const at = temp();
     // (The script's own steps, in a folder of this test's for its /tmp, a free port for its way out unused: its forwarder
     // here only says it listens, and the stand-in bun reaches nothing.)
@@ -248,9 +248,10 @@ describe("the filler's steps (FILLER_SCRIPT), with a stand-in bun that says whic
     writeFileSync(join(at, "resolved.lock"), lock(`"p0": ["is-number@6.0.0", "", {}, "${NUMBER}"],\n    "p1": ["is-odd@3.0.1", "", { "dependencies": { "is-number": "^6.0.0" } }, "${ODD}"],`, `"": { "name": "fill", "optionalDependencies": { "p0": "npm:is-number@6.0.0", "p1": "npm:is-odd@3.0.1" } },`));
     mkdirSync(join(at, "given"));
     writeFileSync(join(at, "given", "bun.lock"), lock(REGISTRY));
-    const given = gzipSync(spawnSync("tar", ["-c", "-C", join(at, "given"), "bun.lock"]).stdout);
+    // (As bytes: a tar is not text.)
+    const given = gzipSync((await spawned(["tar", "-c", "-C", join(at, "given"), "bun.lock"])).stdout);
     const env = { ...fillerEnv(`${join(at, "bin")}:/usr/bin:/bin`), HOME: join(at, "home"), BUN_INSTALL_CACHE_DIR: join(at, "cache"), FORWARD: "import sys\nopen(sys.argv[3], 'w').close()" };
-    const ran = spawnSync("/bin/bash", ["--noprofile", "--norc", "-c", script], { input: given, encoding: "utf8", env, timeout: 30_000 });
+    const ran = await spawnText("/bin/bash", ["--noprofile", "--norc", "-c", script], { input: given, encoding: "utf8", env, timeout: 30_000 });
     expect([ran.status, ran.stderr.trim()]).toEqual([0, ""]);
     const steps = readFileSync(join(at, "bun.log"), "utf8").trim().split("\n");
     expect(steps).toHaveLength(2);

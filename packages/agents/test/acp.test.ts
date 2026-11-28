@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ACP_BRIDGE, ACP_PROBE, acpDriver } from "../src/acp.ts";
 import { driverFor, OWN_SIGN_IN } from "../src/harnesses.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 // Every test here starts the bridge and a stand-in agent as processes of their own, so its time is the machine's to
 // give: "whether the command starts an ACP agent" took 0.5 s on the Mac mini at a load of 59 on 18 cores, ran past
@@ -153,7 +154,7 @@ describe("any ACP agent as an agent's harness", () => {
     expect(missing.events).toEqual([{ type: "error", message: "Stand-in isn't installed in this VM (not-installed was not found)" }]);
   });
 
-  test("the driver: a command of plain words only, quoted safely in every command it makes; known agents by their names; its own setup when no model is offered", () => {
+  test("the driver: a command of plain words only, quoted safely in every command it makes; known agents by their names; its own setup when no model is offered", async () => {
     expect(() => acpDriver("goose acp; rm -rf /")).toThrow("plain words");
     expect(() => acpDriver("goose $(id)")).toThrow("plain words");
     expect(() => acpDriver("")).toThrow("plain words");
@@ -162,7 +163,7 @@ describe("any ACP agent as an agent's harness", () => {
     expect(acpDriver("/usr/local/bin/gemini --acp").title).toBe("Gemini CLI");
     expect(acpDriver("my-agent serve --acp").title).toBe("my-agent");
     for (const command of [goose.command({ provider: "p'; $(danger)", model: "a/b' model" }, "session'; x"), goose.command(OWN_SIGN_IN, null), goose.check]) {
-      expect(Bun.spawnSync(["bash", "-n", "-c", command]).exitCode).toBe(0);
+      expect((await spawned(["bash", "-n", "-c", command])).exitCode).toBe(0);
     }
     expect(goose.command(OWN_SIGN_IN, null)).not.toContain("--provider");
     expect(Object.keys(goose.files([]))).toEqual(["/work/.agent/acp-bridge.py"]);

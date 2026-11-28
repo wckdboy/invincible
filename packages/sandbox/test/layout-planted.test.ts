@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LEASE_FILE, NOTES_DIR } from "@invincible/core";
 import { containerName, type DockerRunner, LABEL, type LayoutEntry, type LayoutMoves, memoryLayoutMoves, memoryTokenStore, runArgs, SandboxHost } from "../src/index.ts";
+import { spawnText } from "../../../bench/spawned.ts";
 
 /*
  * What a layout-1 store's root held before its move, as the host moves it (the fourth fabric review's R4-1 and R4-2, its
@@ -100,7 +100,7 @@ function hostOver(root: string, opts: { containers?: Containers; moves?: LayoutM
           const mount = rest[rest.indexOf("--mount") + 1]!;
           const src = /src=([^,]+)/.exec(mount)![1]!;
           const [script, mode, , ...more] = rest.slice(rest.indexOf("-c") + 1);
-          const ran = spawnSync("python3", ["-I", "-c", script!, mode!, src, ...more], { encoding: "utf8", timeout: 20_000 });
+          const ran = await spawnText("python3", ["-I", "-c", script!, mode!, src, ...more], { encoding: "utf8", timeout: 20_000 });
           modes.push({ mode: mode!, code: ran.status ?? 1, stderr: ran.stderr });
           return { code: ran.status ?? 1, stdout: ran.stdout, stderr: ran.stderr };
         }

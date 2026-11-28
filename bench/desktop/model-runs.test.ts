@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { ExecResult } from "../../packages/core/src/index.ts";
 import { benchLook, type EyesCount, eyesFraming, gatewayValues, limitAnswer, lookOf, meterDollars, pacer, recordOf, routeOf, whyNotOurs } from "./model-runs.ts";
+import { spawned } from "../spawned.ts";
 
 /* The real model's runs (model-runs.ts): what is read of a gateway token's file, where each route's calls go, and the node's meter. */
 
@@ -43,9 +44,9 @@ test("a look given as a command of its own is the bench's to answer, its questio
   for (const other of ['cd /work && desktop look "q"', "desktop click 10 20", 'desktop look "$(cat q)"', "echo desktop look"]) expect(lookOf(other)).toBeNull();
 });
 
-test("a look is framed as deskd frames it: its own EYES_FRAMING, read from its source, word for word as Python has it", () => {
+test("a look is framed as deskd frames it: its own EYES_FRAMING, read from its source, word for word as Python has it", async () => {
   const path = new URL("../../sandbox/desktop/deskd.py", import.meta.url);
-  const python = Bun.spawnSync(["python3", "-I", "-c", "import importlib.util, sys; sys.dont_write_bytecode = True; s = importlib.util.spec_from_file_location('d', sys.argv[1]); d = importlib.util.module_from_spec(s); s.loader.exec_module(d); sys.stdout.write(d.EYES_FRAMING)", path.pathname], { stdout: "pipe", stderr: "pipe" });
+  const python = await spawned(["python3", "-I", "-c", "import importlib.util, sys; sys.dont_write_bytecode = True; s = importlib.util.spec_from_file_location('d', sys.argv[1]); d = importlib.util.module_from_spec(s); s.loader.exec_module(d); sys.stdout.write(d.EYES_FRAMING)", path.pathname], { stdout: "pipe", stderr: "pipe" });
   expect(python.exitCode).toBe(0);
   expect(eyesFraming(readFileSync(path, "utf8"))).toBe(python.stdout.toString());
   expect(eyesFraming(readFileSync(path, "utf8"))).toStartWith("This is a screenshot of a desktop, 1280 pixels wide and 800 high");

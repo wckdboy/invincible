@@ -1,5 +1,5 @@
 import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { spawnSync } from "node:child_process";
+import { spawned } from "../../../bench/spawned.ts";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,26 +50,29 @@ afterAll(async () => {
 const TOKEN = "gw_not_a_real_token_with_your_keys";
 
 /** An agent's VM, as far as git goes: its /work with its repository, its HOME with its lease, and the scripts' paths in it. */
-function vm() {
+async function vm() {
   const work = temp("held-work-");
   const home = temp("held-home-");
   // (A folder first on its PATH, where a test puts a stand-in for a program a repository's configuration names.)
   const bin = temp("held-bin-");
   const env = { PATH: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: home, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t.invalid" };
   const repo = join(work, "repo");
-  const git = (...a: string[]) => spawnSync("git", ["-C", repo, ...a], { env, encoding: "utf8" });
+  const git = async (...a: string[]) => {
+    const r = await spawned(["git", "-C", repo, ...a], { env });
+    return { stdout: r.stdout.toString(), stderr: r.stderr.toString(), status: r.exitCode };
+  };
   mkdirSync(repo);
-  spawnSync("git", ["init", "-q", repo], { env });
+  await spawned(["git", "init", "-q", repo], { env });
   writeFileSync(join(repo, "README.md"), "the agent's repository\n");
-  git("add", ".");
-  git("commit", "-q", "-m", "first");
-  git("config", "user.name", "Ada");
-  git("config", "user.email", "ada@agents.invalid");
+  await git("add", ".");
+  await git("commit", "-q", "-m", "first");
+  await git("config", "user.name", "Ada");
+  await git("config", "user.email", "ada@agents.invalid");
   // (A clone, as every agent's repository is: what is kept to ship says where it came from, and it names its default
   // branch, origin/HEAD, as a clone does.)
-  git("remote", "add", "origin", "https://example.test/ada/repo.git");
-  git("update-ref", "refs/remotes/origin/main", "HEAD");
-  git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+  await git("remote", "add", "origin", "https://example.test/ada/repo.git");
+  await git("update-ref", "refs/remotes/origin/main", "HEAD");
+  await git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
   writeFileSync(join(home, LEASE_FILE), JSON.stringify({ INVINCIBLE_TOKEN: TOKEN, INVINCIBLE_REPO_URL: `http://127.0.0.1:${gateway.port}/git/repo`, INVINCIBLE_KEYS: "http://127.0.0.1:9/key" }));
   /** Whatever a planted command ran, it says here: as whom, and the lease it read. */
   const marker = join(work, "what-it-read");
@@ -96,12 +99,12 @@ function vm() {
 
 describe("a task's setup in the agent's repository (REPO_TASK_START)", () => {
   test("runs no hook another node's task wrote in it, nor its fsmonitor: the worktree is made, and nothing of theirs ran", async () => {
-    const v = vm();
+    const v = await vm();
     writeFileSync(join(v.repo, ".git/hooks/post-checkout"), v.planted);
     chmodSync(join(v.repo, ".git/hooks/post-checkout"), 0o755);
     writeFileSync(join(v.work, "fsmonitor"), v.planted);
     chmodSync(join(v.work, "fsmonitor"), 0o755);
-    v.git("config", "core.fsmonitor", join(v.work, "fsmonitor"));
+    await v.git("config", "core.fsmonitor", join(v.work, "fsmonitor"));
     reached.length = 0;
     const ran = await v.start("task-next");
     expect(ran.status).toBe(0);
@@ -114,7 +117,7 @@ describe("a task's setup in the agent's repository (REPO_TASK_START)", () => {
   });
 
   test("is started in a repository that uses husky's hooks path, and runs none of its hooks: its setup, checkpoints, evidence and changes", async () => {
-    const v = vm();
+    const v = await vm();
     // What husky's install leaves (its prepare script, at every npm install): core.hooksPath at .husky/_, and a hook there
     // for each of git's, in each worktree it is installed in.
     const husky = (root: string) => {
@@ -125,7 +128,7 @@ describe("a task's setup in the agent's repository (REPO_TASK_START)", () => {
         chmodSync(join(root, ".husky/_", hook), 0o755);
       }
     };
-    v.git("config", "core.hooksPath", ".husky/_");
+    await v.git("config", "core.hooksPath", ".husky/_");
     husky(v.repo);
     const ran = await v.start("task-h");
     expect([ran.status, ran.stderr]).toEqual([0, ""]);
@@ -135,7 +138,7 @@ describe("a task's setup in the agent's repository (REPO_TASK_START)", () => {
     writeFileSync(join(root, "made.txt"), "a step's work\n");
     const kept = await v.shell(v.at(checkpointCommand(root, "task-h", 1, "")), root);
     expect(kept.status).toBe(0);
-    expect(v.git("show", "--stat", "--format=%s", "refs/invincible/checkpoints/task-h/1").stdout).toContain("made.txt");
+    expect((await v.git("show", "--stat", "--format=%s", "refs/invincible/checkpoints/task-h/1")).stdout).toContain("made.txt");
     for (const { run } of repositoryEvidence("HEAD")) expect((await v.shell(run, root)).status).toBe(0);
     const changes = await v.shell(changesCommand(join(v.work, "out/task-h"), "HEAD"), root);
     expect([changes.status, changes.stdout.trim()]).toEqual([0, "1"]);
@@ -143,22 +146,22 @@ describe("a task's setup in the agent's repository (REPO_TASK_START)", () => {
   });
 
   test("is started in a repository with Git LFS installed in it, and runs none of LFS: its pointers are checked out, and its files kept, as they are", async () => {
-    const v = vm();
+    const v = await vm();
     // A pointer as LFS stores one, committed (through LFS's clean filter, in the agent's own git).
     const pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\nsize 12345\n";
     writeFileSync(join(v.repo, ".gitattributes"), "*.bin filter=lfs diff=lfs merge=lfs -text\n");
     writeFileSync(join(v.repo, "model.bin"), pointer);
-    v.git("add", ".");
-    v.git("commit", "-q", "-m", "a model, in LFS");
+    await v.git("add", ".");
+    await v.git("commit", "-q", "-m", "a model, in LFS");
     // (The repository's own: its default branch, as last fetched, holds it.)
-    v.git("update-ref", "refs/remotes/origin/main", "HEAD");
+    await v.git("update-ref", "refs/remotes/origin/main", "HEAD");
     // What `git lfs install --local` writes (git-lfs 3): its filter, required, and its four hooks; git-lfs itself a
     // stand-in that says when it runs.
-    v.git("config", "filter.lfs.clean", "git-lfs clean -- %f");
-    v.git("config", "filter.lfs.smudge", "git-lfs smudge -- %f");
-    v.git("config", "filter.lfs.process", "git-lfs filter-process");
-    v.git("config", "filter.lfs.required", "true");
-    v.git("config", "lfs.repositoryformatversion", "0");
+    await v.git("config", "filter.lfs.clean", "git-lfs clean -- %f");
+    await v.git("config", "filter.lfs.smudge", "git-lfs smudge -- %f");
+    await v.git("config", "filter.lfs.process", "git-lfs filter-process");
+    await v.git("config", "filter.lfs.required", "true");
+    await v.git("config", "lfs.repositoryformatversion", "0");
     for (const hook of ["post-checkout", "post-commit", "post-merge", "pre-push"]) {
       writeFileSync(join(v.repo, ".git/hooks", hook), `#!/bin/sh\ngit lfs ${hook} "$@"\n`);
       chmodSync(join(v.repo, ".git/hooks", hook), 0o755);
@@ -173,7 +176,7 @@ describe("a task's setup in the agent's repository (REPO_TASK_START)", () => {
     writeFileSync(join(root, "new.bin"), "another model\n");
     const kept = await v.shell(v.at(checkpointCommand(root, "task-l", 1, "")), root);
     expect(kept.status).toBe(0);
-    expect(v.git("show", "refs/invincible/checkpoints/task-l/1:model.bin").stdout).toBe("the model's own bytes\n");
+    expect((await v.git("show", "refs/invincible/checkpoints/task-l/1:model.bin")).stdout).toBe("the model's own bytes\n");
     const changes = await v.shell(changesCommand(join(v.work, "out/task-l"), "HEAD"), root);
     expect([changes.status, changes.stdout.trim()]).toEqual([0, "2"]);
     expect(readFileSync(join(v.work, "out/task-l/ship/files/model.bin"), "utf8")).toBe("the model's own bytes\n");
@@ -181,8 +184,8 @@ describe("a task's setup in the agent's repository (REPO_TASK_START)", () => {
   });
 
   test("isn't started in a repository whose configuration names another worktree, which nothing the node sets holds off", async () => {
-    const v = vm();
-    v.git("config", "core.worktree", v.home);
+    const v = await vm();
+    await v.git("config", "core.worktree", v.home);
     const ran = await v.start("task-x");
     expect(ran.status).toBe(1);
     expect(ran.stderr).toContain("this repository isn't used here: its configuration names core.worktree");
@@ -209,8 +212,8 @@ describe("a task's setup in the agent's repository (REPO_TASK_START)", () => {
       [`remote.${from}/git/repo.url`, `${to}/stolen`],
       [`remote.${from}/git/repo.proxy`, to],
     ] as const) {
-      const v = vm();
-      v.git("config", key, value);
+      const v = await vm();
+      await v.git("config", key, value);
       reached.length = 0;
       const ran = await v.start("task-y");
       // The token went nowhere: neither where that key would take it, nor to the gateway.
@@ -222,8 +225,8 @@ describe("a task's setup in the agent's repository (REPO_TASK_START)", () => {
   });
 
   test("fetches with the lease through a repository whose own HTTP, credential and transport settings are ordinary ones", async () => {
-    const v = vm();
-    for (const [key, value] of [["http.postBuffer", "524288000"], ["http.version", "HTTP/1.1"], ["credential.useHttpPath", "true"], ["credential.https://github.com.username", "ada"], ["core.sshCommand", "ssh -i ~/.ssh/work"], ["core.askPass", join(v.work, "askpass")]] as const) v.git("config", key, value);
+    const v = await vm();
+    for (const [key, value] of [["http.postBuffer", "524288000"], ["http.version", "HTTP/1.1"], ["credential.useHttpPath", "true"], ["credential.https://github.com.username", "ada"], ["core.sshCommand", "ssh -i ~/.ssh/work"], ["core.askPass", join(v.work, "askpass")]] as const) await v.git("config", key, value);
     reached.length = 0;
     const ran = await v.start("task-o");
     expect(ran.status).toBe(0);
@@ -234,10 +237,10 @@ describe("a task's setup in the agent's repository (REPO_TASK_START)", () => {
   });
 
   test("runs no askpass program of the repository's when the gateway asks for credentials", async () => {
-    const v = vm();
+    const v = await vm();
     writeFileSync(join(v.work, "askpass"), `${v.planted}echo x\n`);
     chmodSync(join(v.work, "askpass"), 0o755);
-    v.git("config", "core.askPass", join(v.work, "askpass"));
+    await v.git("config", "core.askPass", join(v.work, "askpass"));
     v.lease(`http://127.0.0.1:${asking.port}/git/repo`);
     reached.length = 0;
     const ran = await v.start("task-a");
@@ -250,8 +253,8 @@ describe("a task's setup in the agent's repository (REPO_TASK_START)", () => {
 });
 
 /** git's own smart-HTTP server (http-backend, as CGI) for the bare repositories under `root`, each request's Authorization kept. */
-function smartHttp(root: string) {
-  const backend = join(spawnSync("git", ["--exec-path"], { encoding: "utf8" }).stdout.trim(), "git-http-backend");
+async function smartHttp(root: string) {
+  const backend = join((await spawned(["git", "--exec-path"])).stdout.toString().trim(), "git-http-backend");
   const asked: { path: string; auth: string | null }[] = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -303,41 +306,44 @@ function smartHttp(root: string) {
  */
 describe("the lease's fetch, against a smart-HTTP server", () => {
   test("carries the lease to no submodule's own remote, whatever the repository asks of its submodules", async () => {
-    const v = vm();
+    const v = await vm();
     const served = temp("held-served-");
-    const gate = smartHttp(served);
-    const other = smartHttp(served);
+    const gate = await smartHttp(served);
+    const other = await smartHttp(served);
     try {
       const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: v.home, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t.invalid" };
-      const run = (cwd: string, ...a: string[]) => spawnSync("git", ["-C", cwd, ...a], { env, encoding: "utf8" });
+      const run = async (cwd: string, ...a: string[]) => {
+        const r = await spawned(["git", "-C", cwd, ...a], { env });
+        return { stdout: r.stdout.toString(), stderr: r.stderr.toString(), status: r.exitCode };
+      };
       // (One that reaches a server here runs as a process of its own: the servers answer from this one.)
       const reach = async (cwd: string, ...a: string[]) => (await Bun.spawn(["git", "-C", cwd, ...a], { env, stdout: "ignore", stderr: "ignore" }).exited);
       // The submodule's repository, served by the other host, and the agent's, served by the gateway's stand-in.
       const sub = join(served, "sub.git");
-      run(served, "init", "-q", "--bare", "sub.git");
+      await run(served, "init", "-q", "--bare", "sub.git");
       const subWork = temp("held-subwork-");
-      run(subWork, "init", "-q");
+      await run(subWork, "init", "-q");
       writeFileSync(join(subWork, "lib.txt"), "one\n");
-      run(subWork, "add", ".");
-      run(subWork, "commit", "-q", "-m", "one");
-      run(subWork, "push", "-q", sub, "HEAD:refs/heads/main");
-      run(served, "--git-dir=sub.git", "symbolic-ref", "HEAD", "refs/heads/main");
+      await run(subWork, "add", ".");
+      await run(subWork, "commit", "-q", "-m", "one");
+      await run(subWork, "push", "-q", sub, "HEAD:refs/heads/main");
+      await run(served, "--git-dir=sub.git", "symbolic-ref", "HEAD", "refs/heads/main");
       expect(await reach(v.repo, "submodule", "add", "-q", `${other.url}/sub.git`, "sub")).toBe(0);
-      v.git("commit", "-q", "-m", "a submodule");
-      run(served, "init", "-q", "--bare", "repo.git");
-      v.git("push", "-q", join(served, "repo.git"), "HEAD:refs/heads/main");
-      run(served, "--git-dir=repo.git", "symbolic-ref", "HEAD", "refs/heads/main");
+      await v.git("commit", "-q", "-m", "a submodule");
+      await run(served, "init", "-q", "--bare", "repo.git");
+      await v.git("push", "-q", join(served, "repo.git"), "HEAD:refs/heads/main");
+      await run(served, "--git-dir=repo.git", "symbolic-ref", "HEAD", "refs/heads/main");
       // Since: the submodule moves on, and the repository with it, on the server.
       writeFileSync(join(subWork, "lib.txt"), "two\n");
-      run(subWork, "commit", "-q", "-am", "two");
-      run(subWork, "push", "-q", sub, "HEAD:refs/heads/main");
+      await run(subWork, "commit", "-q", "-am", "two");
+      await run(subWork, "push", "-q", sub, "HEAD:refs/heads/main");
       const next = temp("held-next-");
-      run(next, "clone", "-q", join(served, "repo.git"), ".");
+      await run(next, "clone", "-q", join(served, "repo.git"), ".");
       expect(await reach(next, "submodule", "update", "-q", "--init", "--remote")).toBe(0);
-      run(next, "commit", "-q", "-am", "the submodule moves on");
-      run(next, "push", "-q", "origin", "HEAD:refs/heads/main");
+      await run(next, "commit", "-q", "-am", "the submodule moves on");
+      await run(next, "push", "-q", "origin", "HEAD:refs/heads/main");
       // The agent's repository asks for its submodules to be fetched with it, every time.
-      v.git("config", "fetch.recurseSubmodules", "yes");
+      await v.git("config", "fetch.recurseSubmodules", "yes");
       v.lease(`${gate.url}/repo.git`);
       gate.asked.length = 0;
       other.asked.length = 0;
@@ -362,39 +368,39 @@ describe("the lease's fetch, against a smart-HTTP server", () => {
   // whatever the clone says. Only a repository whose HEAD can't be fetched (it names no branch) starts from the clone's
   // own HEAD, and says so (local), so a plan that works only on your own repositories can refuse it.
   test("says where it started: the repository's default branch as fetched, whatever earlier work left the clone's origin/HEAD naming; else its own HEAD (local)", async () => {
-    const v = vm();
+    const v = await vm();
     const served = temp("held-served-");
-    const gate = smartHttp(served);
+    const gate = await smartHttp(served);
     try {
-      spawnSync("git", ["-C", served, "init", "-q", "--bare", "repo.git"]);
-      v.git("push", "-q", join(served, "repo.git"), "HEAD:refs/heads/main");
-      spawnSync("git", ["-C", served, "--git-dir=repo.git", "symbolic-ref", "HEAD", "refs/heads/main"]);
-      const main = v.git("rev-parse", "HEAD").stdout.trim();
+      await spawned(["git", "-C", served, "init", "-q", "--bare", "repo.git"]);
+      await v.git("push", "-q", join(served, "repo.git"), "HEAD:refs/heads/main");
+      await spawned(["git", "-C", served, "--git-dir=repo.git", "symbolic-ref", "HEAD", "refs/heads/main"]);
+      const main = (await v.git("rev-parse", "HEAD")).stdout.trim();
       v.lease(`${gate.url}/repo.git`);
       expect((await v.start("task-head")).stdout.trim()).toBe(`${main} fetched`);
       // What earlier work left: a branch of its own, checked out, and origin/HEAD pointed at it; then at none.
-      v.git("checkout", "-q", "-b", "earlier-work");
+      await v.git("checkout", "-q", "-b", "earlier-work");
       writeFileSync(join(v.repo, "left.txt"), "what earlier work left\n");
-      v.git("add", ".");
-      v.git("commit", "-q", "-m", "earlier work");
-      v.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/heads/earlier-work");
+      await v.git("add", ".");
+      await v.git("commit", "-q", "-m", "earlier work");
+      await v.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/heads/earlier-work");
       const pointed = await v.start("task-pointed");
       expect([pointed.status, pointed.stdout.trim(), existsSync(join(v.work, "tasks/task-pointed/left.txt"))]).toEqual([0, `${main} fetched`, false]);
-      v.git("symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
+      await v.git("symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
       const none = await v.start("task-none");
       expect([none.status, none.stdout.trim(), existsSync(join(v.work, "tasks/task-none/left.txt"))]).toEqual([0, `${main} fetched`, false]);
       // The third re-check's N4b: earlier work plants the ref the repository's HEAD is fetched into, at a commit of its
       // own, with a stale lock beside it, so that fetch can't write it and its delete can't either. Only what this start
       // fetched is read: none, so it is the clone's own HEAD, said as such.
-      const earlier = v.git("rev-parse", "HEAD").stdout.trim();
-      v.git("update-ref", "refs/invincible/fetched-head", earlier);
+      const earlier = (await v.git("rev-parse", "HEAD")).stdout.trim();
+      await v.git("update-ref", "refs/invincible/fetched-head", earlier);
       writeFileSync(join(v.repo, ".git", "refs", "invincible", "fetched-head.lock"), "");
       const planted = await v.start("task-planted");
       expect([planted.status, planted.stdout.trim()]).toEqual([0, `${earlier} local`]);
       // A repository whose HEAD names no branch can't say its default: the clone's own HEAD, said as such.
-      spawnSync("git", ["-C", served, "--git-dir=repo.git", "symbolic-ref", "HEAD", "refs/heads/nowhere"]);
+      await spawned(["git", "-C", served, "--git-dir=repo.git", "symbolic-ref", "HEAD", "refs/heads/nowhere"]);
       const local = await v.start("task-local");
-      expect([local.status, local.stdout.trim()]).toEqual([0, `${v.git("rev-parse", "HEAD").stdout.trim()} local`]);
+      expect([local.status, local.stdout.trim()]).toEqual([0, `${(await v.git("rev-parse", "HEAD")).stdout.trim()} local`]);
     } finally {
       gate.stop();
     }
@@ -403,20 +409,20 @@ describe("the lease's fetch, against a smart-HTTP server", () => {
   // (The fifth review's R5-3 A: a fetch's negotiation asks an alternate object store for its refs, by the repository's
   // core.alternateRefsCommand, through a shell.)
   test("runs no refs command of an alternate object store the repository names, as its fetch negotiates", async () => {
-    const v = vm();
+    const v = await vm();
     const served = temp("held-served-");
-    const gate = smartHttp(served);
+    const gate = await smartHttp(served);
     try {
-      spawnSync("git", ["-C", served, "init", "-q", "--bare", "repo.git"]);
-      v.git("push", "-q", join(served, "repo.git"), "HEAD:refs/heads/main");
-      spawnSync("git", ["-C", served, "--git-dir=repo.git", "symbolic-ref", "HEAD", "refs/heads/main"]);
+      await spawned(["git", "-C", served, "init", "-q", "--bare", "repo.git"]);
+      await v.git("push", "-q", join(served, "repo.git"), "HEAD:refs/heads/main");
+      await spawned(["git", "-C", served, "--git-dir=repo.git", "symbolic-ref", "HEAD", "refs/heads/main"]);
       // An object store the repository borrows from, and the command that would list its refs.
       const alt = temp("held-alt-");
-      spawnSync("git", ["init", "-q", "--bare", alt]);
+      await spawned(["git", "init", "-q", "--bare", alt]);
       writeFileSync(join(v.repo, ".git/objects/info/alternates"), `${join(alt, "objects")}\n`);
       writeFileSync(join(v.work, "alt-refs"), v.planted);
       chmodSync(join(v.work, "alt-refs"), 0o755);
-      v.git("config", "core.alternateRefsCommand", join(v.work, "alt-refs"));
+      await v.git("config", "core.alternateRefsCommand", join(v.work, "alt-refs"));
       v.lease(`${gate.url}/repo.git`);
       const ran = await v.start("task-alt");
       expect(ran.status).toBe(0);
@@ -430,7 +436,7 @@ describe("the lease's fetch, against a smart-HTTP server", () => {
 
 describe("a step's checkpoint, and what is kept to ship", () => {
   test("a checkpoint runs no hook or fsmonitor of the repository's, and keeps the step as before", async () => {
-    const v = vm();
+    const v = await vm();
     expect((await v.start("task-c")).status).toBe(0);
     const root = join(v.work, "tasks/task-c");
     for (const hook of ["reference-transaction", "post-index-change"]) {
@@ -439,12 +445,12 @@ describe("a step's checkpoint, and what is kept to ship", () => {
     }
     writeFileSync(join(v.work, "fsmonitor"), v.planted);
     chmodSync(join(v.work, "fsmonitor"), 0o755);
-    v.git("config", "core.fsmonitor", join(v.work, "fsmonitor"));
+    await v.git("config", "core.fsmonitor", join(v.work, "fsmonitor"));
     writeFileSync(join(root, "made.txt"), "a step's work\n");
     const kept = await v.shell(v.at(checkpointCommand(root, "task-c", 1, "")), root);
     expect(kept.status).toBe(0);
     expect(kept.stdout.trim()).toMatch(/^[0-9a-f]{40} [0-9a-f]{40} [0-9a-f]{40}$/);
-    expect(v.git("show", "--stat", "--format=%s", "refs/invincible/checkpoints/task-c/1").stdout).toContain("made.txt");
+    expect((await v.git("show", "--stat", "--format=%s", "refs/invincible/checkpoints/task-c/1")).stdout).toContain("made.txt");
     expect(v.ran()).toBe("");
     // The same step again: nothing new to keep.
     const [, tree, parent] = kept.stdout.trim().split(" ");
@@ -452,24 +458,24 @@ describe("a step's checkpoint, and what is kept to ship", () => {
   });
 
   test("a checkpoint, the evidence and the shipment run no filter of the repository's, its own or one it includes, and keep each file as it is", async () => {
-    const v = vm();
+    const v = await vm();
     expect((await v.start("task-f")).status).toBe(0);
     const root = join(v.work, "tasks/task-f");
     // What a handed task can write: clean filters in the repository's configuration (one whose name holds '=', which a
     // -c would cut short), one in a file it includes, and the attributes that call them.
     writeFileSync(join(v.work, "clean"), `${v.planted}cat\n`);
     chmodSync(join(v.work, "clean"), 0o755);
-    v.git("config", "filter.evil.clean", join(v.work, "clean"));
-    v.git("config", "filter.evil.required", "true");
-    v.git("config", "filter.a=b.clean", join(v.work, "clean"));
+    await v.git("config", "filter.evil.clean", join(v.work, "clean"));
+    await v.git("config", "filter.evil.required", "true");
+    await v.git("config", "filter.a=b.clean", join(v.work, "clean"));
     const include = join(temp("held-include-"), "more.cfg");
     writeFileSync(include, `[filter "Kept"]\n\tclean = ${join(v.work, "clean")}\n\tprocess = ${join(v.work, "clean")}\n`);
-    v.git("config", "include.path", include);
+    await v.git("config", "include.path", include);
     writeFileSync(join(root, ".gitattributes"), "*.txt filter=evil\n*.md filter=Kept\n*.csv filter=a=b\n");
     for (const name of ["made.txt", "notes.md", "data.csv"]) writeFileSync(join(root, name), `${name}: a step's work\n`);
     const kept = await v.shell(v.at(checkpointCommand(root, "task-f", 1, "")), root);
     expect([kept.status, kept.stderr]).toEqual([0, ""]);
-    for (const name of ["made.txt", "notes.md", "data.csv"]) expect(v.git("show", `refs/invincible/checkpoints/task-f/1:${name}`).stdout).toBe(`${name}: a step's work\n`);
+    for (const name of ["made.txt", "notes.md", "data.csv"]) expect((await v.git("show", `refs/invincible/checkpoints/task-f/1:${name}`)).stdout).toBe(`${name}: a step's work\n`);
     for (const { run } of repositoryEvidence("HEAD")) expect((await v.shell(run, root)).status).toBe(0);
     const shipped = await v.shell(`python3 -I -c '${SHIPMENT_SCRIPT.replaceAll("'", `'\\''`)}' . ${join(v.work, "out/ship")}`, root);
     expect([shipped.status, shipped.stdout.trim()]).toEqual([0, "4"]);

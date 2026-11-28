@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DESKTOP_IMAGE, HARDWARE_IMAGE, OWN_IMAGES } from "../src/index.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * The hardware image (C1 step 11): the agents' desktop with KiCad and FreeCAD, a choice per agent. Here, what the image
@@ -83,16 +84,16 @@ describe("kipy, where an agent's commands run", () => {
   // aren't login shells: they keep Debian's own python3, the image setting no PATH of its own.
   const PROFILE_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games";
   const script = fileURLToPath(new URL("hardware-path.sh", context));
-  const after = (path: string, times = 1) => {
-    const p = Bun.spawnSync(["/bin/sh", "-c", `${'. "$1"; '.repeat(times)}printf %s "$PATH"`, "sh", script], { env: { PATH: path, HOME: "/work" }, stdout: "pipe", stderr: "pipe" });
+  const after = async (path: string, times = 1) => {
+    const p = await spawned(["/bin/sh", "-c", `${'. "$1"; '.repeat(times)}printf %s "$PATH"`, "sh", script], { env: { PATH: path, HOME: "/work" }, stdout: "pipe", stderr: "pipe" });
     expect({ stderr: p.stderr.toString(), code: p.exitCode }).toEqual({ stderr: "", code: 0 });
     return p.stdout.toString();
   };
 
-  test("a login shell has kipy's venv first, once, however many times it is read", () => {
+  test("a login shell has kipy's venv first, once, however many times it is read", async () => {
     expect(dockerfile).toContain("COPY hardware-path.sh /etc/profile.d/invincible-hardware.sh\n");
-    expect(after(PROFILE_PATH).split(":")).toEqual(["/opt/hardware/bin", ...PROFILE_PATH.split(":")]);
-    expect(after(PROFILE_PATH, 2)).toBe(after(PROFILE_PATH));
+    expect((await after(PROFILE_PATH)).split(":")).toEqual(["/opt/hardware/bin", ...PROFILE_PATH.split(":")]);
+    expect(await after(PROFILE_PATH, 2)).toBe(await after(PROFILE_PATH));
   });
 
   test("the image puts nothing on its own PATH: deskd and what it starts keep Debian's python3", () => {
@@ -102,32 +103,32 @@ describe("kipy, where an agent's commands run", () => {
 
 describe("its seed, as the VM runs it as it starts", () => {
   /** hardware-seed in a home of the test's own (and a seed folder of its own, where given), the VM's command after it. */
-  function seed(home: string, command: string[] = [], env: Record<string, string> = {}) {
-    const p = Bun.spawnSync(["sh", seedScript, ...command], { env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: home, INVINCIBLE_HARDWARE_SEED: seeds, ...env }, stdout: "pipe", stderr: "pipe" });
+  async function seed(home: string, command: string[] = [], env: Record<string, string> = {}) {
+    const p = await spawned(["sh", seedScript, ...command], { env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: home, INVINCIBLE_HARDWARE_SEED: seeds, ...env }, stdout: "pipe", stderr: "pipe" });
     return { code: p.exitCode, out: p.stdout.toString(), err: p.stderr.toString() };
   }
   const home = () => mkdtempSync(join(tmpdir(), "invincible-hardware-home-"));
   const PLACES = [".config/kicad/9.0/kicad_common.json", ".config/kicad/9.0/fp-lib-table", ".config/kicad/9.0/sym-lib-table", ".config/FreeCAD/user.cfg"];
 
-  test("puts each setting where it isn't, from the image's own, then runs the VM's command", () => {
+  test("puts each setting where it isn't, from the image's own, then runs the VM's command", async () => {
     const h = home();
     try {
-      expect(seed(h, ["sh", "-c", "echo the command of the VM"])).toMatchObject({ code: 0, out: "the command of the VM\n" });
+      expect(await seed(h, ["sh", "-c", "echo the command of the VM"])).toMatchObject({ code: 0, out: "the command of the VM\n" });
       for (const place of PLACES) expect(existsSync(join(h, place))).toBe(true);
       expect(readFileSync(join(h, ".config/kicad/9.0/fp-lib-table"), "utf8")).toBe(readFileSync(join(seeds, "fp-lib-table"), "utf8"));
       // (Nothing half-written is left beside them.)
-      expect(Bun.spawnSync(["find", h, "-name", "*.part"]).stdout.toString()).toBe("");
+      expect((await spawned(["find", h, "-name", "*.part"])).stdout.toString()).toBe("");
     } finally {
       rmSync(h, { recursive: true, force: true });
     }
   });
 
-  test("never replaces what the agent has: its own settings stay as they are", () => {
+  test("never replaces what the agent has: its own settings stay as they are", async () => {
     const h = home();
     try {
       mkdirSync(join(h, ".config/kicad/9.0"), { recursive: true });
       writeFileSync(join(h, ".config/kicad/9.0/kicad_common.json"), '{"mine": true}\n');
-      expect(seed(h).code).toBe(0);
+      expect((await seed(h)).code).toBe(0);
       expect(readFileSync(join(h, ".config/kicad/9.0/kicad_common.json"), "utf8")).toBe('{"mine": true}\n');
       expect(existsSync(join(h, ".config/kicad/9.0/fp-lib-table"))).toBe(true);
     } finally {
@@ -135,13 +136,13 @@ describe("its seed, as the VM runs it as it starts", () => {
     }
   });
 
-  test("never keeps the VM from starting: a home it can't write, or a seed that's gone, and the command still runs", () => {
+  test("never keeps the VM from starting: a home it can't write, or a seed that's gone, and the command still runs", async () => {
     const h = home();
     try {
       chmodSync(h, 0o500);
-      expect(seed(h, ["sh", "-c", "echo started"])).toMatchObject({ code: 0, out: "started\n" });
+      expect(await seed(h, ["sh", "-c", "echo started"])).toMatchObject({ code: 0, out: "started\n" });
       chmodSync(h, 0o700);
-      expect(seed(h, ["sh", "-c", "echo started"], { INVINCIBLE_HARDWARE_SEED: join(h, "no-such-seed") })).toMatchObject({ code: 0, out: "started\n" });
+      expect(await seed(h, ["sh", "-c", "echo started"], { INVINCIBLE_HARDWARE_SEED: join(h, "no-such-seed") })).toMatchObject({ code: 0, out: "started\n" });
       expect(existsSync(join(h, ".config/kicad/9.0/fp-lib-table"))).toBe(false);
     } finally {
       chmodSync(h, 0o700);
@@ -149,11 +150,11 @@ describe("its seed, as the VM runs it as it starts", () => {
     }
   });
 
-  test("with no command, it seeds and ends; the command's own exit is the VM's", () => {
+  test("with no command, it seeds and ends; the command's own exit is the VM's", async () => {
     const h = home();
     try {
-      expect(seed(h)).toMatchObject({ code: 0, out: "" });
-      expect(seed(h, ["sh", "-c", "exit 3"]).code).toBe(3);
+      expect(await seed(h)).toMatchObject({ code: 0, out: "" });
+      expect((await seed(h, ["sh", "-c", "exit 3"])).code).toBe(3);
     } finally {
       rmSync(h, { recursive: true, force: true });
     }

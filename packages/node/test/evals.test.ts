@@ -6,6 +6,7 @@ import { type ChatStreamEvent, parseVariant, type RouteName, EvalRecord, evalPro
 import { ENGINEERING_SUITE, pose, EVAL_INSTRUCTIONS, type EvalProblem } from "@invincible/models";
 import { CLAUDE_CODE_IMAGE } from "@invincible/sandbox";
 import { AGENT_EVAL_MINUTES, chooseProblems, harnessOptions, runEval, runEvals } from "../src/eval-cli.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * The eval runner against a fake node: fake models, a fake sandbox. What's checked
@@ -152,10 +153,10 @@ describe("a run's harness", () => {
 });
 
 describe("the CLI", () => {
-  test("`invincible eval problems` lists the suite on a machine that isn't a node", () => {
+  test("`invincible eval problems` lists the suite on a machine that isn't a node", async () => {
     const home = mkdtempSync(join(tmpdir(), "invincible-eval-cli-"));
     try {
-      const run = Bun.spawnSync([process.execPath, resolve(import.meta.dir, "../src/cli.ts"), "eval", "problems", "--home", join(home, "none")], {
+      const run = await spawned([process.execPath, resolve(import.meta.dir, "../src/cli.ts"), "eval", "problems", "--home", join(home, "none")], {
         env: { ...process.env, INVINCIBLE_KEYSTORE: "file" },
         stdin: "ignore",
       });

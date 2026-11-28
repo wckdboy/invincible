@@ -1,10 +1,10 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LEASE_FILE } from "@invincible/core";
 import { repositoryEvidence } from "../src/team-runtime.ts";
+import { spawnText } from "../../../bench/spawned.ts";
 
 /*
  * A task's evidence in a repository (team-runtime.ts repositoryEvidence; the fourth fabric review's R4-4): what `git
@@ -32,21 +32,21 @@ test("a task's evidence runs no fsmonitor, external diff or textconv of the repo
   writeFileSync(join(home, LEASE_FILE), JSON.stringify({ INVINCIBLE_TOKEN: "gw_not_a_real_token_with_your_keys" }));
   const repo = join(work, "repo");
   const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: home, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t.invalid" };
-  const git = (...a: string[]) => spawnSync("git", ["-C", repo, ...a], { env, encoding: "utf8" });
-  spawnSync("git", ["init", "-q", repo], { env });
+  const git = async (...a: string[]) => await spawnText("git", ["-C", repo, ...a], { env, encoding: "utf8" });
+  await spawnText("git", ["init", "-q", repo], { env });
   writeFileSync(join(repo, "README.md"), "the agent's repository\n");
-  git("add", ".");
-  git("commit", "-q", "-m", "first");
-  const base = git("rev-parse", "HEAD").stdout.trim();
+  await git("add", ".");
+  await git("commit", "-q", "-m", "first");
+  const base = (await git("rev-parse", "HEAD")).stdout.trim();
   // What another node's task can write in the repository it shares: an fsmonitor, an external diff, and a textconv
   // that the repository's attributes call.
   const marker = join(work, "what-it-read");
   const planted = join(work, "planted");
   writeFileSync(planted, `#!/bin/sh\n{ echo "ran as HOME=$HOME"; cat "$HOME/${LEASE_FILE}"; } >> "${marker}"\n`);
   chmodSync(planted, 0o755);
-  git("config", "core.fsmonitor", planted);
-  git("config", "diff.external", planted);
-  git("config", "diff.evil.textconv", planted);
+  await git("config", "core.fsmonitor", planted);
+  await git("config", "diff.external", planted);
+  await git("config", "diff.evil.textconv", planted);
   writeFileSync(join(repo, ".gitattributes"), "*.md diff=evil\n");
   writeFileSync(join(repo, "README.md"), "the agent's repository, changed\n");
   writeFileSync(join(repo, "new.txt"), "a new file\n");

@@ -116,10 +116,10 @@ describe("your cases", () => {
 });
 
 describe("an eval of a case", () => {
-  let repo: ReturnType<typeof widgets>;
+  let repo: Awaited<ReturnType<typeof widgets>>;
   const nodes: YoursStandIn[] = [];
-  beforeAll(() => {
-    repo = widgets();
+  beforeAll(async () => {
+    repo = await widgets();
   });
   afterAll(() => {
     for (const node of nodes) node.remove();
@@ -304,7 +304,7 @@ describe("an eval of a case", () => {
 
   test("a patch larger than a command may carry goes in pieces, the last with its apply, and is graded the same", async () => {
     // The task's own change adds 100 KB besides its fix: three pieces of its base64 at the door's limit.
-    const big = widgets({ "data.txt": `${"0123456789abcdef".repeat(6_400)}\n` });
+    const big = await widgets({ "data.txt": `${"0123456789abcdef".repeat(6_400)}\n` });
     try {
       const node = new YoursStandIn({ [WIDGETS]: big.dir }, big.patch);
       node.work = FIX;
@@ -411,7 +411,7 @@ describe("the yours suite at the command line", () => {
   });
 
   test("its evals are ordinary evals: the report and compare read two runs of it, pairing case by case", async () => {
-    const repo = widgets();
+    const repo = await widgets();
     const node = new YoursStandIn({ [WIDGETS]: repo.dir }, repo.patch);
     node.work = FIX;
     try {

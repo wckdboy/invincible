@@ -12,6 +12,7 @@ import { githubRepo, shipBranch, taskBranch } from "../src/run-cli.ts";
 import { sameRepository, SHIPMENT_SCRIPT, type ShipDeps, shipToGitHub } from "@invincible/agents";
 import { TeamStore } from "../src/team-store.ts";
 import { freePort } from "./ports.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * Shipping: a run's kept changes become a pull request. The shipper against a fake
@@ -235,37 +236,39 @@ describe("shipping to GitHub", () => {
 // how long a busy machine may take, never what a test checks.
 const SHIP_MS = 40_000;
 
-describe("the shipment the sandbox leaves", () => {
-  const have = (cmd: string[]) => {
-    try {
-      return Bun.spawnSync(cmd).exitCode === 0;
-    } catch {
-      return false;
-    }
-  };
-  const python = have(["python3", "--version"]) && have(["git", "--version"]);
+// (Whether this host has python3 and git, asked once as the file loads, before the tests below are registered.)
+const have = async (cmd: string[]) => {
+  try {
+    return (await spawned(cmd)).exitCode === 0;
+  } catch {
+    return false;
+  }
+};
+const python = await have(["python3", "--version"]) && await have(["git", "--version"]);
 
-  test.skipIf(!python)("every change since the clone: new, changed, executable and deleted files", () => {
+describe("the shipment the sandbox leaves", () => {
+
+  test.skipIf(!python)("every change since the clone: new, changed, executable and deleted files", async () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-ship-"));
     try {
       const repo = join(dir, "repo");
-      const git = (...a: string[]) => Bun.spawnSync(["git", "-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", ...a]);
+      const git = async (...a: string[]) => await spawned(["git", "-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", ...a]);
       mkdirSync(repo);
-      git("init", "-q");
-      git("config", "core.autocrlf", "false");
+      await git("init", "-q");
+      await git("config", "core.autocrlf", "false");
       writeFileSync(join(repo, "keep.txt"), "same\n");
       writeFileSync(join(repo, "old.txt"), "going\n");
       writeFileSync(join(repo, "calc.py"), "a - b\n");
-      git("add", "-A");
-      git("commit", "-qm", "init");
-      git("remote", "add", "origin", REMOTE);
-      const base = git("rev-parse", "HEAD").stdout.toString().trim();
+      await git("add", "-A");
+      await git("commit", "-qm", "init");
+      await git("remote", "add", "origin", REMOTE);
+      const base = (await git("rev-parse", "HEAD")).stdout.toString().trim();
       writeFileSync(join(repo, "calc.py"), "a + b\n");
       rmSync(join(repo, "old.txt"));
       mkdirSync(join(repo, "bin"));
       writeFileSync(join(repo, "bin", "run"), "#!/bin/sh\n", { mode: 0o755 });
       const out = join(dir, "out", "ship");
-      const run = Bun.spawnSync(["python3", "-c", SHIPMENT_SCRIPT, repo, out]);
+      const run = await spawned(["python3", "-c", SHIPMENT_SCRIPT, repo, out]);
       expect({ exit: run.exitCode, stderr: run.exitCode ? run.stderr.toString() : "" }).toEqual({ exit: 0, stderr: "" });
       expect(run.stdout.toString().trim()).toBe("3");
       const manifest = JSON.parse(require("node:fs").readFileSync(join(out, "manifest.json"), "utf8"));
@@ -279,47 +282,47 @@ describe("the shipment the sandbox leaves", () => {
       );
       expect(require("node:fs").readFileSync(join(out, "files", "calc.py"), "utf8")).toBe("a + b\n");
       // The repository is as the agent left it (nothing staged).
-      expect(git("diff", "--cached", "--name-only").stdout.toString()).toBe("");
+      expect((await git("diff", "--cached", "--name-only")).stdout.toString()).toBe("");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   }, SHIP_MS);
 
-  test.skipIf(!python)("told where the work began, it ships what was committed since as well as what wasn't: an agent in its own worktree may commit", () => {
+  test.skipIf(!python)("told where the work began, it ships what was committed since as well as what wasn't: an agent in its own worktree may commit", async () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-ship-"));
     try {
       const repo = join(dir, "repo");
-      const git = (...a: string[]) => Bun.spawnSync(["git", "-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", ...a]);
+      const git = async (...a: string[]) => await spawned(["git", "-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", ...a]);
       mkdirSync(repo);
-      git("init", "-q");
-      git("config", "core.autocrlf", "false");
+      await git("init", "-q");
+      await git("config", "core.autocrlf", "false");
       writeFileSync(join(repo, "calc.py"), "a - b\n");
-      git("add", "-A");
-      git("commit", "-qm", "init");
-      git("remote", "add", "origin", REMOTE);
-      const base = git("rev-parse", "HEAD").stdout.toString().trim();
+      await git("add", "-A");
+      await git("commit", "-qm", "init");
+      await git("remote", "add", "origin", REMOTE);
+      const base = (await git("rev-parse", "HEAD")).stdout.toString().trim();
       // The engineer fixed one file and committed it, then wrote another and did not.
       writeFileSync(join(repo, "calc.py"), "a + b\n");
-      git("commit", "-qam", "fix the sum");
-      const tip = git("rev-parse", "HEAD").stdout.toString().trim();
+      await git("commit", "-qam", "fix the sum");
+      const tip = (await git("rev-parse", "HEAD")).stdout.toString().trim();
       writeFileSync(join(repo, "notes.md"), "why\n");
       const read = (out: string) => JSON.parse(require("node:fs").readFileSync(join(out, "manifest.json"), "utf8"));
       // From its own HEAD the script sees only what was not committed, and names the engineer's commit as the start:
       // a commit GitHub has never seen.
       const alone = join(dir, "alone", "ship");
-      expect(Bun.spawnSync(["python3", "-c", SHIPMENT_SCRIPT, repo, alone]).stdout.toString().trim()).toBe("1");
+      expect((await spawned(["python3", "-c", SHIPMENT_SCRIPT, repo, alone])).stdout.toString().trim()).toBe("1");
       expect(read(alone).base).toBe(tip);
       // Told the commit the work began from, it ships everything since, from that commit.
       const out = join(dir, "out", "ship");
-      const run = Bun.spawnSync(["python3", "-c", SHIPMENT_SCRIPT, repo, out, base]);
+      const run = await spawned(["python3", "-c", SHIPMENT_SCRIPT, repo, out, base]);
       expect({ exit: run.exitCode, stderr: run.exitCode ? run.stderr.toString() : "" }).toEqual({ exit: 0, stderr: "" });
       expect(run.stdout.toString().trim()).toBe("2");
       expect(read(out)).toMatchObject({ v: 1, base, remote: REMOTE });
       expect(read(out).files.map((f: { path: string }) => f.path).sort()).toEqual(["calc.py", "notes.md"]);
       expect(require("node:fs").readFileSync(join(out, "files", "calc.py"), "utf8")).toBe("a + b\n");
       // The worktree is as the engineer left it: its commit, and nothing staged.
-      expect(git("rev-parse", "HEAD").stdout.toString().trim()).toBe(tip);
-      expect(git("diff", "--cached", "--name-only").stdout.toString()).toBe("");
+      expect((await git("rev-parse", "HEAD")).stdout.toString().trim()).toBe(tip);
+      expect((await git("diff", "--cached", "--name-only")).stdout.toString()).toBe("");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

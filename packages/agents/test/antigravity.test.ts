@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { AGY_SIGN_IN, redact, TeamHarness } from "@invincible/core";
 import { AGENTS, ANTIGRAVITY, ANTIGRAVITY_ACP_BRIDGE, ANTIGRAVITY_SIGN_IN, chooseAgentModels, harnessReadiness, OWN_SIGN_IN, seatSignInBridge } from "../src/index.ts";
 import { ENGRAM_BIN, engramArgv } from "../src/engram.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * Google's Antigravity CLI (agy) on its owner's Google sign-in, driven as T3 Code drives it (pingdotgg/t3code,
@@ -735,7 +736,7 @@ describe("a Gemini seat's sealed sign-in", () => {
       const at = join(box.sealed!, "sign-in");
       writeFileSync(join(box.dir, "elsewhere"), "FAKE-not-the-seats-sign-in");
       if (what === "a link") symlinkSync(join(box.dir, "elsewhere"), at);
-      else if (what === "a pipe") expect(Bun.spawnSync(["mkfifo", at]).exitCode).toBe(0);
+      else if (what === "a pipe") expect((await spawned(["mkfifo", at])).exitCode).toBe(0);
       else mkdirSync(at);
       // (A pipe opened to read waits for a writer: the bridge would hang there, and the test with it, were it waited on.)
       expect([what, await status(box)]).toEqual([what, { signedIn: false }]);

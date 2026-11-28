@@ -18,10 +18,10 @@ import { GATES, widgets, widgetsCase, WIDGETS, YoursStandIn } from "./yours-stan
 setDefaultTimeout(60_000);
 
 describe("a failing gate's printed tail in the note", () => {
-  let repo: ReturnType<typeof widgets>;
+  let repo: Awaited<ReturnType<typeof widgets>>;
   const nodes: YoursStandIn[] = [];
-  beforeAll(() => {
-    repo = widgets();
+  beforeAll(async () => {
+    repo = await widgets();
   });
   afterAll(() => {
     for (const node of nodes) node.remove();

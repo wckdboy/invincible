@@ -1,5 +1,4 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,6 +6,7 @@ import { join } from "node:path";
 import type { SandboxView } from "@invincible/core";
 import { SandboxHost } from "../src/host.ts";
 import { KATA_RUNTIME } from "../src/spec.ts";
+import { spawnText } from "../../../bench/spawned.ts";
 
 /*
  * A command in a VM holds none of its VM's other commands (Q5's audit of Computer Use's speed, Ultra, 28 November 2026).
@@ -24,20 +24,20 @@ import { KATA_RUNTIME } from "../src/spec.ts";
  */
 
 const IMAGE = process.env.INVINCIBLE_TEST_SANDBOX_IMAGE ?? "invincible/sandbox:1";
-const docker = (...args: string[]) => spawnSync("docker", args, { encoding: "utf8", timeout: 180_000 });
-const available = process.platform === "linux" && docker("version", "--format", "{{.Server.Version}}").status === 0 && docker("image", "inspect", IMAGE).status === 0;
+const docker = async (...args: string[]) => await spawnText("docker", args, { encoding: "utf8", timeout: 180_000 });
+const available = process.platform === "linux" && (await docker("version", "--format", "{{.Server.Version}}")).status === 0 && (await docker("image", "inspect", IMAGE)).status === 0;
 if (!available) console.log(`${import.meta.file} SKIPPED, unverified: it needs Linux, a Docker it can reach, and ${IMAGE}.`);
 /** Whether the Docker host runs Kata microVMs: asked of it, as a one-off. */
-const kata = available && docker("run", "--rm", "--runtime", KATA_RUNTIME, "--network", "none", IMAGE, "true").status === 0;
+const kata = available && (await docker("run", "--rm", "--runtime", KATA_RUNTIME, "--network", "none", IMAGE, "true")).status === 0;
 if (available && !kata) console.log(`${import.meta.file}: its Kata half SKIPPED, unverified: the Docker host runs no Kata microVM.`);
 
 const made: string[] = [];
 const dir = mkdtempSync(join(tmpdir(), "c1-exec-"));
-afterAll(() => {
+afterAll(async () => {
   // This test's VMs removed, and their volumes: by their own names, never by a pattern.
   for (const name of made.splice(0)) {
-    docker("rm", "-f", name);
-    docker("volume", "rm", "-f", `${name}-work`);
+    await docker("rm", "-f", name);
+    await docker("volume", "rm", "-f", `${name}-work`);
   }
   rmSync(dir, { recursive: true, force: true });
 });
@@ -48,10 +48,10 @@ writeFileSync(bin, `#!/bin/bash\nargs=()\nfor a in "$@"; do args+=("\${a#invinci
 chmodSync(bin, 0o755);
 
 /** A VM as the host makes an agent's: the VMs' user, nothing of the host, a /work of its own, running. */
-function vm(runtime: "runc" | "kata"): string {
+async function vm(runtime: "runc" | "kata"): Promise<string> {
   const name = `c1-exec-${randomBytes(5).toString("hex")}`;
   made.push(name);
-  const ran = docker("run", "--detach", "--name", name, ...(runtime === "kata" ? ["--runtime", KATA_RUNTIME] : []), "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m", "--mount", `type=volume,src=${name}-work,dst=/work`, "--env", "HOME=/work", IMAGE, "sleep", "900");
+  const ran = await docker("run", "--detach", "--name", name, ...(runtime === "kata" ? ["--runtime", KATA_RUNTIME] : []), "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m", "--mount", `type=volume,src=${name}-work,dst=/work`, "--env", "HOME=/work", IMAGE, "sleep", "900");
   expect([ran.status, ran.stderr.trim()]).toEqual([0, ""]);
   return name;
 }
@@ -64,7 +64,7 @@ function vm(runtime: "runc" | "kata"): string {
 function host(name: string): SandboxHost {
   const made = new SandboxHost({ node: "test", maxCpus: 8, maxMemoryGb: 16, docker: bin, ledger: () => {}, tokens: { mint: () => ({ token: "t", info: { hash: "h" } }), revoke: () => true } } as never);
   const view = { id: name, name, status: "running", image: IMAGE, run: null } as unknown as SandboxView;
-  const found = async (id: string) => (id === name && docker("inspect", "--format", "{{.State.Running}}", id).stdout.trim() === "true" ? view : null);
+  const found = async (id: string) => (id === name && (await docker("inspect", "--format", "{{.State.Running}}", id)).stdout.trim() === "true" ? view : null);
   Object.assign(made, { get: found, forCommand: found });
   return made;
 }
@@ -72,7 +72,7 @@ function host(name: string): SandboxHost {
 for (const runtime of ["runc", "kata"] as const) {
   describe.skipIf(!available || (runtime === "kata" && !kata))(`commands in one VM, ${runtime === "kata" ? "a Kata microVM" : "a container"}`, () => {
     test("a command beside a long one is answered at once, never when the long one ends", async () => {
-      const name = vm(runtime);
+      const name = await vm(runtime);
       const h = host(name);
       const long = h.exec(name, ["sleep", "12"], 60);
       await Bun.sleep(2000);
@@ -87,7 +87,7 @@ for (const runtime of ["runc", "kata"] as const) {
     }, 120_000);
 
     test("a command that reads its input is given none: it ends at once, never at its deadline", async () => {
-      const name = vm(runtime);
+      const name = await vm(runtime);
       const h = host(name);
       const t0 = performance.now();
       const read = await h.exec(name, ["cat"], 20);

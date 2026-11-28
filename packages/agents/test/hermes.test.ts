@@ -6,6 +6,7 @@ import { AGENTS } from "../src/harnesses.ts";
 import { HERMES } from "../src/hermes.ts";
 import { ENGRAM_BIN, engramArgv } from "../src/engram.ts";
 import { HERMES_ACP_BRIDGE } from "../src/hermes.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 // Every test here starts the bridge and a stand-in Hermes (Python 3) as processes of their own, so its time is the
 // machine's to give: "with it, a new session and a resumed one" took 0.85 s on the Mac mini at a load of 25 on 18
@@ -132,11 +133,11 @@ function fixture(bridge = HERMES_ACP_BRIDGE) {
 }
 
 describe("Hermes ACP driver", () => {
-  test("the registry offers Hermes without requiring a newer CLI JSONL interface", () => {
+  test("the registry offers Hermes without requiring a newer CLI JSONL interface", async () => {
     expect(AGENTS.hermes).toBe(HERMES);
     expect(HERMES.files([])["/work/.agent/hermes-acp.py"]).toContain("session/load");
     const command = HERMES.command({ provider: "p'; $(danger)", model: "a/b' model" }, "session'; x");
-    expect(Bun.spawnSync(["bash", "-n", "-c", command]).exitCode).toBe(0);
+    expect((await spawned(["bash", "-n", "-c", command])).exitCode).toBe(0);
     expect(command).not.toContain("--format");
     expect(HERMES.read('{"type":"tokens","input":-1,"output":1}')).toEqual([]);
     expect(HERMES.read("not json")).toEqual([]);

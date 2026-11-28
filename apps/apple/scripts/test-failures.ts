@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { spawned } from "../../../bench/spawned.ts";
 /*
  * Why each test failed, from an Xcode result bundle: every failure message, with its test. xcodebuild's -quiet prints
  * only the failing tests' names, so CI's log once said "PerfTests.testRequestsAtRest()" and nothing of what it measured
@@ -33,7 +34,7 @@ if (import.meta.main) {
     console.error("usage: bun apps/apple/scripts/test-failures.ts <result.xcresult>");
     process.exit(2);
   }
-  const run = Bun.spawnSync(["xcrun", "xcresulttool", "get", "test-results", "tests", "--path", path], { stdout: "pipe", stderr: "pipe" });
+  const run = await spawned(["xcrun", "xcresulttool", "get", "test-results", "tests", "--path", path], { stdout: "pipe", stderr: "pipe" });
   if (run.exitCode !== 0) {
     console.error(`xcresulttool couldn't read ${path}: ${run.stderr.toString().slice(0, 300)}`);
     process.exit(1);

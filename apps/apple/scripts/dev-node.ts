@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { spawned } from "../../../bench/spawned.ts";
 /*
  * A throwaway node to run the Apple app against, started as apps/web/measure/first-load.ts starts one: a temp home, the
  * file keystore, startDaemon with a proxyPort (the app comes in as a phone does behind `tailscale serve`), a stand-in
@@ -127,18 +128,18 @@ const liveDesktop = desktopFrames
 // An agent's workspace to look into (its /work), made here: a small repository, and a task's worktree with its change in
 // it. The workspace's own scripts (packages/node/src/workspace-look.ts) run on it for real, /work read as this folder.
 const work = join(tmp, "work");
-const sh = (cwd: string, ...args: string[]) => Bun.spawnSync(args, { cwd, stdout: "ignore", stderr: "ignore" });
+const sh = async (cwd: string, ...args: string[]) => await spawned(args, { cwd, stdout: "ignore", stderr: "ignore" });
 mkdirSync(join(work, "repo", "src"), { recursive: true });
 writeFileSync(join(work, "repo", "README.md"), "# Sync\n\nKeeps every node's log the same, **whichever order** events arrive in.\n\n- Resumes after a dropped connection\n- Verified by `bun test packages/link`\n");
 writeFileSync(join(work, "repo", "src", "sync.ts"), "// Pulls what a peer has that we don't.\nexport async function pull(peer: string, since: number): Promise<number> {\n  const retries = 1;\n  return retries;\n}\n");
 writeFileSync(join(work, "repo", "package.json"), JSON.stringify({ name: "sync", version: "0.4.0", scripts: { test: "bun test" } }, null, 2) + "\n");
 const git = ["git", "-c", "user.name=Builder", "-c", "user.email=builder@example.invalid", "-c", "commit.gpgsign=false"];
-sh(join(work, "repo"), "git", "init", "-q", "-b", "main");
-sh(join(work, "repo"), ...git, "add", ".");
-sh(join(work, "repo"), ...git, "commit", "-q", "-m", "Start");
+await sh(join(work, "repo"), "git", "init", "-q", "-b", "main");
+await sh(join(work, "repo"), ...git, "add", ".");
+await sh(join(work, "repo"), ...git, "commit", "-q", "-m", "Start");
 mkdirSync(join(work, "tasks"), { recursive: true });
-sh(join(work, "repo"), ...git, "worktree", "add", "-q", "--detach", join(work, "tasks", "task"), "HEAD");
-const startedAt = Bun.spawnSync(["git", "-C", join(work, "repo"), "rev-parse", "HEAD"]).stdout.toString().trim();
+await sh(join(work, "repo"), ...git, "worktree", "add", "-q", "--detach", join(work, "tasks", "task"), "HEAD");
+const startedAt = (await spawned(["git", "-C", join(work, "repo"), "rev-parse", "HEAD"])).stdout.toString().trim();
 mkdirSync(join(work, ".agent", "base"), { recursive: true });
 writeFileSync(join(work, ".agent", "base", "task"), `${startedAt} fetched`);
 writeFileSync(join(work, "tasks", "task", "src", "sync.ts"), "// Pulls what a peer has that we don't, and picks up where a dropped connection left off.\nexport async function pull(peer: string, since: number): Promise<number> {\n  const retries = 3;\n  const resumeFrom = since;\n  return retries + resumeFrom;\n}\n");
@@ -147,8 +148,8 @@ const atWork = (path: string) => (path.startsWith("/work/tasks/") ? join(work, "
 
 docker.onExec = async (_container: string, command: string[]) => {
   if (command[0] === "python3" && command[1] === "-c" && [LIST_SCRIPT, READ_SCRIPT, CHANGES_SCRIPT].includes(command[2]!)) {
-    const ran = Bun.spawnSync(["python3", "-c", command[2]!, ...command.slice(3).map(atWork)], { stdout: "pipe", stderr: "pipe" });
-    return { code: ran.exitCode, stdout: ran.stdout.toString(), stderr: ran.stderr.toString() };
+    const ran = await spawned(["python3", "-c", command[2]!, ...command.slice(3).map(atWork)], { stdout: "pipe", stderr: "pipe" });
+    return { code: ran.exitCode ?? 137, stdout: ran.stdout.toString(), stderr: ran.stderr.toString() };
   }
   const text = command.join("\n");
   if (command[0] === "desktop" && command[1] === "open") screen = 1;

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * scripts/qamp-pin.sh: Q-AMP's binary is taken from a file you fetched (its forge is sign-in only), checked against the
@@ -16,8 +17,8 @@ const root = mkdtempSync(join(tmpdir(), "invincible-qamp-pin-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 /** install_qamp <file> <dir>, with `before` run first (a pin for a stand-in, another machine's uname). */
-function install(file: string, dir: string, before = "") {
-  const run = Bun.spawnSync(["bash", "-c", `set -euo pipefail; source "$0"; ${before}\ninstall_qamp "$1" "$2"`, pin, file, dir], { stdout: "pipe", stderr: "pipe" });
+async function install(file: string, dir: string, before = "") {
+  const run = await spawned(["bash", "-c", `set -euo pipefail; source "$0"; ${before}\ninstall_qamp "$1" "$2"`, pin, file, dir], { stdout: "pipe", stderr: "pipe" });
   return { code: run.exitCode, said: `${run.stdout}${run.stderr}` };
 }
 
@@ -34,19 +35,19 @@ test("the pins are the release's: version 0.3.0, a SHA-256 each for Linux x86_64
   expect(/^QAMP_SHA256_DARWIN_ARM64=([0-9a-f]{64})$/m.exec(text)?.[1]).toBe("03578a5b3d5e4ba0b1dd4c75e61f214a30b163a182a827f6f696dc129b6b81ef");
 });
 
-test("a file that isn't the pinned binary is refused, and the one already there stays", () => {
+test("a file that isn't the pinned binary is refused, and the one already there stays", async () => {
   const dir = join(root, "refused");
   mkdirSync(dir);
   writeFileSync(join(dir, "qamp"), "the one already there");
   writeFileSync(join(root, "impostor"), "#!/bin/sh\necho not qamp\n");
-  const run = install(join(root, "impostor"), dir);
+  const run = await install(join(root, "impostor"), dir);
   expect(run.code).toBe(1);
   expect(run.said).toContain("failed its checksum (it isn't Q-AMP 0.3.0 for this machine): not installed");
   expect(readFileSync(join(dir, "qamp"), "utf8")).toBe("the one already there");
   expect(existsSync(join(dir, "qamp.new"))).toBe(false);
 });
 
-test("a file that matches its pin is put in place by a rename, executable", () => {
+test("a file that matches its pin is put in place by a rename, executable", async () => {
   const name = platformPin();
   if (!name) return void console.warn(`no Q-AMP pin for ${process.platform}-${process.arch}: installing a match not checked here`);
   const dir = join(root, "taken");
@@ -54,7 +55,7 @@ test("a file that matches its pin is put in place by a rename, executable", () =
   writeFileSync(stand, "#!/bin/sh\necho qamp 0.3.0\n");
   const sha = createHash("sha256").update(readFileSync(stand)).digest("hex");
   // The pin, for this test alone, is the stand-in's: what's checked is the mechanism, not the release.
-  const run = install(stand, dir, `${name}=${sha}`);
+  const run = await install(stand, dir, `${name}=${sha}`);
   expect(run.code).toBe(0);
   expect(run.said).toContain(`→ Q-AMP 0.3.0 at ${dir}/qamp (checksum-verified)`);
   expect(readFileSync(join(dir, "qamp"), "utf8")).toBe("#!/bin/sh\necho qamp 0.3.0\n");
@@ -62,26 +63,26 @@ test("a file that matches its pin is put in place by a rename, executable", () =
   expect(existsSync(join(dir, "qamp.new"))).toBe(false);
 });
 
-test("a Linux machine on 64-bit Arm takes its own pin", () => {
+test("a Linux machine on 64-bit Arm takes its own pin", async () => {
   const dir = join(root, "arm64");
   const stand = join(root, "stand-in-arm64");
   writeFileSync(stand, "#!/bin/sh\necho qamp on aarch64\n");
   const sha = createHash("sha256").update(readFileSync(stand)).digest("hex");
-  const run = install(stand, dir, `uname() { [[ $1 == -s ]] && echo Linux || echo aarch64; }; QAMP_SHA256_LINUX_AARCH64=${sha}`);
+  const run = await install(stand, dir, `uname() { [[ $1 == -s ]] && echo Linux || echo aarch64; }; QAMP_SHA256_LINUX_AARCH64=${sha}`);
   expect([run.code, run.said.trim()]).toEqual([0, `→ Q-AMP ${/^QAMP_VERSION=(\S+)$/m.exec(readFileSync(pin, "utf8"))?.[1]} at ${dir}/qamp (checksum-verified)`]);
   expect(readFileSync(join(dir, "qamp"), "utf8")).toBe("#!/bin/sh\necho qamp on aarch64\n");
 });
 
-test("no file, or a machine with no pin: refused, saying which", () => {
-  expect(install(join(root, "nowhere"), join(root, "none")).said).toContain("no such file (Q-AMP 0.3.0's binary for this machine)");
-  const elsewhere = install(join(root, "impostor"), join(root, "none"), 'uname() { [[ $1 == -s ]] && echo Plan9 || echo mips; }');
+test("no file, or a machine with no pin: refused, saying which", async () => {
+  expect((await install(join(root, "nowhere"), join(root, "none"))).said).toContain("no such file (Q-AMP 0.3.0's binary for this machine)");
+  const elsewhere = await install(join(root, "impostor"), join(root, "none"), 'uname() { [[ $1 == -s ]] && echo Plan9 || echo mips; }');
   expect([elsewhere.code, elsewhere.said.trim()]).toEqual([1, "no pinned Q-AMP 0.3.0 for Plan9 mips"]);
   expect(existsSync(join(root, "none"))).toBe(false);
 });
 
-test("it passes shellcheck, where shellcheck is installed", () => {
+test("it passes shellcheck, where shellcheck is installed", async () => {
   const shellcheck = Bun.which("shellcheck");
   if (!shellcheck) return void console.warn("shellcheck isn't installed here: not checked");
-  const run = Bun.spawnSync([shellcheck, "-S", "warning", pin], { cwd: repo, stdout: "pipe", stderr: "pipe" });
+  const run = await spawned([shellcheck, "-S", "warning", pin], { cwd: repo, stdout: "pipe", stderr: "pipe" });
   expect(`${run.stdout}${run.stderr}`).toBe("");
 });

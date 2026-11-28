@@ -1,5 +1,4 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,6 +6,7 @@ import { join } from "node:path";
 import { checkpointCommand, HANDED_CHANGES_BYTES, handedApply, handedGive, handedNonce, handedReceive, handedSend, handedTake, handedTree } from "@invincible/agents";
 import type { SandboxView } from "@invincible/core";
 import { KATA_RUNTIME, SandboxHost } from "@invincible/sandbox";
+import { spawnText } from "../../../bench/spawned.ts";
 
 /*
  * Another node's task's clone of its own, and its changes back (R5-3), on real Docker: SandboxHost.pipe between two VMs
@@ -22,22 +22,22 @@ import { KATA_RUNTIME, SandboxHost } from "@invincible/sandbox";
  */
 
 const IMAGE = "invincible/sandbox:1";
-const docker = (...args: string[]) => spawnSync("docker", args, { encoding: "utf8", timeout: 180_000 });
-const available = process.platform === "linux" && docker("version", "--format", "{{.Server.Version}}").status === 0 && docker("image", "inspect", IMAGE).status === 0;
+const docker = async (...args: string[]) => await spawnText("docker", args, { encoding: "utf8", timeout: 180_000 });
+const available = process.platform === "linux" && (await docker("version", "--format", "{{.Server.Version}}")).status === 0 && (await docker("image", "inspect", IMAGE)).status === 0;
 if (!available) console.log(`${import.meta.file} SKIPPED, unverified: it needs Linux, a Docker it can reach, and ${IMAGE}.`);
 /** Whether the Docker host runs Kata microVMs: asked of it, as a one-off (this process may be in a container of its own). */
-const kata = available && docker("run", "--rm", "--runtime", KATA_RUNTIME, "--network", "none", IMAGE, "true").status === 0;
+const kata = available && (await docker("run", "--rm", "--runtime", KATA_RUNTIME, "--network", "none", IMAGE, "true")).status === 0;
 if (available && !kata) console.log(`${import.meta.file}: its Kata half SKIPPED, unverified: the Docker host runs no Kata microVM.`);
 
 const made: { containers: string[]; volumes: string[] } = { containers: [], volumes: [] };
 const dir = mkdtempSync(join(tmpdir(), "q5-handed-"));
 /** This test's VMs removed, and their volumes: by their own names, never by a pattern. */
-function drop(): void {
-  for (const name of made.containers.splice(0)) docker("rm", "-f", name);
-  for (const name of made.volumes.splice(0)) docker("volume", "rm", "-f", name);
+async function drop(): Promise<void> {
+  for (const name of made.containers.splice(0)) await docker("rm", "-f", name);
+  for (const name of made.volumes.splice(0)) await docker("volume", "rm", "-f", name);
 }
-afterAll(() => {
-  drop();
+afterAll(async () => {
+  await drop();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -47,36 +47,36 @@ writeFileSync(bin, `#!/bin/bash\nargs=()\nfor a in "$@"; do args+=("\${a#invinci
 chmodSync(bin, 0o755);
 
 /** A VM as the host makes an agent's or a task's: the VMs' user, nothing of the host, a /work of its own, running. */
-function vm(runtime: "runc" | "kata"): string {
+async function vm(runtime: "runc" | "kata"): Promise<string> {
   const name = `q5-handed-${randomBytes(5).toString("hex")}`;
   made.containers.push(name);
   made.volumes.push(`${name}-work`);
-  const ran = docker("run", "--detach", "--name", name, ...(runtime === "kata" ? ["--runtime", KATA_RUNTIME] : []), "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m", "--mount", `type=volume,src=${name}-work,dst=/work`, "--env", "HOME=/work", IMAGE, "sleep", "900");
+  const ran = await docker("run", "--detach", "--name", name, ...(runtime === "kata" ? ["--runtime", KATA_RUNTIME] : []), "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m", "--mount", `type=volume,src=${name}-work,dst=/work`, "--env", "HOME=/work", IMAGE, "sleep", "900");
   expect([ran.status, ran.stderr.trim()]).toEqual([0, ""]);
   return name;
 }
 /** A command in a VM, as the node's exec runs one (bash -lc in /work). */
-const inside = (name: string, command: string, input?: string) => spawnSync("docker", ["exec", "--interactive", "--workdir", "/work", name, "bash", "-lc", command], { encoding: "utf8", timeout: 180_000, ...(input !== undefined ? { input } : {}) });
+const inside = async (name: string, command: string, input?: string) => await spawnText("docker", ["exec", "--interactive", "--workdir", "/work", name, "bash", "-lc", command], { encoding: "utf8", timeout: 180_000, ...(input !== undefined ? { input } : {}) });
 
 /** The host, as the node has it, its listing of VMs a stand-in that knows these two are running (what Docker says of them). */
 function host(names: string[]): SandboxHost {
   const made = new SandboxHost({ node: "test", maxCpus: 8, maxMemoryGb: 16, docker: bin, runner: async () => ({ code: 1, stdout: "", stderr: "" }), ledger: () => {}, tokens: { mint: () => ({ token: "t", info: { hash: "h" } }), revoke: () => true } } as never);
-  Object.assign(made, { get: async (id: string) => (names.includes(id) && docker("inspect", "--format", "{{.State.Running}}", id).stdout.trim() === "true" ? ({ id, status: "running" } as unknown as SandboxView) : null) });
+  Object.assign(made, { get: async (id: string) => (names.includes(id) && (await docker("inspect", "--format", "{{.State.Running}}", id)).stdout.trim() === "true" ? ({ id, status: "running" } as unknown as SandboxView) : null) });
   return made;
 }
 const side = (id: string, command: string) => ({ id, cmd: ["bash", "-lc", command] });
 /** Whether no process whose command line matches `pattern` (bracketed, so it can't match its own search) runs in a VM, within 10 s. */
 async function gone(name: string, pattern: string): Promise<boolean> {
   for (let i = 0; i < 100; i++) {
-    if (inside(name, `pgrep -f '${pattern}' >/dev/null`).status === 1) return true;
+    if ((await inside(name, `pgrep -f '${pattern}' >/dev/null`)).status === 1) return true;
     await Bun.sleep(100);
   }
   return false;
 }
 
 describe.skipIf(!available)("the sandbox image's git", () => {
-  test("is 2.39.2 or later: its apply refuses a write through a link a patch renames (CVE-2023-23946)", () => {
-    const said = docker("run", "--rm", "--network", "none", "--entrypoint", "git", IMAGE, "--version").stdout.trim();
+  test("is 2.39.2 or later: its apply refuses a write through a link a patch renames (CVE-2023-23946)", async () => {
+    const said = (await docker("run", "--rm", "--network", "none", "--entrypoint", "git", IMAGE, "--version")).stdout.trim();
     const [major = 0, minor = 0, patch = 0] = (/(\d+)\.(\d+)\.(\d+)/.exec(said) ?? []).slice(1).map(Number);
     console.log(`${IMAGE}: ${said}`);
     expect(major * 1e6 + minor * 1e3 + patch).toBeGreaterThanOrEqual(2_039_002);
@@ -87,12 +87,12 @@ for (const runtime of ["runc", "kata"] as const) {
   describe.skipIf(!available || (runtime === "kata" && !kata))(`another node's task's clone and its changes, between two VMs ${runtime === "kata" ? "in Kata microVMs" : "in containers"}`, () => {
     test("its clone is made through the pipe, its changes come back as a patch, are applied, and its step is kept", async () => {
       try {
-        const [agent, task] = [vm(runtime), vm(runtime)];
+        const [agent, task] = [await vm(runtime), await vm(runtime)];
         const pipes = host([agent, task]);
         const id = "task-q5handed";
         const root = `/work/tasks/${id}`;
         // The agent's repository, and the task's worktree at its base, as REPO_TASK_START leaves them.
-        const setUp = inside(agent, `set -e; export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t.invalid
+        const setUp = await inside(agent, `set -e; export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t.invalid
           git init -q /work/repo; cd /work/repo; printf 'one\\n' > app.txt; printf 'the readme\\n' > README.md; git add -A; git commit -q -m first
           git worktree add -q --detach ${root} HEAD; git -C ${root} rev-parse HEAD`);
         expect(setUp.status).toBe(0);
@@ -103,29 +103,29 @@ for (const runtime of ["runc", "kata"] as const) {
         expect([given.cut, given.from.exitCode, given.to.exitCode, given.from.stderr.trim()]).toEqual([false, 0, 0, ""]);
         expect(given.to.stdout.trim()).toBe(base);
         expect(given.bytes).toBeGreaterThan(0);
-        expect(inside(task, `git -C ${root} rev-parse HEAD && cat ${root}/app.txt`).stdout.trim().split("\n")).toEqual([base, "one"]);
+        expect((await inside(task, `git -C ${root} rev-parse HEAD && cat ${root}/app.txt`)).stdout.trim().split("\n")).toEqual([base, "one"]);
 
         // The task's work in its clone: a change, a deletion, a new file in a new folder, a binary file, and a link.
-        const work = inside(task, `set -e; cd ${root}; printf 'two\\n' > app.txt; rm README.md; mkdir -p src; printf 'export const x = 1;\\n' > src/new.ts; printf '\\000\\001\\377' > logo.bin; ln -s src/new.ts link.ts`);
+        const work = await inside(task, `set -e; cd ${root}; printf 'two\\n' > app.txt; rm README.md; mkdir -p src; printf 'export const x = 1;\\n' > src/new.ts; printf '\\000\\001\\377' > logo.bin; ln -s src/new.ts link.ts`);
         expect(work.status).toBe(0);
         const nonce = handedNonce();
         const back = await pipes.pipe(side(task, handedSend(root, base)), side(agent, handedReceive(id, nonce, HANDED_CHANGES_BYTES)), { timeoutSec: 120, maxBytes: HANDED_CHANGES_BYTES });
         expect([back.cut, back.from.exitCode, back.to.exitCode, back.from.stderr.trim()]).toEqual([false, 0, 0, ""]);
         // All of it kept, as many bytes as were carried: only then is it applied.
         expect(Number(back.to.stdout.trim())).toBe(back.bytes);
-        const applied = inside(agent, handedApply(root, base, id, nonce, back.bytes, HANDED_CHANGES_BYTES));
+        const applied = await inside(agent, handedApply(root, base, id, nonce, back.bytes, HANDED_CHANGES_BYTES));
         expect([applied.status, applied.stderr.trim()]).toEqual([0, ""]);
         // (It prints the tree it made the worktree, which the agent's side then reads there as it stands: the image's git.)
         const made = applied.stdout.trim().split(" ")[1];
         expect(made).toMatch(/^[0-9a-f]{40}$/);
-        expect(inside(agent, handedTree(root, base, id)).stdout.trim()).toBe(made!);
-        const seen = inside(agent, `cd ${root} && cat app.txt src/new.ts && od -An -tx1 logo.bin && readlink link.ts && test ! -e README.md && echo gone && git diff --cached --name-status ${base} | sort`);
+        expect((await inside(agent, handedTree(root, base, id))).stdout.trim()).toBe(made!);
+        const seen = await inside(agent, `cd ${root} && cat app.txt src/new.ts && od -An -tx1 logo.bin && readlink link.ts && test ! -e README.md && echo gone && git diff --cached --name-status ${base} | sort`);
         expect(seen.stdout.trim().split("\n").map((line) => line.trim())).toEqual(["two", "export const x = 1;", "00 01 ff", "src/new.ts", "gone", "A\tlink.ts", "A\tlogo.bin", "A\tsrc/new.ts", "D\tREADME.md", "M\tapp.txt"]);
         // Its step kept from the agent's worktree, as the node keeps one after a step of the task's.
-        const kept = inside(agent, checkpointCommand(root, id, 1, ""));
+        const kept = await inside(agent, checkpointCommand(root, id, 1, ""));
         expect([kept.status, kept.stdout.trim()]).toMatchObject([0, expect.stringMatching(/^[0-9a-f]{40} [0-9a-f]{40} [0-9a-f]{40}$/)]);
       } finally {
-        drop();
+        await drop();
       }
     }, 300_000);
 
@@ -134,11 +134,11 @@ for (const runtime of ["runc", "kata"] as const) {
       // where `: | docker exec -i … cat` ran to its deadline and held the VM meanwhile. A review's evidence waits on this
       // bring-back, I-b.)
       try {
-        const [agent, task] = [vm(runtime), vm(runtime)];
+        const [agent, task] = [await vm(runtime), await vm(runtime)];
         const pipes = host([agent, task]);
         const id = "task-q5unchanged";
         const root = `/work/tasks/${id}`;
-        const setUp = inside(agent, `set -e; export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t.invalid
+        const setUp = await inside(agent, `set -e; export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t.invalid
           git init -q /work/repo; cd /work/repo; printf 'one\\n' > app.txt; git add -A; git commit -q -m first
           git worktree add -q --detach ${root} HEAD; git -C ${root} rev-parse HEAD HEAD^{tree}`);
         expect(setUp.status).toBe(0);
@@ -152,7 +152,7 @@ for (const runtime of ["runc", "kata"] as const) {
         expect([back.cut, back.bytes, back.from.exitCode, back.to.exitCode, back.to.stdout.trim()]).toEqual([false, 0, 0, 0, "0"]);
         // (At once: well within its deadline, never by it.)
         expect(took).toBeLessThan(30_000);
-        const applied = inside(agent, handedApply(root, base!, id, nonce, 0, HANDED_CHANGES_BYTES));
+        const applied = await inside(agent, handedApply(root, base!, id, nonce, 0, HANDED_CHANGES_BYTES));
         expect([applied.status, applied.stdout.trim(), applied.stderr.trim()]).toEqual([0, `0 ${baseTree}`, ""]);
         // And while the agent's VM runs a command of its own, as the node runs one (its input /dev/null, interactive): in
         // a Kata VM that holds every other exec there until it ends, so the receiving side starts only then, after the
@@ -168,13 +168,13 @@ for (const runtime of ["runc", "kata"] as const) {
         // (At most the rest of that command, and never the pipe's deadline.)
         expect(behindTook).toBeLessThan(30_000);
       } finally {
-        drop();
+        await drop();
       }
     }, 300_000);
 
     test("a pipe past its cap is cut and its other side ended; a side past its deadline is ended", async () => {
       try {
-        const [from, to] = [vm(runtime), vm(runtime)];
+        const [from, to] = [await vm(runtime), await vm(runtime)];
         const pipes = host([from, to]);
         const cut = await pipes.pipe(side(from, "head -c 50000000 /dev/zero"), side(to, "wc -c"), { timeoutSec: 120, maxBytes: 1_000_000 });
         expect(cut.cut).toBe(true);
@@ -189,13 +189,13 @@ for (const runtime of ["runc", "kata"] as const) {
         expect(Date.now() - began).toBeLessThan(30_000);
         expect(await gone(from, "[s]leep 60")).toBe(true);
       } finally {
-        drop();
+        await drop();
       }
     }, 300_000);
 
     test("a pipe cut at its cap leaves no process of either side in either VM: what each started there is ended too, by the pipe's tag and the group its timeout leads (I-c)", async () => {
       try {
-        const [from, to] = [vm(runtime), vm(runtime)];
+        const [from, to] = [await vm(runtime), await vm(runtime)];
         // (Its ends are asked of Docker as the node asks them, through the binary its sides run by: the host above answers
         // all but the sides with a stand-in, which would never reach these VMs.)
         const pipes = new SandboxHost({ node: "test", maxCpus: 8, maxMemoryGb: 16, docker: bin, ledger: () => {}, tokens: { mint: () => ({ token: "t", info: { hash: "h" } }), revoke: () => true } } as never);
@@ -217,9 +217,9 @@ for (const runtime of ["runc", "kata"] as const) {
         for (const [name, pattern] of [[from, "[s]leep 271"], [from, "[h]ead -c 50000000"], [from, "[t]imeout --signal=KILL 600s"], [to, "[s]leep 272"], [to, "[c]at >/dev/null"], [to, "[t]imeout --signal=KILL 600s"]] as const) {
           expect([name, pattern, await gone(name, pattern)]).toEqual([name, pattern, true]);
         }
-        for (const name of [from, to]) expect([name, inside(name, "grep -lsF INVINCIBLE_PIPE= /proc/[0-9]*/environ | wc -l").stdout.trim()]).toEqual([name, "0"]);
+        for (const name of [from, to]) expect([name, (await inside(name, "grep -lsF INVINCIBLE_PIPE= /proc/[0-9]*/environ | wc -l")).stdout.trim()]).toEqual([name, "0"]);
       } finally {
-        drop();
+        await drop();
       }
     }, 300_000);
   });

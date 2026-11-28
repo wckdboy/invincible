@@ -2,6 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * The one-line install (scripts/install.sh), asked what it would do (--plan) in homes of its own: it says each change
@@ -17,15 +18,15 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 // The checkout it installs from is one of its own (--plan reads only its commit), so this runs from a tarball too.
 const source = join(scratch, "source");
 mkdirSync(source);
-const git = (...a: string[]) => Bun.spawnSync(["git", "-C", source, "-c", "user.email=t@t", "-c", "user.name=t", ...a]);
-git("init", "-q");
-git("commit", "-q", "--allow-empty", "-m", "init");
+const git = async (...a: string[]) => await spawned(["git", "-C", source, "-c", "user.email=t@t", "-c", "user.name=t", ...a]);
+await git("init", "-q");
+await git("commit", "-q", "--allow-empty", "-m", "init");
 
-function plan(name: string, args: string[], before?: (home: string) => void) {
+async function plan(name: string, args: string[], before?: (home: string) => void) {
   const home = join(scratch, name);
   mkdirSync(home, { recursive: true });
   before?.(home);
-  const run = Bun.spawnSync(["bash", script, "--plan", ...args], {
+  const run = await spawned(["bash", script, "--plan", ...args], {
     env: { HOME: home, PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", INVINCIBLE_SOURCE: source },
     stdout: "pipe",
     stderr: "pipe",
@@ -33,8 +34,8 @@ function plan(name: string, args: string[], before?: (home: string) => void) {
   return { code: run.exitCode, said: `${run.stdout}${run.stderr}`, home };
 }
 
-test("on a machine new to it, it says it would fetch this commit, install its own Bun in its own folder, add the command and found a fleet; and changes nothing", () => {
-  const { code, said, home } = plan("fresh", ["--name", "laptop", "--fleet", "homelab"]);
+test("on a machine new to it, it says it would fetch this commit, install its own Bun in its own folder, add the command and found a fleet; and changes nothing", async () => {
+  const { code, said, home } = await plan("fresh", ["--name", "laptop", "--fleet", "homelab"]);
   expect(code).toBe(0);
   expect(said).toContain("--plan: nothing below is done");
   expect(said).toContain(`would: install the pinned Bun into ${home}/.local/share/invincible/bun`);
@@ -47,18 +48,18 @@ test("on a machine new to it, it says it would fetch this commit, install its ow
   expect(readdirSync(home)).toEqual([]);
 });
 
-test("it keeps the node running as a service of yours, and publishes it and pairs a phone only then", () => {
-  const kept = plan("service", []);
+test("it keeps the node running as a service of yours, and publishes it and pairs a phone only then", async () => {
+  const kept = await plan("service", []);
   if (process.platform === "darwin") expect(kept.said).toContain(`would: write ${kept.home}/Library/LaunchAgents/sh.invincible.node.plist`);
   else expect(kept.said).toMatch(/would: write .*systemd\/user\/invincible\.service|no service manager for you here/);
-  const none = plan("no-service", ["--no-service"]);
+  const none = await plan("no-service", ["--no-service"]);
   expect(none.said).not.toMatch(/LaunchAgents|systemd|publish the app|pair a phone/);
-  expect(plan("no-expose", ["--no-expose"]).said).not.toContain("publish the app");
+  expect((await plan("no-expose", ["--no-expose"])).said).not.toContain("publish the app");
 });
 
-test("with an invite it joins your fleet instead, and a machine that is already a node is kept as it is", () => {
-  expect(plan("join", ["--join", "gi1.fake-invite-for-tests", "--name", "server"]).said).toContain("would: invincible join gi1.fake-invite-for-tests --name server");
-  const kept = plan("node", [], (home) => {
+test("with an invite it joins your fleet instead, and a machine that is already a node is kept as it is", async () => {
+  expect((await plan("join", ["--join", "gi1.fake-invite-for-tests", "--name", "server"])).said).toContain("would: invincible join gi1.fake-invite-for-tests --name server");
+  const kept = await plan("node", [], (home) => {
     mkdirSync(join(home, ".invincible"));
     writeFileSync(join(home, ".invincible/config.json"), '{ "name": "keep" }');
   });
@@ -66,20 +67,20 @@ test("with an invite it joins your fleet instead, and a machine that is already 
   expect(kept.said).not.toMatch(/invincible (init|join)/);
 });
 
-test("an option it doesn't know is refused, and --help says what it does", () => {
-  expect(plan("unknown", ["--frobnicate"]).code).toBe(2);
-  const help = Bun.spawnSync(["bash", script, "--help"], { stdout: "pipe" }).stdout.toString();
+test("an option it doesn't know is refused, and --help says what it does", async () => {
+  expect((await plan("unknown", ["--frobnicate"])).code).toBe(2);
+  const help = (await spawned(["bash", script, "--help"], { stdout: "pipe" })).stdout.toString();
   expect(help).toContain("curl -fsSL https://invincible.sh | bash");
   expect(help).toContain("--no-expose");
 });
 
-test("run by a shell that isn't bash (`curl … | sh` on Debian is dash), it says to run it with bash and stops, having done nothing", () => {
+test("run by a shell that isn't bash (`curl … | sh` on Debian is dash), it says to run it with bash and stops, having done nothing", async () => {
   const shells = ["dash", "zsh"].flatMap((name) => Bun.which(name) ?? []);
   if (!shells.length) return void console.warn("neither dash nor zsh is installed here: not checked");
   for (const shell of shells) {
     const home = join(scratch, `by-${shell.split("/").pop()}`);
     mkdirSync(home);
-    const run = Bun.spawnSync([shell], { stdin: Bun.file(script), env: { HOME: home, PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" }, stdout: "pipe", stderr: "pipe" });
+    const run = await spawned([shell], { stdin: Bun.file(script), env: { HOME: home, PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" }, stdout: "pipe", stderr: "pipe" });
     expect([shell, run.exitCode]).toEqual([shell, 1]);
     expect(run.stderr.toString()).toContain("curl -fsSL https://invincible.sh | bash");
     expect(readdirSync(home)).toEqual([]);
@@ -113,10 +114,10 @@ test("on a Mac, both installers load the node's service again only once launchd 
   }
 });
 
-test("it passes shellcheck, where shellcheck is installed", () => {
+test("it passes shellcheck, where shellcheck is installed", async () => {
   const shellcheck = Bun.which("shellcheck");
   if (!shellcheck) return void console.warn("shellcheck isn't installed here: not checked");
-  const run = Bun.spawnSync([shellcheck, "-S", "warning", "-x", script, join(root, "scripts/bun-pin.sh")], { cwd: root, stdout: "pipe", stderr: "pipe" });
+  const run = await spawned([shellcheck, "-S", "warning", "-x", script, join(root, "scripts/bun-pin.sh")], { cwd: root, stdout: "pipe", stderr: "pipe" });
   expect(`${run.stdout}${run.stderr}`).toBe("");
   expect(existsSync(script)).toBe(true);
 });

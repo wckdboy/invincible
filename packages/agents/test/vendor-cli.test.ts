@@ -13,6 +13,7 @@ import { type RunEvent, type RunRole, runLoop } from "../src/run.ts";
 import { CLAUDE_BRIDGE, CODEX_BRIDGE } from "../src/vendor-cli.ts";
 import { ANTIGRAVITY_ACP_BRIDGE } from "../src/antigravity.ts";
 import { ANTIGRAVITY_SIGN_IN } from "../src/seat-sign-in.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 // Every test here starts a bridge and a stand-in tool as processes of their own, so its time is the machine's to
 // give: "a result that is an error ends the run as failed" took 0.6 s alone and 5.0 s (bun's default limit) in a full
@@ -49,9 +50,9 @@ const PYTHON = Bun.which("python3")!;
  * `CPATH`, `LIBRARY_PATH` and `MANPATH` (found 26 November 2026 on the Mac mini, whose only python3 it is). A driver is
  * held to adding nothing beyond these: on Linux, as a VM is, the set is empty.
  */
-const HOST_ADDED: ReadonlySet<string> = (() => {
+const HOST_ADDED: ReadonlySet<string> = await (async () => {
   const given = { PATH: "/usr/bin:/bin" };
-  const seen = Bun.spawnSync([PYTHON, "-c", "import json, os; print(json.dumps(sorted(os.environ)))"], { env: given, stdout: "pipe" });
+  const seen = await spawned([PYTHON, "-c", "import json, os; print(json.dumps(sorted(os.environ)))"], { env: given, stdout: "pipe" });
   return new Set((JSON.parse(seen.stdout.toString()) as string[]).filter((name) => !(name in given)));
 })();
 /** Each tool's session as the fixtures recorded it: the one its `hello` began, and its `resumed` continued. */
@@ -590,11 +591,11 @@ describe("the vendors' own CLIs are harnesses", () => {
     expect(AGENTS.hermes!.capabilities.steer).toBe("restart");
   });
 
-  test("every command is valid shell whatever a name holds, and a run on its own sign-in names no provider or model", () => {
+  test("every command is valid shell whatever a name holds, and a run on its own sign-in names no provider or model", async () => {
     for (const driver of [CLAUDE, CODEX]) {
       const hostile = driver.command({ provider: "p'; $(danger)", model: "a/b' model" }, "session'; x");
-      expect(Bun.spawnSync(["bash", "-n", "-c", hostile]).exitCode).toBe(0);
-      expect(Bun.spawnSync(["bash", "-n", "-c", driver.check]).exitCode).toBe(0);
+      expect((await spawned(["bash", "-n", "-c", hostile])).exitCode).toBe(0);
+      expect((await spawned(["bash", "-n", "-c", driver.check])).exitCode).toBe(0);
       const own = driver.command(OWN_SIGN_IN, SESSION.claude);
       expect(own).toContain(` --own --session '${SESSION.claude}'`);
       expect(own).not.toMatch(/--provider|--model/);
@@ -1298,7 +1299,7 @@ describe("a sign-in and the roster together", () => {
     // No session came of the first run, so the second is given the whole run, not "continue".
     expect(box.prompt(box.launches[1]!)).toBe(box.prompt(box.launches[0]!));
     expect(events.find((event) => event.type === "retry")).toMatchObject({ role: "engineer", attempt: 1, error: "its own sign-in: Claude Code's allowance is spent; it resets 2026-01-01 04:00 UTC\nit exited with 1" });
-    for (const command of box.launches) expect(Bun.spawnSync(["bash", "-n", "-c", command]).stderr.toString()).toBe("");
+    for (const command of box.launches) expect((await spawned(["bash", "-n", "-c", command])).stderr.toString()).toBe("");
   });
 
   test("spent midway, the roster's model continues the same session and is told why", async () => {
@@ -1393,7 +1394,7 @@ describe("a seat's status", () => {
     const run = await box.run(["--status", "--salt", "not a salt; $(id)"]);
     expect(run.exit).toBe(1);
     expect(box.trace()).toEqual([]);
-    expect(Bun.spawnSync(["bash", "-n", "-c", CLAUDE.signIn!.seatCheck("x'; $(danger)")]).exitCode).toBe(0);
+    expect((await spawned(["bash", "-n", "-c", CLAUDE.signIn!.seatCheck("x'; $(danger)")])).exitCode).toBe(0);
   });
 });
 

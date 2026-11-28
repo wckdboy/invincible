@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { DESKTOP_IMAGE, OWN_IMAGES } from "../src/index.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * The agents' desktop image: a display, a window manager, a browser, a terminal and an editor in an agent's own VM,
@@ -41,7 +42,7 @@ describe("the desktop image", () => {
     expect(OWN_IMAGES[DESKTOP_IMAGE]).toEqual({ context: "desktop", keeper: "invincible-desktop-image", base: "invincible/sandbox:1" });
   });
 
-  test("deskd starts the display, the window manager, the buses and the browser: nothing listening outside the VM", () => {
+  test("deskd starts the display, the window manager, the buses and the browser: nothing listening outside the VM", async () => {
     // deskd's own Pieces.start, with what it would start written down instead (and found up once asked for).
     const script = `
 import importlib.util, json, sys
@@ -61,7 +62,7 @@ d._alive = lambda pid: pid == 4321
 import os; os.makedirs = lambda *a, **k: None
 p.start(); p.start()
 print(json.dumps(started))`;
-    const ran = Bun.spawnSync(["python3", "-c", script, fileURLToPath(new URL("deskd.py", context))], { stdout: "pipe", stderr: "pipe" });
+    const ran = await spawned(["python3", "-c", script, fileURLToPath(new URL("deskd.py", context))], { stdout: "pipe", stderr: "pipe" });
     expect(ran.stderr.toString()).toBe("");
     const started = JSON.parse(ran.stdout.toString()) as string[][];
     // Once: a second start finds them running.

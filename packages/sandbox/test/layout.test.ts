@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LEASE_FILE, NOTES_DIR, WORKSPACE_OWN } from "@invincible/core";
 import { MOVE_PY } from "../src/layout.ts";
+import { spawnText } from "../../../bench/spawned.ts";
 
 /*
  * Moving an agent's store from layout 1 (its /work its HOME too) to layout 2 (three trees, work/, home/ and notes/, each
@@ -62,15 +62,15 @@ function store(opts: { notes?: boolean } = {}): string {
 const NONCE = "0123456789abcdef0123456789abcdef";
 const MANIFEST = `.invincible-layout-${NONCE}.json`;
 const staging = (tree: string) => `.invincible-layout-${NONCE}-${tree}`;
-const run = (mode: string, root: string, nonce: string | null = NONCE) =>
-  spawnSync("python3", ["-I", "-c", MOVE_PY, mode, root, JSON.stringify(WORKSPACE_OWN), LEASE_FILE, NOTES_DIR, ...(nonce === null ? [] : [nonce])], { encoding: "utf8", timeout: 20_000 });
+const run = async (mode: string, root: string, nonce: string | null = NONCE) =>
+  await spawnText("python3", ["-I", "-c", MOVE_PY, mode, root, JSON.stringify(WORKSPACE_OWN), LEASE_FILE, NOTES_DIR, ...(nonce === null ? [] : [nonce])], { timeout: 20_000 });
 const ls = (path: string) => readdirSync(path).sort();
 const WORK = [".agent", ".eval", ".evidence", ".tmp", "home", "out", "repo", "tasks", "work"];
 
 describe("moving a store to layout 2", () => {
-  test("its notes go to a tree of their own, its tools' own entries to its HOME, the rest stays its workspace, the lease is dropped, and lost+found stays", () => {
+  test("its notes go to a tree of their own, its tools' own entries to its HOME, the rest stays its workspace, the lease is dropped, and lost+found stays", async () => {
     const root = store();
-    const moved = run("move", root);
+    const moved = await run("move", root);
     expect(moved.status).toBe(0);
     expect(ls(root)).toEqual([MANIFEST, "home", "lost+found", "notes", "work"]);
     expect(ls(join(root, "work"))).toEqual(WORK);
@@ -89,25 +89,25 @@ describe("moving a store to layout 2", () => {
     expect(statSync(join(root, "notes")).mode & 0o777).toBe(0o700);
     expect(statSync(join(root, "work")).mode & 0o777).toBe(0o755);
     // Again: nothing more.
-    expect(run("move", root).status).toBe(0);
+    expect((await run("move", root)).status).toBe(0);
     expect(ls(join(root, "home"))).toEqual([".config", ".local", ".memory"]);
     expect(ls(join(root, "notes"))).toEqual(["notes.db"]);
   });
 
-  test("a toolchain it moved still runs from its HOME's PATH", () => {
+  test("a toolchain it moved still runs from its HOME's PATH", async () => {
     const root = store();
-    expect(run("move", root).status).toBe(0);
+    expect((await run("move", root)).status).toBe(0);
     expect(lstatSync(join(root, "home/.local/bin/tool")).isSymbolicLink()).toBe(true);
-    const ran = spawnSync("sh", ["-c", "tool"], { encoding: "utf8", env: { PATH: `${join(root, "home/.local/bin")}:/usr/bin:/bin` } });
+    const ran = await spawnText("sh", ["-c", "tool"], { env: { PATH: `${join(root, "home/.local/bin")}:/usr/bin:/bin` } });
     expect(ran.status).toBe(0);
     expect(ran.stdout.trim()).toBe("moved-tool-ran");
   });
 
-  test("back undoes it: every entry where it was, its notes in their place, but the lease, which every prepare writes anew", () => {
+  test("back undoes it: every entry where it was, its notes in their place, but the lease, which every prepare writes anew", async () => {
     const root = store();
     const before = ls(root);
-    expect(run("move", root).status).toBe(0);
-    expect(run("back", root).status).toBe(0);
+    expect((await run("move", root)).status).toBe(0);
+    expect((await run("back", root)).status).toBe(0);
     expect(ls(root)).toEqual(before.filter((name) => !name.startsWith(".invincible-gateway")));
     expect(readFileSync(join(root, "work"), "utf8")).toBe("a file of the agent's named work");
     expect(readFileSync(join(root, NOTES_DIR, "notes.db"), "utf8")).toBe("the agent's notes");
@@ -115,47 +115,47 @@ describe("moving a store to layout 2", () => {
     expect(existsSync(join(root, MANIFEST))).toBe(false);
   });
 
-  test("back leaves its notes' folder the mode it had: a move makes their tree the VMs' user's alone, and back undoes that too", () => {
+  test("back leaves its notes' folder the mode it had: a move makes their tree the VMs' user's alone, and back undoes that too", async () => {
     // (Ultra's dry run on copies of live stores, 27 November 2026: the notes' folder came back 0700 from 0755.)
     const root = store();
     chmodSync(join(root, NOTES_DIR), 0o755);
-    expect(run("move", root).status).toBe(0);
+    expect((await run("move", root)).status).toBe(0);
     expect(statSync(join(root, "notes")).mode & 0o777).toBe(0o700);
-    expect(run("back", root).status).toBe(0);
+    expect((await run("back", root)).status).toBe(0);
     expect(statSync(join(root, NOTES_DIR)).mode & 0o777).toBe(0o755);
   });
 
-  test("a store with no notes yet gets an empty tree for them, which back takes away", () => {
+  test("a store with no notes yet gets an empty tree for them, which back takes away", async () => {
     const root = store({ notes: false });
-    expect(run("move", root).status).toBe(0);
+    expect((await run("move", root)).status).toBe(0);
     expect(ls(join(root, "notes"))).toEqual([]);
     expect(ls(join(root, "home/.memory"))).toEqual(["engram", "other"]);
-    expect(run("back", root).status).toBe(0);
+    expect((await run("back", root)).status).toBe(0);
     expect(existsSync(join(root, "notes"))).toBe(false);
     expect(ls(join(root, ".memory"))).toEqual(["other"]);
     expect(ls(root).filter((name) => name.startsWith(".invincible-layout"))).toEqual([]);
   });
 
-  test("back takes away what the move made for its notes' mountpoint, and nothing of the agent's", () => {
+  test("back takes away what the move made for its notes' mountpoint, and nothing of the agent's", async () => {
     // An empty .memory of the agent's own: back leaves it where it was, empty.
     const empty = store({ notes: false });
     rmSync(join(empty, ".memory"), { recursive: true });
     mkdirSync(join(empty, ".memory"));
-    expect(run("move", empty).status).toBe(0);
+    expect((await run("move", empty)).status).toBe(0);
     expect(ls(join(empty, "home/.memory"))).toEqual(["engram"]);
-    expect(run("back", empty).status).toBe(0);
+    expect((await run("back", empty)).status).toBe(0);
     expect(ls(join(empty, ".memory"))).toEqual([]);
     // None at all: the move made one for the mountpoint, and back takes it away.
     const none = store({ notes: false });
     rmSync(join(none, ".memory"), { recursive: true });
-    expect(run("move", none).status).toBe(0);
+    expect((await run("move", none)).status).toBe(0);
     expect(ls(join(none, "home"))).toEqual([".config", ".local", ".memory"]);
-    expect(run("back", none).status).toBe(0);
+    expect((await run("back", none)).status).toBe(0);
     expect(existsSync(join(none, ".memory"))).toBe(false);
     expect(ls(none).filter((name) => name.startsWith(".invincible-layout"))).toEqual([]);
   });
 
-  test("a link where its notes would be is never followed: its notes' tree is made empty, and the link moves as it is", () => {
+  test("a link where its notes would be is never followed: its notes' tree is made empty, and the link moves as it is", async () => {
     // Its .memory a link to a folder outside the store, with notes in it.
     const elsewhere = temp("elsewhere-");
     mkdirSync(join(elsewhere, "engram"));
@@ -163,7 +163,7 @@ describe("moving a store to layout 2", () => {
     const linked = store({ notes: false });
     rmSync(join(linked, ".memory"), { recursive: true });
     symlinkSync(elsewhere, join(linked, ".memory"));
-    expect(run("move", linked).status).toBe(0);
+    expect((await run("move", linked)).status).toBe(0);
     expect(ls(join(linked, "notes"))).toEqual([]);
     expect(lstatSync(join(linked, "home/.memory")).isSymbolicLink()).toBe(true);
     expect(ls(elsewhere)).toEqual(["engram"]);
@@ -171,53 +171,53 @@ describe("moving a store to layout 2", () => {
     // Its notes' folder itself a link: it stays in .memory as it is.
     const inner = store({ notes: false });
     symlinkSync(join(elsewhere, "engram"), join(inner, NOTES_DIR));
-    expect(run("move", inner).status).toBe(0);
+    expect((await run("move", inner)).status).toBe(0);
     expect(ls(join(inner, "notes"))).toEqual([]);
     expect(lstatSync(join(inner, "home", NOTES_DIR)).isSymbolicLink()).toBe(true);
     expect(ls(join(elsewhere, "engram"))).toEqual(["notes.db"]);
   });
 
-  test("a move cut off in the middle is moved on from where it was", () => {
+  test("a move cut off in the middle is moved on from where it was", async () => {
     const root = store();
     // As a cut leaves it: its notes and two entries staged and written down, the rest not yet.
     mkdirSync(join(root, staging("work")));
     mkdirSync(join(root, staging("home")));
-    spawnSync("mv", [join(root, NOTES_DIR), join(root, staging("notes"))]);
-    spawnSync("mv", [join(root, "repo"), join(root, staging("work"), "repo")]);
-    spawnSync("mv", [join(root, ".config"), join(root, staging("home"), ".config")]);
+    await spawnText("mv", [join(root, NOTES_DIR), join(root, staging("notes"))]);
+    await spawnText("mv", [join(root, "repo"), join(root, staging("work"), "repo")]);
+    await spawnText("mv", [join(root, ".config"), join(root, staging("home"), ".config")]);
     writeFileSync(join(root, MANIFEST), JSON.stringify({ layout: 2, state: "moving", moved: [{ name: NOTES_DIR, to: "notes" }, { name: "repo", to: "work" }, { name: ".config", to: "home" }], nonce: NONCE }));
-    expect(run("move", root).status).toBe(0);
+    expect((await run("move", root)).status).toBe(0);
     expect(ls(join(root, "work"))).toEqual(WORK);
     expect(ls(join(root, "home"))).toEqual([".config", ".local", ".memory"]);
     expect(ls(join(root, "notes"))).toEqual(["notes.db"]);
     // One cut just after its notes were renamed, before that was written down: moved on, and back puts them in place.
     const renamed = store();
     writeFileSync(join(renamed, MANIFEST), JSON.stringify({ layout: 2, state: "moving", moved: [], nonce: NONCE }));
-    spawnSync("mv", [join(renamed, NOTES_DIR), join(renamed, staging("notes"))]);
-    expect(run("move", renamed).status).toBe(0);
+    await spawnText("mv", [join(renamed, NOTES_DIR), join(renamed, staging("notes"))]);
+    expect((await run("move", renamed)).status).toBe(0);
     expect(ls(join(renamed, "notes"))).toEqual(["notes.db"]);
-    expect(run("back", renamed).status).toBe(0);
+    expect((await run("back", renamed)).status).toBe(0);
     expect(readFileSync(join(renamed, NOTES_DIR, "notes.db"), "utf8")).toBe("the agent's notes");
     // And one cut as the trees took their names: the workspace's tree named, its HOME's and its notes' not yet.
     const other = store();
-    expect(run("move", other).status).toBe(0);
-    spawnSync("mv", [join(other, "home"), join(other, staging("home"))]);
-    spawnSync("mv", [join(other, "notes"), join(other, staging("notes"))]);
+    expect((await run("move", other)).status).toBe(0);
+    await spawnText("mv", [join(other, "home"), join(other, staging("home"))]);
+    await spawnText("mv", [join(other, "notes"), join(other, staging("notes"))]);
     writeFileSync(join(other, MANIFEST), JSON.stringify({ ...JSON.parse(readFileSync(join(other, MANIFEST), "utf8")), state: "naming" }));
-    expect(run("move", other).status).toBe(0);
+    expect((await run("move", other)).status).toBe(0);
     expect(ls(other)).toEqual([MANIFEST, "home", "lost+found", "notes", "work"]);
     expect(ls(join(other, "work"))).toContain("work");
     expect(ls(join(other, "notes"))).toEqual(["notes.db"]);
   });
 
-  test("a store made new has its three trees, and where its notes are mounted in its HOME", () => {
+  test("a store made new has its three trees, and where its notes are mounted in its HOME", async () => {
     const root = temp("made-");
-    expect(run("make", root).status).toBe(0);
+    expect((await run("make", root)).status).toBe(0);
     expect(ls(root)).toEqual([MANIFEST, "home", "notes", "work"]);
     expect(ls(join(root, "home", NOTES_DIR))).toEqual([]);
     expect(statSync(join(root, "notes")).mode & 0o777).toBe(0o700);
     // Made again: nothing changes.
-    expect(run("make", root).status).toBe(0);
+    expect((await run("make", root)).status).toBe(0);
     expect(ls(root)).toEqual([MANIFEST, "home", "notes", "work"]);
   });
 });
@@ -246,9 +246,9 @@ describe("what was at a store's root before its move (the fourth fabric review's
     return { root, elsewhere };
   }
 
-  test("a planted manifest, tree-named links and staging-named links are the agent's entries: moved by the rule, links as links", () => {
+  test("a planted manifest, tree-named links and staging-named links are the agent's entries: moved by the rule, links as links", async () => {
     const { root, elsewhere } = planted();
-    const moved = run("move", root);
+    const moved = await run("move", root);
     expect(moved.status).toBe(0);
     // Its root: the move's manifest, the trees it made, and the image's lost+found. Nothing else.
     expect(ls(root)).toEqual([MANIFEST, "home", "lost+found", "notes", "work"]);
@@ -267,32 +267,32 @@ describe("what was at a store's root before its move (the fourth fabric review's
     expect(ls(elsewhere)).toEqual(["secret.txt"]);
     // What it moved went where the rule says: its tools' entries really are in its HOME.
     expect(readFileSync(join(root, "home/.config/tool/config.json"), "utf8")).toContain("not-a-real-secret-sentinel");
-    expect(run("check", root, null).status).toBe(0);
+    expect((await run("check", root, null)).status).toBe(0);
     // And back puts each where it was, the links among them.
-    expect(run("back", root).status).toBe(0);
+    expect((await run("back", root)).status).toBe(0);
     expect(lstatSync(join(root, "notes")).isSymbolicLink()).toBe(true);
     expect(lstatSync(join(root, ".invincible-layout-home")).isSymbolicLink()).toBe(true);
     expect(readFileSync(join(root, ".invincible-layout.json"), "utf8")).toContain('"moved"');
     expect(ls(root).filter((name) => name.startsWith(".invincible-layout-0"))).toEqual([]);
   });
 
-  test("a manifest under the move's name that doesn't hold its word is refused: nothing is moved, nothing put back", () => {
+  test("a manifest under the move's name that doesn't hold its word is refused: nothing is moved, nothing put back", async () => {
     const root = store();
     writeFileSync(join(root, MANIFEST), JSON.stringify({ layout: 2, state: "moved", moved: [], nonce: "another" }));
     const before = ls(root);
     for (const mode of ["move", "back", "make"]) {
-      const ran = run(mode, root);
+      const ran = await run(mode, root);
       expect(ran.status).toBe(3);
       expect(ran.stderr).toContain("isn't this move's");
     }
     expect(ls(root)).toEqual(before);
   });
 
-  test("a store holding another move's manifest (its node lost its word for it) is neither moved again nor touched (R4-6)", () => {
+  test("a store holding another move's manifest (its node lost its word for it) is neither moved again nor touched (R4-6)", async () => {
     const root = store();
-    expect(run("move", root).status).toBe(0);
+    expect((await run("move", root)).status).toBe(0);
     // A move begun by a node that has no word for the one before: it would take the trees for the agent's entries.
-    const again = run("move", root, "f".repeat(32));
+    const again = await run("move", root, "f".repeat(32));
     expect(again.status).toBe(3);
     expect(again.stderr).toContain(`the store holds another move's manifest (${MANIFEST})`);
     expect(ls(root)).toEqual([MANIFEST, "home", "lost+found", "notes", "work"]);
@@ -300,44 +300,44 @@ describe("what was at a store's root before its move (the fourth fabric review's
     expect(ls(join(root, "home"))).toEqual([".config", ".local", ".memory"]);
   });
 
-  test("a move, its putting back and a store made new each need the node's word: without one nothing is done", () => {
+  test("a move, its putting back and a store made new each need the node's word: without one nothing is done", async () => {
     const root = store();
     const before = ls(root);
-    for (const mode of ["move", "back", "make"]) expect(run(mode, root, null).status).toBe(3);
+    for (const mode of ["move", "back", "make"]) expect((await run(mode, root, null)).status).toBe(3);
     expect(ls(root)).toEqual(before);
   });
 
-  test("check: each tree a folder at the store's root, the VMs' user's; a link, a file, a missing one refused, saying which", () => {
+  test("check: each tree a folder at the store's root, the VMs' user's; a link, a file, a missing one refused, saying which", async () => {
     const made = temp("made-");
-    expect(run("make", made).status).toBe(0);
-    expect(run("check", made, null).status).toBe(0);
+    expect((await run("make", made)).status).toBe(0);
+    expect((await run("check", made, null)).status).toBe(0);
     const elsewhere = temp("elsewhere-");
     const linked = temp("linked-");
-    expect(run("make", linked).status).toBe(0);
+    expect((await run("make", linked)).status).toBe(0);
     rmSync(join(linked, "notes"), { recursive: true });
     symlinkSync(elsewhere, join(linked, "notes"));
     rmSync(join(linked, "home"), { recursive: true });
     symlinkSync("work", join(linked, "home"));
     rmSync(join(linked, "work"), { recursive: true });
     writeFileSync(join(linked, "work"), "a file");
-    const refused = run("check", linked, null);
+    const refused = await run("check", linked, null);
     expect(refused.status).toBe(3);
     expect(refused.stderr).toContain("work isn't a folder");
     expect(refused.stderr).toContain("home is a link");
     expect(refused.stderr).toContain("notes is a link");
     const missing = temp("missing-");
-    expect(run("check", missing, null).stderr).toContain("work is missing; home is missing; notes is missing");
+    expect((await run("check", missing, null)).stderr).toContain("work is missing; home is missing; notes is missing");
     // A store in layout 1, never moved: no tree of the move's, so nothing of it is mounted as one.
-    expect(run("check", store(), null).status).toBe(3);
+    expect((await run("check", store(), null)).status).toBe(3);
   });
 });
 
 describe("a name that isn't UTF-8, as the list says it (R4-5)", () => {
-  test("is well-formed text: its bytes as UTF-8, each byte that isn't one as \\xNN, never a lone surrogate", () => {
+  test("is well-formed text: its bytes as UTF-8, each byte that isn't one as \\xNN, never a lone surrogate", async () => {
     // (APFS refuses such a name, so the list's own words for one are run on what Python lists on Linux for its bytes:
     // os.fsdecode, which gives a byte that isn't UTF-8 as a lone surrogate.)
     const show = /def show\(name\):\n(?: {4}.*\n)+/.exec(MOVE_PY)![0];
-    const ran = spawnSync("python3", ["-I", "-c", `import json, os\n${show}\nprint(json.dumps([show(os.fsdecode(b".x\\xff")), show("caf\\u00e9"), show("\\U0001F6E1")]))`], { encoding: "utf8" });
+    const ran = await spawnText("python3", ["-I", "-c", `import json, os\n${show}\nprint(json.dumps([show(os.fsdecode(b".x\\xff")), show("caf\\u00e9"), show("\\U0001F6E1")]))`]);
     expect(ran.status).toBe(0);
     const said = JSON.parse(ran.stdout) as string[];
     expect(said).toEqual([".x\\xff", "café", "\u{1F6E1}"]);
@@ -351,7 +351,7 @@ describe("what the code keeps in a workspace", () => {
    * for itself (the desktop's pictures came that way, after layout 2 was written) must be named in WORKSPACE_OWN, or a
    * store moved would lose it from its workspace: every /work/.name in every package's source is checked here.
    */
-  test("every top-level dot-entry of /work the code names is the workspace's own, or the lease a move drops", () => {
+  test("every top-level dot-entry of /work the code names is the workspace's own, or the lease a move drops", async () => {
     const named = new Map<string, string>();
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -370,11 +370,11 @@ describe("what the code keeps in a workspace", () => {
 });
 
 describe("what a move would do, listed", () => {
-  test("by name, where it goes, its kind and its size: never a byte of a file, nor a link followed, nor a pipe opened", () => {
+  test("by name, where it goes, its kind and its size: never a byte of a file, nor a link followed, nor a pipe opened", async () => {
     const root = store();
     // A pipe nobody writes to: a list that opened it would wait for ever.
-    spawnSync("mkfifo", [join(root, ".config/tool/pipe")]);
-    const listed = run("list", root);
+    await spawnText("mkfifo", [join(root, ".config/tool/pipe")]);
+    const listed = await run("list", root);
     expect(listed.status).toBe(0);
     expect(listed.stdout).not.toContain("not-a-real-secret-sentinel");
     expect(listed.stdout).not.toContain("moved-tool-ran");
@@ -392,7 +392,7 @@ describe("what a move would do, listed", () => {
     expect(notes).toMatchObject({ kind: "dir" });
     expect(notes.bytes).toBeGreaterThanOrEqual("the agent's notes".length);
     const memory = entries.find((e) => e.name === ".memory")!.bytes;
-    const whole = spawnSync("python3", ["-I", "-c", "import os,sys\nt=os.lstat(sys.argv[1]).st_size\nfor d,ds,fs in os.walk(sys.argv[1]):\n  t+=sum(os.lstat(os.path.join(d,n)).st_size for n in ds+fs)\nprint(t)", join(root, ".memory")], { encoding: "utf8" });
+    const whole = await spawnText("python3", ["-I", "-c", "import os,sys\nt=os.lstat(sys.argv[1]).st_size\nfor d,ds,fs in os.walk(sys.argv[1]):\n  t+=sum(os.lstat(os.path.join(d,n)).st_size for n in ds+fs)\nprint(t)", join(root, ".memory")]);
     expect(memory + notes.bytes).toBe(Number(whole.stdout.trim()));
     // And it changed nothing.
     expect(readdirSync(root)).toContain(LEASE_FILE);

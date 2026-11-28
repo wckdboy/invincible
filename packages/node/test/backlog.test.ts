@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +8,7 @@ import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { BACKLOG, BACKLOG_READ, BacklogRunner, issueLines, readProposal } from "../src/backlog.ts";
 import { TeamStore } from "../src/team-store.ts";
 import { TeamService } from "../src/team.ts";
+import { spawnText } from "../../../bench/spawned.ts";
 
 /*
  * Work for idle agents, from your backlog (PLAN #37): an agent with a repository and nothing to do is given one task a
@@ -308,31 +308,31 @@ describe("work for idle agents, from your backlog", () => {
  * next idle look, as the agent, with its lease beside it.
  */
 describe("the look at an agent's repository", () => {
-  test("runs no program of the repository's configuration: no signature is checked, and the plan and commits are read", () => {
+  test("runs no program of the repository's configuration: no signature is checked, and the plan and commits are read", async () => {
     const work = realpathSync(mkdtempSync(join(tmpdir(), "backlog-held-")));
     try {
       const repo = join(work, "repo");
       const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: work, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t.invalid" };
-      const git = (...a: string[]) => spawnSync("git", ["-C", repo, ...a], { env, encoding: "utf8" });
-      spawnSync("git", ["init", "-q", repo], { env });
-      spawnSync("mkdir", ["-p", join(repo, "docs")]);
+      const git = async (...a: string[]) => await spawnText("git", ["-C", repo, ...a], { env, encoding: "utf8" });
+      await spawnText("git", ["init", "-q", repo], { env });
+      await spawnText("mkdir", ["-p", join(repo, "docs")]);
       writeFileSync(join(repo, "docs/PLAN.md"), "| 1 | the next step | 🔨 |\n");
-      git("add", ".");
-      git("commit", "-q", "-m", "the plan");
+      await git("add", ".");
+      await git("commit", "-q", "-m", "the plan");
       // A commit that carries a signature, its repository's newest, as origin/HEAD names it.
-      const tree = git("rev-parse", "HEAD^{tree}").stdout.trim();
-      const parent = git("rev-parse", "HEAD").stdout.trim();
+      const tree = (await git("rev-parse", "HEAD^{tree}")).stdout.trim();
+      const parent = (await git("rev-parse", "HEAD")).stdout.trim();
       const signed = `tree ${tree}\nparent ${parent}\nauthor t <t@t.invalid> 1800000000 +0000\ncommitter t <t@t.invalid> 1800000000 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n not-a-real-signature\n -----END PGP SIGNATURE-----\n\nsigned\n`;
-      const made = spawnSync("git", ["-C", repo, "hash-object", "-t", "commit", "-w", "--stdin"], { env, input: signed, encoding: "utf8" }).stdout.trim();
-      git("update-ref", "refs/remotes/origin/main", made);
-      git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+      const made = (await spawnText("git", ["-C", repo, "hash-object", "-t", "commit", "-w", "--stdin"], { env, input: signed, encoding: "utf8" })).stdout.trim();
+      await git("update-ref", "refs/remotes/origin/main", made);
+      await git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
       // What its configuration would run to check that signature.
       const marker = join(work, "what-it-ran");
       writeFileSync(join(work, "gpg"), `#!/bin/sh\necho "ran as HOME=$HOME" >> "${marker}"\nexit 1\n`);
       chmodSync(join(work, "gpg"), 0o755);
-      git("config", "log.showSignature", "true");
-      git("config", "gpg.program", join(work, "gpg"));
-      const read = spawnSync("bash", ["-c", BACKLOG_READ.replaceAll("/work/repo", repo)], { env: { PATH: env.PATH, HOME: work }, encoding: "utf8" });
+      await git("config", "log.showSignature", "true");
+      await git("config", "gpg.program", join(work, "gpg"));
+      const read = await spawnText("bash", ["-c", BACKLOG_READ.replaceAll("/work/repo", repo)], { env: { PATH: env.PATH, HOME: work }, encoding: "utf8" });
       expect(existsSync(marker) ? readFileSync(marker, "utf8") : "").toBe("");
       expect(read.status).toBe(0);
       expect(read.stdout).toContain("=== docs/PLAN.md\n| 1 | the next step | 🔨 |");

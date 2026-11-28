@@ -11,6 +11,7 @@ import type { HandedVm, SeatAnswer, SeatRun, TeamRunContext } from "@invincible/
 import type { TaskAccount } from "@invincible/core";
 import { memoryTokenStore, SandboxHost } from "@invincible/sandbox";
 import { fakeDocker } from "./fake-docker.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 /** What a task asks its VM as it starts: whether it has a desktop, and on it the hardware tools (KiCad's command). */
 /** What a task asks of its VM as it starts: its HOME and its desktop's tools, in one command. */
@@ -2386,7 +2387,7 @@ test("on, in a VM that has the pinned version: the engineer is told its notes ar
   // Its own commands and the task's gates run in the task's workspace with the store's place and project said.
   const exports = `export PATH=/opt/engram/bin:"$PATH" ENGRAM_DATA_DIR=/work/.memory/engram ENGRAM_NO_UPDATE_CHECK=1 ENGRAM_PROJECT='\\''ada'\\'' && `;
   for (const ran of ["echo built", "bun test required-check"]) expect(t.commands.find((c) => c.includes(ran))).toContain(`cd '\\''/work/tasks/task-abcdefghijkl'\\'' && ${exports}${ran}`);
-  for (const command of t.commands) expect(Bun.spawnSync(["bash", "-n", "-c", command]).stderr.toString()).toBe("");
+  for (const command of t.commands) expect((await spawned(["bash", "-n", "-c", command])).stderr.toString()).toBe("");
   expect(t.progress[0]).toBe("Notes · Engram 3.7.2, project ada");
   expect(outcome.output).toEndWith("Workspace: /work/tasks/task-abcdefghijkl\nNotes: Engram 3.7.2, project ada");
   // The reviewer is told nothing of the store.
@@ -2971,22 +2972,22 @@ test("the files your messages carried go with the conversation: the newest pictu
   expect(sent).not.toContain("shot-1.png), but");
 });
 
-test("an agent's command runs with its lease's model access, and without it, saying so, when the lease is gone or broken", () => {
+test("an agent's command runs with its lease's model access, and without it, saying so, when the lease is gone or broken", async () => {
   // On 22 November 2026 an agent deleted its lease; every command in its VM failed from then on, its coding tool's
   // progress polls among them, and its task never ended.
   const dir = mkdtempSync(join(tmpdir(), "invincible-lease-"));
   try {
     const lease = join(dir, ".invincible-gateway.json");
-    const run = (path: string) => {
-      const r = Bun.spawnSync(["bash", "-c", withGateway("echo ran; echo \"${OPENAI_BASE_URL:-none}\"; echo \"${SHELL_SECRET:-none}\"", path)], { env: { PATH: process.env.PATH ?? "", HOME: dir } });
+    const run = async (path: string) => {
+      const r = await spawned(["bash", "-c", withGateway("echo ran; echo \"${OPENAI_BASE_URL:-none}\"; echo \"${SHELL_SECRET:-none}\"", path)], { env: { PATH: process.env.PATH ?? "", HOME: dir } });
       return { exit: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
     };
     // Its lease: what it may use is set, and nothing else it holds.
     writeFileSync(lease, JSON.stringify({ OPENAI_BASE_URL: "http://127.0.0.1:7400/gw/x", SHELL_SECRET: "never set" }));
-    expect(run(lease)).toEqual({ exit: 0, out: "ran\nhttp://127.0.0.1:7400/gw/x\nnone\n", err: "" });
+    expect(await run(lease)).toEqual({ exit: 0, out: "ran\nhttp://127.0.0.1:7400/gw/x\nnone\n", err: "" });
     // Gone, or not JSON: the command still runs, with no model access, and says why.
     for (const broken of [join(dir, "gone.json"), (writeFileSync(lease, "not json"), lease)]) {
-      const r = run(broken);
+      const r = await run(broken);
       expect([r.exit, r.out]).toEqual([0, "ran\nnone\nnone\n"]);
       expect(r.err).toContain("is missing or unreadable, so this command has no model access");
     }

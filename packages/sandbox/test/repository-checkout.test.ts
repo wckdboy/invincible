@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CHECKOUT_SCRIPT, containerName, LABEL, SandboxHost, type LedgerEntryInput, type TokenMinter } from "../src/index.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * A commit of a repository put in an eval's sandbox through the git gateway (an eval of your own work starts from
@@ -116,52 +117,54 @@ describe("a repository checked out in an eval's sandbox", () => {
  * The script itself, really run with python3 and git (where they are), on a repository of three commits read
  * through `file://` in place of the gateway: only its lease's place differs from a sandbox's.
  */
+// (Whether this host has python3 and git, asked once as the file loads, before the tests below are registered.)
+const have = async (cmd: string[]) => {
+  try {
+    return (await spawned(cmd)).exitCode === 0;
+  } catch {
+    return false;
+  }
+};
+const tools = await have(["python3", "--version"]) && await have(["git", "--version"]);
+
 describe("the checkout, really run", () => {
-  const have = (cmd: string[]) => {
-    try {
-      return Bun.spawnSync(cmd).exitCode === 0;
-    } catch {
-      return false;
-    }
-  };
-  const tools = have(["python3", "--version"]) && have(["git", "--version"]);
   // Each is processes, git's dozen and python's (whose script fetches and checks out with git of its own), and a busy Mac
   // starts them slowly: at 2 % of a core (SIGSTOP 980 ms of every second, the Mac mini, 28 November 2026) they took 6
   // to 21 s, where bun's 5 s was met at a load of 44 to 61 there. The limit is three times that: how long a busy machine
   // may take, never what a test checks.
   const LIMIT = 60_000;
 
-  function upstream() {
+  async function upstream() {
     const dir = mkdtempSync(join(tmpdir(), "invincible-checkout-"));
     const src = join(dir, "widgets");
     mkdirSync(src);
-    const git = (...a: string[]) => Bun.spawnSync(["git", "-C", src, "-c", "user.email=t@example.invalid", "-c", "user.name=t", ...a]).stdout.toString().trim();
-    git("init", "-q");
+    const git = async (...a: string[]) => (await spawned(["git", "-C", src, "-c", "user.email=t@example.invalid", "-c", "user.name=t", ...a])).stdout.toString().trim();
+    await git("init", "-q");
     for (const n of [1, 2, 3]) {
       writeFileSync(join(src, "count.txt"), `${n}\n`);
-      git("add", "-A");
-      git("commit", "-qm", `commit ${n}`);
+      await git("add", "-A");
+      await git("commit", "-qm", `commit ${n}`);
     }
     // (In a sandbox the lease is in its HOME: here the test's own folder is the script's HOME.)
     const leasePath = join(dir, ".invincible-gateway.json");
     writeFileSync(leasePath, JSON.stringify({ INVINCIBLE_TOKEN: "test-only-token", INVINCIBLE_REPO_URL: `file://${src}` }));
-    const run = (root: string, commit: string) => Bun.spawnSync(["python3", "-c", CHECKOUT_SCRIPT, root, commit], { env: { ...process.env, HOME: dir } });
-    return { dir, src, leasePath, run, base: git("rev-parse", "HEAD~1"), later: git("rev-parse", "HEAD") };
+    const run = async (root: string, commit: string) => await spawned(["python3", "-c", CHECKOUT_SCRIPT, root, commit], { env: { ...process.env, HOME: dir } });
+    return { dir, src, leasePath, run, base: await git("rev-parse", "HEAD~1"), later: await git("rev-parse", "HEAD") };
   }
 
-  test.skipIf(!tools)("the commit is checked out, detached, with nothing after it and no remote; the lease is gone, and never in the repository", () => {
-    const u = upstream();
+  test.skipIf(!tools)("the commit is checked out, detached, with nothing after it and no remote; the lease is gone, and never in the repository", async () => {
+    const u = await upstream();
     try {
       const root = join(u.dir, "work", "tasks", "task-abc_def-1234");
-      const run = u.run(root, u.base);
+      const run = await u.run(root, u.base);
       expect(run.exitCode).toBe(0);
       expect(run.stdout.toString().trim()).toBe(u.base);
-      const git = (...a: string[]) => Bun.spawnSync(["git", "-C", root, ...a]);
-      expect(git("rev-parse", "HEAD").stdout.toString().trim()).toBe(u.base);
+      const git = async (...a: string[]) => await spawned(["git", "-C", root, ...a]);
+      expect((await git("rev-parse", "HEAD")).stdout.toString().trim()).toBe(u.base);
       expect(readFileSync(join(root, "count.txt"), "utf8")).toBe("2\n");
       // What came after the commit isn't there to be read, and there is nowhere to fetch it from.
-      expect(git("cat-file", "-e", u.later).exitCode).not.toBe(0);
-      expect(git("remote").stdout.toString().trim()).toBe("");
+      expect((await git("cat-file", "-e", u.later)).exitCode).not.toBe(0);
+      expect((await git("remote")).stdout.toString().trim()).toBe("");
       expect(existsSync(u.leasePath)).toBe(false);
       expect(readFileSync(join(root, ".git", "config"), "utf8")).not.toContain("test-only-token");
     } finally {
@@ -169,10 +172,10 @@ describe("the checkout, really run", () => {
     }
   }, LIMIT);
 
-  test.skipIf(!tools)("a commit the repository doesn't have fails, and the lease is gone all the same", () => {
-    const u = upstream();
+  test.skipIf(!tools)("a commit the repository doesn't have fails, and the lease is gone all the same", async () => {
+    const u = await upstream();
     try {
-      const run = u.run(join(u.dir, "work", "repo"), "f".repeat(40));
+      const run = await u.run(join(u.dir, "work", "repo"), "f".repeat(40));
       expect(run.exitCode).not.toBe(0);
       expect(run.stderr.toString()).not.toContain("test-only-token");
       expect(existsSync(u.leasePath)).toBe(false);

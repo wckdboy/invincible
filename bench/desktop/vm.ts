@@ -9,6 +9,7 @@ import { type DesktopAction, type DesktopView, microVMsAvailable, SandboxHost } 
 import type { SandboxView } from "../../packages/core/src/index.ts";
 import { pick, rng, subSeed } from "../lib.ts";
 import { scratchArgs, scratchNames, scratchRunner, spawnDocker } from "./scratch.ts";
+import { spawned } from "../spawned.ts";
 
 /*
  * A VM of the desktop bench's: made by the node's own SandboxHost, as an agent's VM is made (its run arguments: Kata, a
@@ -78,12 +79,12 @@ function longPage(seed: number, title: string): string {
 }
 
 /** The kit as a tar: its files, and the long pages made from the seed. */
-export function kitTar(seed: number): Uint8Array {
+export async function kitTar(seed: number): Promise<Uint8Array> {
   const dir = mkdtempSync(join(tmpdir(), "invincible-bench-kit-"));
   try {
     cpSync(KIT, dir, { recursive: true });
     writeFileSync(join(dir, "pages/long.html"), longPage(seed, "long"));
-    const tar = Bun.spawnSync(["tar", "-C", dir, "-cf", "-", "."], { stdout: "pipe", stderr: "pipe" });
+    const tar = await spawned(["tar", "-C", dir, "-cf", "-", "."], { stdout: "pipe", stderr: "pipe" });
     if (tar.exitCode !== 0) throw new Error(`the kit couldn't be packed: ${tar.stderr.toString()}`);
     return tar.stdout;
   } finally {
@@ -138,7 +139,7 @@ export class BenchVm {
 
   /** The kit in /work/bench, the stand-in eyes' lease in place, and its server on the VM's loopback. */
   async ready(seed: number): Promise<void> {
-    const put = await this.raw(["sh", "-c", `mkdir -p ${IN_VM}/out && tar -xf - -C ${IN_VM} && printf '%s' "$1" > /work/.invincible-gateway.json`, "sh", LEASE], { stdin: kitTar(seed) });
+    const put = await this.raw(["sh", "-c", `mkdir -p ${IN_VM}/out && tar -xf - -C ${IN_VM} && printf '%s' "$1" > /work/.invincible-gateway.json`, "sh", LEASE], { stdin: await kitTar(seed) });
     if (put.code !== 0) throw new Error(`the kit couldn't be put in the VM: ${put.stderr.trim()}`);
     await this.detached(["python3", `${IN_VM}/server.py`, "8000"]);
     for (let i = 0; i < 50; i++) {

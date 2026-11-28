@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { GatewayTokens } from "@invincible/models";
 import { gatewayEnv, type LedgerEntryInput } from "@invincible/sandbox";
 import { handleSandboxSearch, SearchError, searchWeb } from "../src/search.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * Web search: the primary's own SearXNG, through the node. Results are trimmed to what's
@@ -103,20 +104,21 @@ describe("searching from a sandbox", () => {
   });
 });
 
+// (Whether this host has python3, asked once as the file loads: the websearch test below needs it.)
+const python = await (async () => {
+  try {
+    return (await spawned(["python3", "-c", "print(1)"])).exitCode === 0;
+  } catch {
+    return false;
+  }
+})();
+
 describe("websearch, in the images", () => {
-  test("the same command in the workshop and the Lab, and valid shell", () => {
+  test("the same command in the workshop and the Lab, and valid shell", async () => {
     const workshop = readFileSync(join(REPO, "sandbox", "websearch"), "utf8");
     expect(readFileSync(join(REPO, "sandbox", "lab", "websearch"), "utf8")).toBe(workshop);
-    expect(Bun.spawnSync(["sh", "-n", join(REPO, "sandbox", "websearch")]).exitCode).toBe(0);
+    expect((await spawned(["sh", "-n", join(REPO, "sandbox", "websearch")])).exitCode).toBe(0);
   });
-
-  const python = (() => {
-    try {
-      return Bun.spawnSync(["python3", "-c", "print(1)"]).exitCode === 0;
-    } catch {
-      return false;
-    }
-  })();
 
   test.skipIf(!python || process.platform === "win32")("prints each result from the gateway, sending the token", async () => {
     let auth = "";

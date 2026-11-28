@@ -16,7 +16,8 @@ for (const name of GIT_LOCATION) delete process.env[name];
 /*
  * node:child_process passes process.env as it stands, so that is enough there. Bun's own spawn passes the environment
  * the process started with unless it is given one (Bun 1.4: a name deleted from process.env still reaches it), so a
- * command spawned without an env is given the environment as it stood when the test run began, without these.
+ * command spawned without an env is given the environment as it stood when the test run began, without these. (Its
+ * synchronous spawn is not wrapped: nothing here may call one, bench/no-spawn-sync.test.ts.)
  */
 const started: Record<string, string> = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
 type Spawn = (...args: unknown[]) => unknown;
@@ -30,9 +31,7 @@ const withEnv = (args: unknown[]): unknown[] => {
   return [{ ...options, env: options.env ?? started }, ...args.slice(1)];
 };
 const spawn = Bun.spawn as unknown as Spawn;
-const spawnSync = Bun.spawnSync as unknown as Spawn;
 Bun.spawn = ((...args: unknown[]) => spawn(...withEnv(args))) as unknown as typeof Bun.spawn;
-Bun.spawnSync = ((...args: unknown[]) => spawnSync(...withEnv(args))) as unknown as typeof Bun.spawnSync;
 
 /*
  * Where each worker of a watched run stands (scripts/test-check.ts runs `bun run check`'s tests): the file it is in, how

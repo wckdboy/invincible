@@ -1,5 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
 import { primaryRevision } from "../src/revision.ts";
+import {  } from "../../../bench/spawned.ts";
 
 /*
  * The checkout's revision is asked of git without holding the process (28 November 2026). `bun run check` hung on the

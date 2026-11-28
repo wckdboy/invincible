@@ -4,6 +4,7 @@ import { release, tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomId } from "@invincible/core";
 import { type LedgerEntryInput, microVMsAvailable, SandboxHost, vmResolvConf, WORKSPACE_SOCKET, WorkspaceHelper } from "../src/index.ts";
+import { spawned } from "../../../bench/spawned.ts";
 
 /*
  * Real Docker, real containers. Opt-in (INVINCIBLE_DOCKER_TESTS=1) and meant for a
@@ -126,9 +127,9 @@ describe.if(enabled && existsSync(WORKSPACE_SOCKET))("size-limited workspaces on
 
   test("the image stays in use (a stopped keeper container), so `docker image prune -a` leaves it alone", async () => {
     expect(await host.keepImage()).toBe(true);
-    const inspect = (args: string[]) => new TextDecoder().decode(Bun.spawnSync(["docker", ...args]).stdout).trim();
-    const image = inspect(["image", "inspect", "invincible/sandbox:1", "--format", "{{.Id}}"]);
-    expect(inspect(["container", "inspect", "invincible-sandbox-image", "--format", "{{.Image}} {{.State.Status}}"])).toBe(`${image} created`);
+    const inspect = async (args: string[]) => new TextDecoder().decode((await spawned(["docker", ...args])).stdout).trim();
+    const image = await inspect(["image", "inspect", "invincible/sandbox:1", "--format", "{{.Id}}"]);
+    expect(await inspect(["container", "inspect", "invincible-sandbox-image", "--format", "{{.Image}} {{.State.Status}}"])).toBe(`${image} created`);
   }, 60_000);
 });
 
