@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { type ChatStreamEvent, type RouteName, routes, type TeamSnapshot, type TeamTask, type TeamTaskRecord, type Agent, EvalRecord, evalProblem, type EvalView } from "@invincible/core";
 import type { YourCase } from "../src/eval-yours.ts";
 
@@ -176,6 +176,31 @@ export class YoursStandIn {
 
   remove(): void {
     for (const b of this.boxes) rmSync(b.dir, { recursive: true, force: true });
+    for (const dir of this.made.values()) rmSync(dir, { recursive: true, force: true });
+  }
+
+  /**
+   * Each commit checked out once, by git as the gateway would (init, a fetch, a checkout), and copied into each sandbox
+   * after: a copy is the same repository. An attempt grades in three sandboxes and works in a fourth, and git's
+   * processes were most of what a test's time went to on a busy machine.
+   */
+  private readonly made = new Map<string, string>();
+
+  private checkedOut(repository: string, commit: string): string {
+    const key = `${repository}@${commit}`;
+    const made = this.made.get(key);
+    if (made) return made;
+    const root = mkdtempSync(join(tmpdir(), "invincible-yours-checkout-"));
+    Bun.spawnSync(["git", "-C", root, "init", "-q"]);
+    const from = this.repositories[repository];
+    const fetched = from ? Bun.spawnSync(["git", "-C", root, "fetch", "-q", "--depth", "50", `file://${from}`, commit]) : null;
+    if (!fetched || fetched.exitCode !== 0) {
+      rmSync(root, { recursive: true, force: true });
+      throw new Error(`couldn't fetch ${commit.slice(0, 12)} of ${repository.replace("https://github.com/", "")}: fatal: remote error: not our ref`);
+    }
+    Bun.spawnSync(["git", "-C", root, "-c", "advice.detachedHead=false", "checkout", "-q", "--detach", "FETCH_HEAD"]);
+    this.made.set(key, root);
+    return root;
   }
 
   async call<T>(name: RouteName, input?: any): Promise<T> {
@@ -195,12 +220,9 @@ export class YoursStandIn {
         this.checkouts.push(input);
         const box = this.box(input.id);
         const root = local(box.dir, input.path);
-        mkdirSync(root, { recursive: true });
-        Bun.spawnSync(["git", "-C", root, "init", "-q"]);
-        const from = this.repositories[input.repository];
-        const fetched = from ? Bun.spawnSync(["git", "-C", root, "fetch", "-q", "--depth", "50", `file://${from}`, input.commit]) : null;
-        if (!fetched || fetched.exitCode !== 0) throw new Error(`couldn't fetch ${input.commit.slice(0, 12)} of ${input.repository.replace("https://github.com/", "")}: fatal: remote error: not our ref`);
-        Bun.spawnSync(["git", "-C", root, "-c", "advice.detachedHead=false", "checkout", "-q", "--detach", "FETCH_HEAD"]);
+        const made = this.checkedOut(input.repository, input.commit);
+        mkdirSync(dirname(root), { recursive: true });
+        cpSync(made, root, { recursive: true });
         return { commit: input.commit } as T;
       }
       case "execSandbox": {

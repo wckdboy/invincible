@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { EvalRecord, evalProblem } from "@invincible/core";
 import type { EvalJob } from "../src/eval-cli.ts";
 import { attemptCase, gateTail, TAIL_CHARS } from "../src/eval-yours.ts";
@@ -10,6 +10,12 @@ import { GATES, widgets, widgetsCase, WIDGETS, YoursStandIn } from "./yours-stan
  * left. A gate that passes keeps nothing, and a long tail is cut before anything else so the note stays within the
  * record's 1,000 characters.
  */
+
+// Its tests are processes (each gate a shell, with git beside it, some thirty a test), and a busy Mac starts them
+// slowly: at 2 % of a core (SIGSTOP 980 ms of every second, the Mac mini, 28 November 2026) they took up to 18 s each,
+// the four gates' 31 s (29 and 46 s before the stand-in checked each commit out once). Each limit is three times that:
+// how long a busy machine may take, never what a test checks. (bun's 5 s was met at a load of 44 to 61 there.)
+setDefaultTimeout(60_000);
 
 describe("a failing gate's printed tail in the note", () => {
   let repo: ReturnType<typeof widgets>;
@@ -86,5 +92,5 @@ describe("a failing gate's printed tail in the note", () => {
     expect(note).toContain("gate 4 failed (exit 1):");
     // The end of each gate's tail is what's kept, so the last gate's marker is still there.
     expect(note.endsWith("GATE4")).toBe(true);
-  }, 30_000); // (Its four gates each run sh, with git beside them: the default 5 s is below that cost on a loaded machine.)
+  }, 100_000); // (Its four gates each run sh, with git beside them: 26 and 31 s at 2 % of a core, as above.)
 });
