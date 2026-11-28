@@ -902,6 +902,41 @@ test("another node's task runs on the native tools loop unless your grant names 
   expect(commands.find((c) => c.includes("setsid")) ?? "").toContain("opencode run");
 });
 
+/* A brief that carries its own command and its own gate (core's briefCarriesCommand: the lead's word, 28 November 2026)
+ * has nothing for a planner to decide: its work runs with no plan, the goal its whole brief, and the planner's call is
+ * saved, on the loop that has one (the tools loop has none already) and before a coding tool. Any other is planned. */
+test("a brief that carries its own command and its own gate runs with no planner call; any other is planned as ever", async () => {
+  const goal = "Write hello.txt with one line:\n```sh\nprintf 'hello\\n' > hello.txt\n```";
+  const brief = { ...task, goal, gates: ["test -f hello.txt"] };
+  const work = () => [say("```sh\nprintf 'hello\\n' > hello.txt\n```"), say("DONE\nWrote it."), say("PASS\nFine.")];
+  const asksPlanner = (bodies: any[]) => bodies.some((body) => JSON.stringify(body.messages).includes("Plan this run for an engineer"));
+  const f = fixture(work());
+  const trail: string[] = [];
+  const outcome = await f.runtime.executeTask(member, brief, { ...f.context, emit: (line) => trail.push(String(line)) });
+  expect(outcome.verified).toBe(true);
+  expect([f.bodies.length, asksPlanner(f.bodies)]).toEqual([3, false]);
+  expect(trail.some((line) => line.startsWith("Plan ·"))).toBe(false);
+  expect(outcome.record!.spent.map((line) => line.role)).not.toContain("planner");
+  // Its command only in a line's backticks, or no gate of its own: planned as ever.
+  for (const other of [{ ...brief, goal: "Write `hello.txt` with one line: hello" }, { ...brief, gates: [] }]) {
+    const planned = fixture([say("1. Write it.\nDone when: it's there."), ...work()]);
+    await planned.runtime.executeTask(member, other, planned.context);
+    expect(asksPlanner(planned.bodies)).toBe(true);
+  }
+  // Before a coding tool too: its launch comes with no planner's call before it.
+  const commands: string[] = [];
+  const exec = async (_m: Agent, command: string) => {
+    commands.push(command);
+    // (Its run ends at its first look, having said nothing: only what came before its launch matters here.)
+    return result({ stdout: command.includes('"next": nxt') ? JSON.stringify({ alive: false, exit: 0, next: 0, lines: [] }) : "0" });
+  };
+  const opencode = { ...member, harness: "opencode" as const };
+  const coding = fixture([], { agent: () => opencode, models: () => [{ provider: "paid", model: "m" }], exec });
+  await coding.runtime.executeTask(opencode, brief, coding.context).catch(() => {});
+  expect(commands.some((c) => c.includes("setsid"))).toBe(true);
+  expect(asksPlanner(coding.bodies)).toBe(false);
+});
+
 test("another node's task runs each command under the handed helper: its gates' processes end with them, the rest with the task", async () => {
   const script = () => [say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("PASS\nFine.")];
   const f = fixture(script());

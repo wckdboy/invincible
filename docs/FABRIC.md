@@ -103,7 +103,8 @@ The routes are `handTask`, `handedTasks`, `handedTask`, `stopHanded` and `revoke
 transport keys carries all of it:
 
 1. **The giver opens the call** with the task: `{handoff, nonce, goal, title, gates, budgetUsd?, agent?, tools}`. The
-   hand-off's id and a fresh nonce are the giver's own.
+   hand-off's id and a fresh nonce are the giver's own. A goal that carries its own command, in a block of shell, with a
+   gate of its own is run there with no planner call ([ARCHITECTURE](ARCHITECTURE.md) §6: core's `briefCarriesCommand`).
 2. **The runner takes it** only from an active full node, and at once only within your grant for that pair of nodes:
    - **Your grant**, given once for the pair: `invincible fabric grant <from> <to> --budget <usd a day> [--agents
      <id>,…] [--tools fleet,…] [--harness opencode|claude|codex|hermes]` (the `grantHandoffs` route; `fabric grants`,

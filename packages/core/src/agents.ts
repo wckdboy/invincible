@@ -81,6 +81,24 @@ export const looksAtADesktop = (gate: string): boolean => /(^|[;&|(]\s*|\$\(\s*)
 export const looksToNeedAScreen = (task: { goal: string; gates: readonly string[] }): boolean =>
   SCREEN_WORDS.test(task.goal) || (ADDRESS.test(task.goal) && SCREEN_VERB.test(task.goal)) || task.gates.some(looksAtADesktop);
 
+/** A fenced block of shell in a brief (```sh, bash, shell, zsh or console), closed: what is in it. */
+const SHELL_BLOCK = /(?:^|\n)[ \t]*```[ \t]*(?:sh|bash|shell|zsh|console)[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```/gi;
+
+/**
+ * A brief that carries its own command and its own gate (the lead's word, 28 November 2026): its goal holds a closed,
+ * fenced block of shell with a command in it (a line that isn't a comment), and the task has a gate of its own. Nothing
+ * is left for a planner to decide, so its work runs with no plan, the goal its whole brief, and the planner's call is
+ * saved (team-runtime). A command in a line's backticks isn't one (`hello.txt` is as often a file's name), nor a block
+ * in another language or none, nor a gate alone.
+ */
+export function briefCarriesCommand(task: { goal: string; gates: readonly string[] }): boolean {
+  if (!task.gates.some((gate) => gate.trim())) return false;
+  for (const block of task.goal.matchAll(SHELL_BLOCK)) {
+    if (block[1]!.split("\n").some((line) => line.trim() !== "" && !line.trim().startsWith("#"))) return true;
+  }
+  return false;
+}
+
 /** Words that say nothing of what a task is about. */
 const STOP = new Set(
   "about after again also always another before being both cannot could does doing done each either every from have having into itself just keep keeps make makes made many more most much must never only other ought over same should since some such than that their them then there these they this those through under until upon very what when where which while whom whose will with within without would your yours".split(" "),

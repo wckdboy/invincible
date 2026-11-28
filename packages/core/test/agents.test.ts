@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chooseAgent, looksToNeedAScreen, type AgentFacts } from "../src/agents.ts";
+import { briefCarriesCommand, chooseAgent, looksToNeedAScreen, type AgentFacts } from "../src/agents.ts";
 
 /*
  * The agent best suited to a task takes it, and evidence decides, never rank.
@@ -117,5 +117,31 @@ describe("a desktop task, whose agent's desktop starts as its work begins", () =
     expect(is("Fix the crash reported in https://github.com/example/app/issues/12, and verify the fix.")).toBe(false);
     expect(is("Update the changelog with https://example.test/releases/4.2 and run the tests.")).toBe(false);
     expect(is("Build and verify the change.", ["bun test"])).toBe(false);
+  });
+});
+
+/*
+ * A brief that carries its own command and its own gate (the lead's word, 28 November 2026): a fenced block of shell
+ * with a command in it, and a gate of the task's own. Nothing is left for a planner to decide, so its work runs with no
+ * plan and the planner's call is saved. Anything less is planned as ever.
+ */
+describe("a brief that carries its own command and its own gate", () => {
+  const block = (tag: string, body: string) => `Write hello.txt with one line:\n\`\`\`${tag}\n${body}\n\`\`\``;
+  const is = (goal: string, gates: string[] = ["test -f hello.txt"]) => briefCarriesCommand({ goal, gates });
+
+  test("a fenced block of shell with a command in it, and a gate of its own", () => {
+    for (const tag of ["sh", "bash", "shell", "zsh", "console", "SH"]) expect([tag, is(block(tag, "printf 'hello\\n' > hello.txt"))]).toEqual([tag, true]);
+    expect(is(`Run this, then check it:\n\`\`\`sh\n# the file\nprintf 'hello\\n' > hello.txt\n\`\`\`\nThat's all.`)).toBe(true);
+  });
+
+  test("never without a gate of its own, nor a command only in a line's backticks, another language's block, a block of comments, or one left open", () => {
+    expect(is(block("sh", "printf 'hello\\n' > hello.txt"), [])).toBe(false);
+    expect(is(block("sh", "printf 'hello\\n' > hello.txt"), ["  "])).toBe(false);
+    expect(is("Write `hello.txt` with one line: hello")).toBe(false);
+    expect(is("Run `printf 'hello\\n' > hello.txt`.")).toBe(false);
+    expect(is(block("python", "open('hello.txt', 'w').write('hello\\n')"))).toBe(false);
+    expect(is(block("", "printf 'hello\\n' > hello.txt"))).toBe(false);
+    expect(is(block("sh", "# nothing to run\n   "))).toBe(false);
+    expect(is("Write hello.txt:\n```sh\nprintf 'hello\\n' > hello.txt")).toBe(false);
   });
 });

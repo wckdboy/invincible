@@ -166,6 +166,10 @@ Its event kinds are Invincible's own (`chat.*`, `task.*`, `run.*`, `project.*`, 
 
 The run loop is carried and renamed (§10), the most proven part of it:
 - **The loop:** restate the task as acceptance criteria, plan, work, verify, report.
+- **No plan where nothing is left to plan** (the lead's word, 28 November 2026): a task whose brief carries its own
+  command (a closed block of shell: `sh`, `bash`, `shell`, `zsh` or `console`) and its own gate runs with no planner
+  call, its goal the whole brief (core's `briefCarriesCommand`), on the loop that has one and before a coding tool. The
+  tools loop has none already. A command in a line's backticks isn't one: `hello.txt` is as often a file's name.
 - **Gates:** the gates run before any work, so a gate that already passes proves nothing and is said to. Test files a
   gate names are locked. Yours run exactly as given. The planner may propose up to three of its own, and they are only
   its proposal: work that gives up with them in force has them withdrawn, once, and goes on under yours (26 November
