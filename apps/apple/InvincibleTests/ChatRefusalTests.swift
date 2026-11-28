@@ -1,3 +1,4 @@
+#if os(iOS)
 import Foundation
 import SwiftUI
 import Testing
@@ -41,3 +42,4 @@ import UIKit
         return try #require(image.pngData())
     }
 }
+#endif
