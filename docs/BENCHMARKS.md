@@ -49,9 +49,54 @@ and exits non-zero when something got worse.
 | harness-overhead | the chat loop and the run runner with models that answer at once |
 | context | what a run sends its engineer over a whole run |
 | notify | a seeded week of asks and news on two devices: are asks answered in time, and how often does it buzz? |
+| routing | an agent's seeded tasks through the real team runtime with stand-in models: which model does the work, what is verified, and at what cost (below) |
 | web | the PWA's places on a laptop and a phone: how far what's on screen moves once it is there |
 | desktop | an agent's desktop in a Kata microVM, as the node makes one (below) |
 | hardware | the hardware image: KiCad and FreeCAD in an agent's Kata microVM, by script and through the screen (below) |
+
+### routing: who does the work, and what it comes to
+
+Smart routing (the owner's word, 28 November 2026: the orchestrator on big models, the workers on fast cheap ones),
+measured with stand-ins (`bench/routing/sim.ts`). A seeded set of an agent's tasks, 36 by default, each run as the node
+runs one: the team runtime's `executeTask`, so the plan, the work loop and its escalation ladder (`escalate` in
+`packages/agents/src/run.ts`), the gates before and after, the audits, the independent review, the $3 budget and every
+call's way to a model through the roster are the real code. Only the models and the VM are stand-ins, answering from
+each task's hidden truth:
+
+- **The tasks.** Each is of a kind and a level from 1 to 4, drawn from the seed. Its kind is how a model it is too hard
+  for fails it: its fix leaves the gate failing (`gate`), passes the gate but not the reviewer (`review`), or never
+  comes, as it reads the same files again and again (`stall`).
+- **The stand-ins.** A worker on the engineer's role does levels 1 and 2. A lead on the planner's does up to 3, at ten
+  times the worker's price and slower. Nothing does a 4: that task needs you, whoever is asked. A judge on the reviewer's
+  role knows the truth: it passes only done work, and an audit steers only work that changed nothing since the last
+  one. So what is measured is the routing, never how well a reviewer reads evidence (the reviewer evals do that).
+- **Three ways to route the same tasks:**
+  - `routed`, as a node does: the ladder may move the work up;
+  - `pinned`, the agent pinned to the cheap model, whose work stays there (the all-cheap bound);
+  - `strong`, every turn on the lead (the all-strong bound).
+- **Measured, for each way:** tasks verified, interventions per verified task (a task ending unverified needs you: the
+  north star), stand-in dollars and virtual minutes per verified task, and how often the work moved up, and why.
+- **The rules, held at 0:** a pinned agent's work answered by another model, work moved up more than the ladder's one
+  rung, work said to move up onto the model it was on, and a task that comes out differently when run again.
+- **Its limits.** No vendor's model, price or speed is in it. Its prices, speeds and capabilities are the stand-ins'
+  own, and how a real model fails is richer than three kinds. A routing change that helps here is shown to work as
+  designed on these terms. Whether it helps your own work is the `yours` eval suite's to say, with real models and
+  real money (docs/EVALS.md).
+
+On 28 November 2026 (seed 20 261 112), main as it was (c12cefd9) against the escalation ladder's three triggers, with
+pins and rungs kept:
+
+| Routed | Verified | Interventions per verified | $ per verified | Minutes per verified | Moved up |
+|---|---|---|---|---|---|
+| main: a gate failing twice alone | 21 of 36 | 0.714 | 1.28 | 6.62 | 4 |
+| a gate, the review or the audits saying no twice | 29 of 36 | 0.241 | 1.01 | 4.32 | 18 |
+| the bounds: all on the worker / all on the lead | 18 / 29 | 1 / 0.241 | 1.46 / 0.693 | 7.58 / 3.56 | 0 / 0 |
+
+On main, both rules were broken. A pinned agent's work went to the planner's models on 8 turns (`pinned` was `routed`
+again), and work on the lead "escalated" onto the lead. The ladder now verifies what the lead can do, but under these
+terms all on the lead is still cheaper and faster per verified task. The cost is failure found late: a worker going
+round spends 40 turns before a second audit steers it, and one the reviewer sends back spends three rounds. Finding it
+sooner is the next step.
 
 ### desktop: an agent's desktop, fast and stable
 

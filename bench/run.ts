@@ -21,6 +21,7 @@ const SUITES: Record<string, () => Promise<{ suite: Suite }>> = {
   context: () => import("./suites/context.ts"),
   notify: () => import("./suites/notify.ts"),
   seats: () => import("./suites/seats.ts"),
+  routing: () => import("./suites/routing.ts"),
   web: () => import("./suites/web.ts"),
   // Need Docker with Kata microVMs (a sandbox host): skipped, and said to be, anywhere else.
   desktop: () => import("./suites/desktop.ts"),
