@@ -35,6 +35,11 @@ import type { RouteName } from "./api.ts";
  *    the mind's count of events.
  *  - `turns`: a turn began or ended, or your chats changed; not each step a turn takes.
  *  - `runs`: a run began or ended, changed its state or fell silent; not each step it reports.
+ *  - `ledger`: a line was recorded, told at most every LIVE_LEDGER_MS. While agents work a line comes with each command
+ *    they run, so it is told once in that time, not once a command. Its route answers the latest lines, and the mind's
+ *    count of events as it is read. The count isn't told apart: it moves with what a device may not read (a key asked
+ *    for), and this stream tells such a device nothing of that. A line a device isn't shown (a private connector's, to
+ *    one without fleet:admin) moves it too: it says the ledger moved, not what moved.
  *
  * And one is told a little more widely than its route answers: `notify` moves when what your notifications' settings show
  * moves (who is told and how sends to them went, what was sent, lost or withdrawn), and when a notification is kept for a
@@ -58,6 +63,7 @@ export const LIVE_TOPICS = [
   "runs",
   "team",
   "turns",
+  "ledger",
 ] as const satisfies readonly RouteName[];
 export type LiveTopic = (typeof LIVE_TOPICS)[number];
 
@@ -94,3 +100,6 @@ export function livePath(since?: string | null): string {
  * connection for 45 s.
  */
 export const LIVE_BEAT_MS = 1_500;
+
+/** `ledger` is told at most this often: the first line after a quiet spell at once, the rest of a busy one together. */
+export const LIVE_LEDGER_MS = 5_000;

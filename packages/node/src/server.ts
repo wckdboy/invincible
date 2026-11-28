@@ -131,6 +131,7 @@ import {
   moneyPrices,
   type AwayView,
   LIVE_BEAT_MS,
+  LIVE_LEDGER_MS,
   LIVE_TOPICS,
   type LiveBye,
   LiveCursor,
@@ -208,7 +209,7 @@ import { primaryRevision } from "./revision.ts";
 import { localModelsOf, type ModelPeer, serves, viaFleet } from "./local-models.ts";
 import { githubRepo, taskBranch } from "./run-cli.ts";
 import type { Terminals } from "./terminals.ts";
-import { LiveChanges, LedgerCounts, timedStamp } from "./live.ts";
+import { coarseStamp, LiveChanges, LedgerCounts, timedStamp } from "./live.ts";
 import { grantScopes, QampGrantError, QampGrants } from "./qamp-grants.ts";
 import { type Fabric, fabricPrincipalOf } from "./fabric/service.ts";
 import { handleFabricTool, type Handoffs } from "./fabric/handoff.ts";
@@ -1991,6 +1992,8 @@ export function createApp(ctx: AppContext) {
       team: () => ctx.team?.store.version() ?? "",
       // Your chats as kept, and which turns run; not each step a turn takes.
       turns: () => `${ctx.chats.version()}.${ctx.turns.running().map((turn) => turn.id).join(",")}`,
+      // A line was recorded (one with each command an agent runs): told at most every LIVE_LEDGER_MS, not once a line.
+      ledger: coarseStamp(() => mindCounts.of("ledger"), LIVE_LEDGER_MS),
     },
     { log: ctx.log },
   );
@@ -4101,6 +4104,9 @@ export function createApp(ctx: AppContext) {
             run: e.body.run ?? null,
             detail: e.body.detail ?? null,
           })),
+        // (The mind's count of events, as the fleet's answer says it: what a page shows beside the latest lines, read as
+        // the live stream says `ledger` moved, so it needn't ask the fleet for it.)
+        events: ctx.store.eventCount(),
       };
     },
     sandboxes: (input, p) =>

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { LIVE_TOPICS, type LiveTopic, routes, SCOPES } from "@invincible/core";
-import { LiveChanges, LedgerCounts, mindTopics, type Stamps, timedStamp } from "../src/live.ts";
+import { coarseStamp, LiveChanges, LedgerCounts, mindTopics, type Stamps, timedStamp } from "../src/live.ts";
 
 /*
  * What changed on a node, for the live stream (live.ts): each topic's stamp read again soon after a write, as a deadline
@@ -276,7 +276,7 @@ describe("where a stream stood: the cursor it is opened again from", () => {
 });
 
 describe("the mind's part", () => {
-  test("each event kind touches what shows it, and the ledger nothing", () => {
+  test("each event kind touches what shows it (a ledger line, the ledger), and a loop's run nothing", () => {
     expect(mindTopics("action.requested")).toEqual(["actions"]);
     expect(mindTopics("order.revoked")).toEqual(["actions"]);
     expect(mindTopics("notice.dismissed")).toEqual(["notices"]);
@@ -287,18 +287,105 @@ describe("the mind's part", () => {
     expect(mindTopics("device.revoked")).toEqual(["fleet", "screenSessions"]);
     expect(mindTopics("node.profile")).toEqual(["fleet", "screenSessions"]);
     expect(mindTopics("connector.set")).toEqual(["connectorRequests"]);
-    expect(mindTopics("ledger.recorded")).toEqual([]);
+    expect(mindTopics("ledger.recorded")).toEqual(["ledger"]);
     expect(mindTopics("loop.ran")).toEqual([]);
   });
 
   test("counted by topic; a replay counts as every topic moving", () => {
     const counts = new LedgerCounts();
-    expect(counts.take([{ kind: "ledger.recorded" }], false)).toBe(false);
-    expect(counts.take([{ kind: "action.requested" }, { kind: "action.decided" }, { kind: "notice.raised" }], false)).toBe(true);
-    expect([counts.of("actions"), counts.of("notices"), counts.of("team")]).toEqual([2, 1, 0]);
+    expect(counts.take([{ kind: "loop.ran" }], false)).toBe(false);
+    expect(counts.take([{ kind: "action.requested" }, { kind: "action.decided" }, { kind: "notice.raised" }, { kind: "ledger.recorded" }], false)).toBe(true);
+    expect([counts.of("actions"), counts.of("notices"), counts.of("ledger"), counts.of("team")]).toEqual([2, 1, 1, 0]);
     expect(counts.take([], true)).toBe(true);
     expect(LIVE_TOPICS.every((topic) => counts.of(topic) >= 1)).toBe(true);
   });
+});
+
+describe("what moves too often to tell each time (the ledger's lines)", () => {
+  test("its stamp moves at once after a quiet spell, then at most every so often, and says when it next may", () => {
+    let now = 1_000;
+    let lines = 0;
+    const stamp = coarseStamp(() => lines, 5_000, () => now);
+    const first = stamp();
+    expect(stamp.due?.()).toBe(Infinity);
+    // The first line after a quiet spell: at once.
+    lines = 1;
+    const second = stamp();
+    expect(second).not.toBe(first);
+    // The rest of a busy spell wait: the stamp holds, and says how long until it may move.
+    now = 2_000;
+    lines = 7;
+    expect(stamp()).toBe(second);
+    expect(stamp.due?.()).toBe(4_000);
+    now = 5_999;
+    expect(stamp()).toBe(second);
+    // Its time come, it moves to where the lines stand then.
+    now = 6_000;
+    const third = stamp();
+    expect(third).not.toBe(second);
+    expect(stamp.due?.()).toBe(Infinity);
+    // Nothing more: it stays, whatever the time.
+    now = 1e9;
+    expect(stamp()).toBe(third);
+  });
+
+  test("a stream's hello has a line that waits its turn: opened again from that hello's cursor, nothing moved; a line since, it did", () => {
+    // (28 November 2026: a phone's stream opened a moment after the line its pairing recorded, while that line waited
+    // its turn, and renewed after its turn came: its hello said the ledger moved, a read for nothing.)
+    const s = stamps();
+    let now = 1_000;
+    let lines = 0;
+    const table: Stamps = { ...s.table, ledger: coarseStamp(() => lines, 5_000, () => now) };
+    const live = new LiveChanges(table, { everyMs: 60_000, soonMs: 1 });
+    // A line, told at once to the stream open then: the first after a quiet spell.
+    const earlier = live.subscribe(() => {});
+    lines = 1;
+    live.look();
+    earlier();
+    // Another, a second later, has to wait its turn; a device opens its stream then, and is told where things stand.
+    now = 2_000;
+    lines = 2;
+    const first = live.subscribe(() => {});
+    const cursor = live.at();
+    first();
+    // Its turn come and gone, the device opens its stream again from that cursor: nothing moved since.
+    now = 8_000;
+    const again = live.subscribe(() => {});
+    expect(live.since(cursor)).toEqual([]);
+    const later = live.at();
+    again();
+    // A line recorded after it is told, whenever it's opened again.
+    lines = 3;
+    now = 9_000;
+    const third = live.subscribe(() => {});
+    expect(live.since(later)).toEqual(["ledger"]);
+    third();
+  });
+
+  test("a burst of them is told twice, once as it begins and once when it may again, not once a line", async () => {
+    const s = stamps();
+    let lines = 0;
+    const table: Stamps = { ...s.table, ledger: coarseStamp(() => lines, 120) };
+    const live = new LiveChanges(table, { everyMs: 60_000, soonMs: 1 });
+    const told: LiveTopic[][] = [];
+    const stop = live.subscribe((topics) => told.push(topics));
+    // (Each wait as long as a starved machine takes to run its timer, as the deadline's test's is.)
+    const until = async (n: number) => {
+      for (const end = Date.now() + 30_000; told.length < n && Date.now() < end; ) await Bun.sleep(5);
+    };
+    lines += 1;
+    live.poke();
+    await until(1);
+    // The rest of the burst at once, as a run's commands come: faster than it may be told again.
+    for (let i = 0; i < 9; i++) {
+      lines += 1;
+      live.poke();
+    }
+    await until(2);
+    await Bun.sleep(300);
+    stop();
+    expect(told).toEqual([["ledger"], ["ledger"]]);
+  }, 40_000);
 });
 
 describe("a deadline a stamp names", () => {

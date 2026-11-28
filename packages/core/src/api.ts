@@ -1789,6 +1789,13 @@ export interface TerminalView {
 /** What a watched terminal sends: its output (base64, as bytes), then its shell's exit code when it ends. */
 export type TerminalEvent = { type: "output"; data: string } | { type: "exit"; code: number };
 
+/** GET /api/ledger: the latest lines, newest first, as the asker may read them. */
+export interface LedgerView {
+  entries: LedgerEntry[];
+  /** The mind's count of events as this was read (FleetView's `events`): absent from a node older than it. */
+  events?: number;
+}
+
 export interface LedgerEntry {
   id: string;
   hlc: string;

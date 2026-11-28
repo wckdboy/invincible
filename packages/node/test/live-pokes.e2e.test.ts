@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type RouteName, routes } from "@invincible/core";
+import { LIVE_LEDGER_MS, type LedgerView, type RouteName, routes } from "@invincible/core";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -176,6 +176,28 @@ describe("the live stream, as the background moves", () => {
       // (Told by the store's own word, within SOON_MS and a little. By the look alone, under 100 ms is one chance in
       // twenty each: six in six, one in 64 million.)
       for (const [topic, ms] of after) expect([topic, ms < 100]).toEqual([topic, true]);
+    } finally {
+      stop.abort();
+    }
+  }, 30_000);
+});
+
+describe("the ledger, as the node records its lines", () => {
+  test("a line recorded is told as `ledger`, within the time it is told at most once in, and its route answers the mind's count", async () => {
+    const stop = new AbortController();
+    const told = await listen(stop.signal);
+    try {
+      const wrote = performance.now();
+      daemon.store.emit(daemon.identity, "ledger.recorded", { class: "read", resource: "sandbox.exec", target: "speed-e2e · true", verdict: "allow" });
+      const heard = () => told.find((m) => m.type === "changed" && m.topics.includes("ledger") && m.at >= wrote);
+      // (At once after a quiet spell; within LIVE_LEDGER_MS if a line was told just before it. live.test holds which.)
+      await until(() => heard() !== undefined, LIVE_LEDGER_MS + 2_000);
+      expect(heard()).toBeDefined();
+      const read = await admin("ledger");
+      const view = (await read.json()) as LedgerView;
+      expect(view.entries[0]?.target).toBe("speed-e2e · true");
+      // The mind's count with it, as the fleet's answer says it: a page shows both from this one read.
+      expect(view.events).toBe(daemon.store.eventCount());
     } finally {
       stop.abort();
     }

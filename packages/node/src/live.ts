@@ -30,8 +30,11 @@ export const SOON_MS = 15;
 /** The longest a timer waits (setTimeout's own bound); a deadline further off is looked at again then. */
 const LONGEST_WAIT_MS = 2 ** 31 - 1;
 
-/** A topic's stamp, and, for one that also moves with the clock, how many ms until it next does (Infinity: never). */
-export type Stamp = (() => string) & { due?: () => number };
+/**
+ * A topic's stamp, and, for one that also moves with the clock, how many ms until it next does (Infinity: never); for
+ * one that holds a move back (coarseStamp), `exact` reads it as it is, moving it there: what a stream's hello is told.
+ */
+export type Stamp = (() => string) & { due?: () => number; exact?: () => string };
 /** Each topic's stamp, as this node reads it. */
 export type Stamps = Record<LiveTopic, Stamp>;
 
@@ -112,7 +115,8 @@ export class LiveChanges {
    */
   subscribe(listener: (topics: LiveTopic[], at: string) => void): () => void {
     if (!this.listeners.size) {
-      const now = this.read();
+      // (Read as it is, a move held back included: this stream's hello is where things stand, and its reader reads them.)
+      const now = this.read(true);
       // What moved while nobody listened: moved now, told to none (a stream opened again from before it is told).
       if (this.kept) this.moved(LIVE_TOPICS.filter((topic) => now[topic] !== this.kept![topic]));
       this.kept = null;
@@ -124,7 +128,7 @@ export class LiveChanges {
       // for the next slice of CPU, a second away. Those already listening are told it now, as that look would have.
       if (this.soon) clearTimeout(this.soon);
       this.soon = null;
-      this.look();
+      this.look(true);
     }
     this.listeners.add(listener);
     return () => {
@@ -145,11 +149,11 @@ export class LiveChanges {
     }, this.o.soonMs ?? SOON_MS);
   }
 
-  /** Reads every stamp and tells whoever listens which moved. */
-  look(): void {
+  /** Reads every stamp and tells whoever listens which moved (`exact`: a move a stamp holds back too, for a hello). */
+  look(exact = false): void {
     const before = this.last;
     if (!before) return;
-    const now = this.read();
+    const now = this.read(exact);
     this.last = now;
     const moved = LIVE_TOPICS.filter((topic) => now[topic] !== before[topic]);
     if (!moved.length) return;
@@ -196,12 +200,13 @@ export class LiveChanges {
     this.last = null;
   }
 
-  private read(): Record<LiveTopic, string> {
+  private read(exact = false): Record<LiveTopic, string> {
     const out = {} as Record<LiveTopic, string>;
     const before = this.last ?? this.kept;
     for (const topic of LIVE_TOPICS) {
       try {
-        out[topic] = this.stamps[topic]();
+        const stamp = this.stamps[topic];
+        out[topic] = exact && stamp.exact ? stamp.exact() : stamp();
         this.failing.delete(topic);
       } catch (error) {
         // Read as unchanged: whatever it would have told, its route still answers.
@@ -237,8 +242,10 @@ export class LiveChanges {
   }
 }
 
-/** What each kind of the mind's events can change, of what the stream tells (most change none of it: the ledger, a loop's run). */
+/** What each kind of the mind's events can change, of what the stream tells (some change none of it: a loop's run). */
 export function mindTopics(kind: string): readonly LiveTopic[] {
+  // (Told coarsely: the server's stamp for it moves at most every LIVE_LEDGER_MS, coarseStamp.)
+  if (kind === "ledger.recorded") return ["ledger"];
   // (A node's name is shown with its sessions on a Mac's screen.)
   if (kind === "fleet.genesis" || kind === "fleet.chained" || kind === "node.profile" || kind.startsWith("device.")) return ["fleet", "screenSessions"];
   if (kind.startsWith("secret.")) return ["secretRequests"];
@@ -297,4 +304,37 @@ export function timedStamp<T>(version: () => number, read: (now: number) => read
     return `${v}.${passed}`;
   };
   return Object.assign(stamp, { due: () => (Number.isFinite(next) ? next - now() : Infinity) });
+}
+
+/**
+ * The stamp of what moves too often to tell each time it does (the ledger's lines, one with each command an agent runs):
+ * it moves as `version` does, but at most once every `everyMs`. The first move after a quiet spell is told at once; the
+ * rest of a busy spell wait, and the stamp says how long until it may move again (Stamp's `due`), so the stream looks
+ * then and the last of them is told too. A stream's hello reads it as it is (`exact`): a stream opened, or opened again,
+ * is where things stand, and a move held back from it then would be told to it later as one since its cursor, a read for
+ * nothing. Read only as the stream looks: nothing of it runs while nobody listens.
+ */
+export function coarseStamp(version: () => number, everyMs: number, now: () => number = Date.now): Stamp {
+  let shown: number | null = null;
+  let movedAt = -Infinity;
+  const stamp = () => {
+    const v = version();
+    const at = now();
+    if (shown === null) shown = v;
+    else if (v !== shown && at - movedAt >= everyMs) {
+      shown = v;
+      movedAt = at;
+    }
+    return String(shown);
+  };
+  const exact = () => {
+    const v = version();
+    if (shown === null) shown = v;
+    else if (v !== shown) {
+      shown = v;
+      movedAt = now();
+    }
+    return String(shown);
+  };
+  return Object.assign(stamp, { due: () => (shown !== null && version() !== shown ? Math.max(0, movedAt + everyMs - now()) : Infinity), exact });
 }
