@@ -54,6 +54,8 @@ import {
   NETWORKS,
   networkCreateArgs,
   OWN_IMAGES,
+  PIPE_END,
+  pipeArgs,
   refreshOrder,
   remadeImage,
   runArgs,
@@ -417,7 +419,7 @@ export interface Piped {
   from: ExecResult;
   to: ExecResult;
   bytes: number;
-  /** More than its `maxBytes` came: both were ended. */
+  /** More than its `maxBytes` came: both sides were ended, their clients here and what they started in their VMs (PIPE_END). */
   cut: boolean;
 }
 
@@ -2187,9 +2189,23 @@ export class SandboxHost {
   /**
    * What one of this host's sandboxes prints, given as it is printed to a command in another as its input, never kept
    * here: another node's task's clone, from its agent's VM into its own, and its changes back (the fifth fabric review's
-   * R5-3). At most `maxBytes` go through, past which both are ended and the pipe is said to be cut. Each side runs as an
-   * exec does (execArgs: its deadline, /work), and both VMs are busy for it. What the receiving side prints comes back,
-   * capped; what either side says on stderr too, redacted.
+   * R5-3). At most `maxBytes` go through, past which the pipe is cut and says so. Each side runs as an exec does, with the
+   * pipe's own tag in its environment (pipeArgs: its deadline, /work), and both VMs are busy for it. What the receiving
+   * side prints comes back, capped; what either side says on stderr too, redacted.
+   *
+   * A side is ended in two steps: its docker client here is killed, and once that client has gone, PIPE_END runs in its
+   * VM. PIPE_END kills everything there with the pipe's tag in its environment, and the process group each such process
+   * leads (the side's `timeout`'s, which holds its whole command). This is needed because Docker leaves what an exec
+   * started running when its client goes (the seventh fabric review's I-c). Both sides are ended at the cut and at the
+   * pipe's deadline. The sending side alone is ended when the receiving side's client exits while the sender is still
+   * going with more to give (a broken pipe: nothing would read it again, so it would wait until its deadline). The pipe
+   * returns only after the ends it asked for are done, each bounded as a terminal's hang-up is (30 s in its VM, 45 s
+   * here), so a pipe that returns cut has nothing of either side left running in either VM, but for what follows.
+   *
+   * An end is best effort, and the pipe returns all the same. Where Docker doesn't run it, what it would have ended runs
+   * on until the side's own deadline in its VM (its `timeout`, timeoutSec), as it did before. So does a side's command
+   * that Docker was still starting when its client went, if it starts only after PIPE_END has looked (a cut that comes
+   * before the receiving side is under way). What PIPE_END can't find (see there) runs on as it would after any exec.
    */
   async pipe(from: { id: string; cmd: string[] }, to: { id: string; cmd: string[] }, opts: { timeoutSec: number; maxBytes: number }): Promise<Piped> {
     if (this.apple) throw new SandboxError("a pipe between two VMs is made on a Linux host with Docker", 424);
@@ -2201,17 +2217,35 @@ export class SandboxHost {
     const ids = [from.id, to.id];
     for (const id of ids) this.busy.set(id, (this.busy.get(id) ?? 0) + 1);
     const started = performance.now();
+    // The pipe's own tag, 128 bits, in the environment of what both sides start: how that is found again to be ended (I-c).
+    const tag = hex(randomBytes(16));
     try {
-      const source = Bun.spawn([this.bin, ...execArgs(from.id, from.cmd, opts.timeoutSec)], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-      const sink = Bun.spawn([this.bin, ...execArgs(to.id, to.cmd, opts.timeoutSec)], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      const source = Bun.spawn([this.bin, ...pipeArgs(from.id, from.cmd, opts.timeoutSec, tag)], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+      const sink = Bun.spawn([this.bin, ...pipeArgs(to.id, to.cmd, opts.timeoutSec, tag)], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      // Each side is ended once: its client killed, then, once that client has gone, PIPE_END in its VM. An end that fails
+      // is the best effort it is, and never the pipe's failure.
+      const ends: Promise<unknown>[] = [];
+      const ender = (id: string, client: { kill(signal: "SIGKILL"): void; exited: Promise<number> }) => {
+        let asked = false;
+        return () => {
+          if (asked) return;
+          asked = true;
+          client.kill("SIGKILL");
+          ends.push(client.exited.then(() => this.docker(execArgs(id, ["sh", "-c", PIPE_END, "end", tag], 30), 45_000)).catch(() => null));
+        };
+      };
+      const endFrom = ender(from.id, source);
+      const endTo = ender(to.id, sink);
       const end = () => {
-        source.kill("SIGKILL");
-        sink.kill("SIGKILL");
+        endFrom();
+        endTo();
       };
       // (Past both deadlines, as an exec's: neither side outlives it, whatever the other does.)
       const timer = setTimeout(end, (opts.timeoutSec + 15) * 1000);
       let bytes = 0;
       let cut = false;
+      // Whether what the sending side gave was read to its end (or to the cut, which has ended both already).
+      let drained = false;
       const carried = (async () => {
         try {
           for await (const chunk of source.stdout) {
@@ -2224,6 +2258,7 @@ export class SandboxHost {
             sink.stdin.write(chunk);
             await sink.stdin.flush();
           }
+          drained = true;
         } catch {
           // (The other side gone: what it exits with says so.)
         } finally {
@@ -2234,9 +2269,18 @@ export class SandboxHost {
           }
         }
       })();
+      // A broken pipe: the receiving side's client has exited while the sending side is still going, its output not read
+      // to its end. Nothing reads it now, so it would wait on its output until its deadline. It is ended, and only in its
+      // own VM: the receiver's client exited because its command did. A sender whose output was all read is let finish,
+      // however soon after it the receiver exits.
+      void sink.exited.then(() => {
+        if (!drained && source.exitCode === null && source.signalCode === null) endFrom();
+      });
       const [fromErr, toOut, toErr, fromCode, toCode] = await Promise.all([readCapped(source.stderr, MAX_OUTPUT), readCapped(sink.stdout, MAX_OUTPUT), readCapped(sink.stderr, MAX_OUTPUT), source.exited, sink.exited, carried]);
       clearTimeout(timer);
       const durationMs = Math.round(performance.now() - started);
+      // (What was ended here is ended in its VM before the pipe says how it went.)
+      await Promise.all(ends);
       return {
         from: { exitCode: fromCode, stdout: "", stderr: redact(fromErr.text), durationMs, truncated: fromErr.truncated },
         to: { exitCode: toCode, stdout: toOut.text, stderr: redact(toErr.text), durationMs, truncated: toOut.truncated || toErr.truncated },

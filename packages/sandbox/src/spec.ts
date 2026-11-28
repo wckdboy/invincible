@@ -342,6 +342,44 @@ export const execArgs = (id: string, cmd: string[], timeoutSec: number): string[
 ];
 
 /**
+ * A side of a pipe between two VMs (SandboxHost.pipe), run as an exec is (execArgs: its deadline, /work), with the pipe's
+ * tag in its environment. What the side starts inherits the tag unless it is given an environment of its own (as the
+ * node's git is), and stays in the process group its `timeout` leads unless it makes one of its own. The tag and that
+ * group are how what the side started is found again in its VM and ended there when the pipe ends it (PIPE_END; the
+ * seventh fabric review's I-c).
+ */
+export const pipeArgs = (id: string, cmd: string[], timeoutSec: number, tag: string): string[] => ["exec", "--env", `INVINCIBLE_PIPE=${tag}`, ...execArgs(id, cmd, timeoutSec).slice(1)];
+
+/**
+ * A pipe's end, run in one of its VMs with the pipe's tag (`sh -c PIPE_END end <tag>`) once a side's docker client has
+ * been killed (SandboxHost.pipe; the seventh fabric review's I-c). Docker leaves what an exec started running when its
+ * client goes, so without this a side's command would run on in its VM until its input ended or its own deadline came.
+ *
+ * Everything with the tag in its environment is killed (SIGKILL), and so is the process group of each such process that
+ * leads its own. That is a side's GNU `timeout`: it makes a group of its own (setpgid), which holds the whole command, the
+ * node's git among it, though git runs with an environment of its own and so without the tag. A group is killed only
+ * where its leader has the tag, never group 0 or 1 or a group an untagged process leads, so nothing else is ended; this
+ * script runs without the tag, and so it is never among what it kills. It looks twice, for anything a tagged process
+ * started between the first look and its kill. The tag is matched whole, as a fixed string, so no other pipe's processes
+ * match it, and one that isn't 32 or more lowercase hex digits is refused (exit 2) before anything is looked at.
+ *
+ * What it can't find runs on: a process that dropped the tag from its environment and also left the group (as a daemon
+ * does) runs on in its VM, as it would after any exec.
+ */
+export const PIPE_END = `t=$1
+case $t in ''|*[!0-9a-f]*) exit 2;; esac
+[ \${#t} -ge 32 ] || exit 2
+tagged() { for d in /proc/[0-9]*; do tr '\\0' '\\n' 2>/dev/null < "$d/environ" | grep -qxF "INVINCIBLE_PIPE=$t" && echo "\${d#/proc/}"; done; }
+for look in 1 2; do
+  for p in $(tagged); do
+    [ "$p" -gt 1 ] || continue
+    [ "$(sed 's/.*) //' "/proc/$p/stat" 2>/dev/null | cut -d' ' -f3)" = "$p" ] && kill -KILL "-$p" 2>/dev/null
+    kill -KILL "$p" 2>/dev/null
+  done
+done
+exit 0`;
+
+/**
  * A login shell on a terminal of its own (bash where the image has it), as `docker exec` runs it under a pseudo-terminal
  * on the host. Nothing bounds its time but its closing: a terminal is yours, open while you use it. Its tag, in the
  * environment of everything it starts, is how what it started is found again when it closes (TERMINAL_HANG_UP).
