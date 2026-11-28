@@ -25,7 +25,7 @@ import { freePort } from "./ports.ts";
 const repo = resolve(import.meta.dir, "../../..");
 const cli = join(repo, "packages/node/src/cli.ts");
 const bin = process.env.INVINCIBLE_QAMP_BIN;
-const pinName = `${process.platform}-${process.arch}` === "linux-x64" ? "QAMP_SHA256_LINUX_X86_64" : `${process.platform}-${process.arch}` === "darwin-arm64" ? "QAMP_SHA256_DARWIN_ARM64" : null;
+const pinName = `${process.platform}-${process.arch}` === "linux-x64" ? "QAMP_SHA256_LINUX_X86_64" : `${process.platform}-${process.arch}` === "linux-arm64" ? "QAMP_SHA256_LINUX_AARCH64" : `${process.platform}-${process.arch}` === "darwin-arm64" ? "QAMP_SHA256_DARWIN_ARM64" : null;
 const pinned = readFileSync(join(repo, "scripts/qamp-pin.sh"), "utf8");
 const pin = pinName ? new RegExp(`^${pinName}=([0-9a-f]{64})$`, "m").exec(pinned)?.[1] ?? null : null;
 /** The release the pin names (QAMP_VERSION): what the binary says it is. */

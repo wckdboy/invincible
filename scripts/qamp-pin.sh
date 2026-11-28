@@ -4,11 +4,13 @@
 # it against the pin for this machine. Sourced by remote-setup.sh, which puts it where the node looks for it, in the
 # service user's Invincible home (<home>/bin/qamp; INVINCIBLE_QAMP_BIN names another). The binary is put in place by a rename,
 # so a bridge still running the old one keeps running.
-QAMP_VERSION=0.2.0
-# qamp-0.2.0-x86_64-unknown-linux-gnu (built in rust:1.100-bookworm, glibc 2.36, its paths remapped; it needs glibc 2.34)
-QAMP_SHA256_LINUX_X86_64=fe6bf7f5bf72dd2d79be9a39b5e3aa15127df86faa9305f31c518c8c5074ee0d
-# qamp-0.2.0-aarch64-apple-darwin (Rust 1.100.0, its paths remapped, ad-hoc signed only)
-QAMP_SHA256_DARWIN_ARM64=f2a3702c7b16299469211aab262d034ad337c35251b5a1e7d1e864547710c9f8
+QAMP_VERSION=0.3.0
+# qamp-0.3.0-x86_64-unknown-linux-gnu (built in rust:1.100-bookworm, glibc 2.36, its paths remapped; it needs glibc 2.34)
+QAMP_SHA256_LINUX_X86_64=c6dbf6c7b2709d4edae11a644025925a4411fae86dcccd29a08d551d44f659cf
+# qamp-0.3.0-aarch64-unknown-linux-gnu (the same, on 64-bit Arm; it needs glibc 2.34)
+QAMP_SHA256_LINUX_AARCH64=b0b1602c8f93ab3b9e7ac44d702a10f5b2b370419469f7e9b2fb575ad4876cfe
+# qamp-0.3.0-aarch64-apple-darwin (Rust 1.100.0, its paths remapped, ad-hoc signed only)
+QAMP_SHA256_DARWIN_ARM64=03578a5b3d5e4ba0b1dd4c75e61f214a30b163a182a827f6f696dc129b6b81ef
 
 # install_qamp <file> <dir>: <dir>/qamp becomes <file>, which must be Q-AMP $QAMP_VERSION's binary for this machine
 # (its pinned SHA-256), or the function fails and leaves <dir> as it was. The copy is what's checked, then renamed.
@@ -16,6 +18,7 @@ install_qamp() {
   local file=$1 into=$2 sha actual
   case "$(uname -s)-$(uname -m)" in
     Linux-x86_64) sha=$QAMP_SHA256_LINUX_X86_64 ;;
+    Linux-aarch64) sha=$QAMP_SHA256_LINUX_AARCH64 ;;
     Darwin-arm64) sha=$QAMP_SHA256_DARWIN_ARM64 ;;
     *) echo "no pinned Q-AMP $QAMP_VERSION for $(uname -s) $(uname -m)" >&2; return 1 ;;
   esac

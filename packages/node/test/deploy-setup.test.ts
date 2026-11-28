@@ -13,6 +13,8 @@ import { basename, join, resolve } from "node:path";
 const script = resolve(import.meta.dir, "../../../scripts/remote-setup.sh");
 // The script installs the Bun it pins (scripts/bun-pin.sh) unless that one is there already: the stand-in says it is.
 const pinned = /^BUN_VERSION=(\S+)$/m.exec(readFileSync(resolve(import.meta.dir, "../../../scripts/bun-pin.sh"), "utf8"))![1]!;
+/** The Q-AMP release scripts/qamp-pin.sh names, as its refusals say it. */
+const qampPinned = /^QAMP_VERSION=(\S+)$/m.exec(readFileSync(resolve(import.meta.dir, "../../../scripts/qamp-pin.sh"), "utf8"))![1]!;
 const root = mkdtempSync(join(tmpdir(), "invincible-deploy-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
@@ -48,7 +50,7 @@ function server(name: string, tests: "pass" | "fail", qamp?: string) {
 test("Q-AMP's binary shipped with a deploy that isn't the pinned one refuses the deploy: nothing installed, nothing tested, app as it was", () => {
   const deploy = server("impostor", "pass", "#!/bin/sh\necho not qamp\n");
   expect(deploy.code).toBe(1);
-  expect(deploy.said).toContain("failed its checksum (it isn't Q-AMP 0.2.0 for this machine): not installed");
+  expect(deploy.said).toContain(`failed its checksum (it isn't Q-AMP ${qampPinned} for this machine): not installed`);
   expect(deploy.said).toContain("Q-AMP's binary wasn't installed: not deploying");
   expect(existsSync(join(deploy.home, ".invincible/bin/qamp"))).toBe(false);
   expect(deploy.testedIn).toBeNull();
