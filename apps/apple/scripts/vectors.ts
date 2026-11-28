@@ -1712,6 +1712,10 @@ const steps = {
     // (Money in two decimals however much: $14.40 of $25.00, never $14.4 of $25.0.)
     { budgetUsd: 25, record: undefined },
     { budgetUsd: 25, record: record(40, 34, [usage("deepseek/deepseek-v4-pro", 4, 20_000_000, 1_000_000)]) },
+    // A handed task's call counted at its most (its provider silent in time): an upper bound, "at most $0.30 of $2.00";
+    // beside a call that reported nothing, neither bound: "about".
+    { budgetUsd: 2, record: record(40, 34, [usage("deepseek/deepseek-v4-pro", 3, 47_200, 60_000, { atMost: 2 })]) },
+    { budgetUsd: undefined, record: record(40, 34, [usage("deepseek/deepseek-v4-pro", 3, 47_200, 60_000, { atMost: 2 }), usage("mistral/large", 2, 1_000, 100, { unknown: 1 })]) },
   ].map(({ budgetUsd, record: r }) => ({ budgetUsd: budgetUsd ?? null, record: r ?? null, words: costWords({ budgetUsd, record: r }, PRICES) })),
 };
 

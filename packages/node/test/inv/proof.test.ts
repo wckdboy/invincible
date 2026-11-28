@@ -64,7 +64,7 @@ describe("the verdict, as an exit code", () => {
 describe("the proof's JSON", () => {
   test("it holds what docs/CLI.md says, in its types: gates with their exits, times and how they ran before; the review; the cost against the budget", () => {
     const shown = proof({ status: "done", verified: true, budgetUsd: 2, record: record("done"), changes: { artifact: "art_3hVZ0iW2kq6mJx0sY1aB4c", files: 2, base: "0".repeat(40) }, output: "Fixed the race in retry(); all tests pass.\n\nReview: Looks right." }, [...worked([1]), ...gated([0]), ...reviewed("pass")]);
-    expect(Object.keys(shown).sort()).toEqual(["agent", "budgetUsd", "changes", "costComplete", "costUsd", "exit", "gates", "ms", "node", "project", "review", "said", "state", "steers", "task", "title", "v", "word"].sort());
+    expect(Object.keys(shown).sort()).toEqual(["agent", "budgetUsd", "changes", "costAtMost", "costComplete", "costUsd", "exit", "gates", "ms", "node", "project", "review", "said", "state", "steers", "task", "title", "v", "word"].sort());
     expect(shown).toMatchObject({
       v: 1,
       task: "task-a1b2c3d4e5f6",
@@ -75,6 +75,7 @@ describe("the proof's JSON", () => {
       review: { verdict: "pass", sameModel: false, notes: 2 },
       changes: { files: 2, artifact: "art_3hVZ0iW2kq6mJx0sY1aB4c" },
       costComplete: true,
+      costAtMost: false,
       budgetUsd: 2,
       ms: 372_000,
       said: "Fixed the race in retry(); all tests pass.",
@@ -83,6 +84,13 @@ describe("the proof's JSON", () => {
     expect(shown.costUsd).toBeCloseTo(0.12, 6);
     expect(shown.gates).toEqual([{ cmd: GATE, exit: 0, ms: 1000, before: 1, failedBefore: true, said: "38 pass" }]);
     expect(JSON.parse(JSON.stringify(shown))).toEqual(shown);
+  });
+
+  test("a handed task's call counted at its most (its provider silent in time) makes its cost an upper bound, and the proof says so", () => {
+    const counted = { ...record("done"), spent: [{ ...record("done").spent[0]!, atMost: 2 }] };
+    const shown = proof({ status: "done", verified: true, record: counted }, []);
+    expect([shown.costComplete, shown.costAtMost]).toEqual([true, true]);
+    expect(proof({ status: "done", verified: true, record: record("done") }, []).costAtMost).toBe(false);
   });
 
   test("what isn't known is null, never guessed: a task not run has no cost, no time and no review", () => {

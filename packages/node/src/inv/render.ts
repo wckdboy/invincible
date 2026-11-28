@@ -1,4 +1,4 @@
-import { plainLine, plainText, moneyLabel, visibleText } from "@invincible/core";
+import { boundWord, plainLine, plainText, moneyLabel, visibleText } from "@invincible/core";
 import type { StateLook } from "../../../../apps/web/src/lib/agent-state.ts";
 import { type StepGroup, workedFor } from "../../../../apps/web/src/lib/steps.ts";
 import type { WorkRow } from "../../../../apps/web/src/lib/work.ts";
@@ -238,7 +238,7 @@ export function proofLines(proof: ProofJson, style: Style): string[] {
     body.push(`steered ${n === 1 ? "once" : `${n} times`}, ${whose} · ${ending}`);
   }
   if (proof.changes) body.push(`change  ${proof.changes.files} ${proof.changes.files === 1 ? "file" : "files"} · kept as ${proof.changes.artifact}`);
-  const money = proof.costUsd === null ? null : `${proof.costComplete ? "" : "at least "}${moneyLabel(proof.costUsd)}`;
+  const money = proof.costUsd === null ? null : `${boundWord(!proof.costComplete, proof.costAtMost)}${moneyLabel(proof.costUsd)}`;
   const spend = money ? (proof.budgetUsd !== null ? `${money} of ${moneyLabel(proof.budgetUsd)}` : money) : proof.budgetUsd !== null ? `budget ${moneyLabel(proof.budgetUsd)}` : null;
   const cost = [spend, proof.ms !== null ? workedFor(proof.ms) : null].filter(Boolean).join(" · ");
   if (cost) body.push(`cost    ${cost}`);

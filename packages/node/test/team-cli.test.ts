@@ -55,6 +55,20 @@ test("a task that has run says what it came to: how it ended, its time, its comm
   ]);
 });
 
+test("a handed task's calls counted at their most (their provider silent in time) are said as upper bounds, in the listing and in the routing report", async () => {
+  // Ultra's first hand-off as it was recorded (28 November 2026), had its two calls been marked so.
+  const spent = [{ role: "tool", model: "deepseek/deepseek-v4-pro", calls: 2, unknown: 0, input: 44_300, output: 57_300, cached: 0, reasoning: 0, atMost: 2 }];
+  const handed = { id: "task-handed000001", room: "forge", assignee: "ada", title: "Write hello.txt", goal: "g", dependsOn: [], gates: [], status: "done", verified: true, progress: "", output: "", error: null, chainId: "c", createdAt: 1, updatedAt: 2, record: { startedAt: 0, endedAt: 49_000, ended: "done", commands: 1, revisions: 0, spent, routing: { began: "engineer", kind: "task" } } };
+  const state = { agents: [member("ada")], rooms: [], deliveries: [], tasks: [handed] };
+  const api = { async call<T>(name: RouteName): Promise<T> { return (name === "prices" ? { prices: { "deepseek/deepseek-v4-pro": { input: 1.32, output: 3.96, cached: 0.044 } } } : state) as T; } };
+  const listed: string[] = [];
+  await teamCommand(api, undefined, [], {}, (line) => listed.push(line));
+  expect(listed[1]).toBe("task-handed000001 · done (verified) · ada · Write hello.txt · 49s · 1 command · at most 102k tokens · at most $0.29");
+  const report: string[] = [];
+  await teamCommand(api, "routing", [], {}, (line) => report.push(line));
+  expect(report[1]).toBe("  Tasks: 1 task, 1 verified, at most $0.29 and 0.8 min a verified task");
+});
+
 test("a task done on a coding plan, or on your own sign-in, costs no money in the listing: those calls are paid for already, as the node and the apps count them", async () => {
   const lines: string[] = [];
   const task = (id: string, model: string) => ({ id, room: "forge", assignee: "ada", title: `Task ${id}`, goal: "g", dependsOn: [], gates: [], status: "done", verified: true, progress: "", output: "", error: null, chainId: "c", createdAt: 1, updatedAt: 2, record: { startedAt: 0, endedAt: 724_000, ended: "done", commands: 8, revisions: 0, spent: [{ role: "engineer", model, calls: 9, unknown: 0, input: 90_000, output: 4000, cached: 0, reasoning: 0 }] } });
@@ -867,7 +881,7 @@ test("`invincible agents routing`, no agent: the team's routing from the node's 
   await teamCommand(api, "routing", [], { json: true }, (line) => json.push(line));
   const report = JSON.parse(json.join("\n"));
   expect([report.v, report.finished, report.unrouted, report.kinds.map((k: { kind: string }) => k.kind), report.probes]).toEqual([1, 7, 1, ["fix", "code"], { tried: 1, held: 1 }]);
-  expect(report.kinds[1].groups[0]).toEqual({ began: "engineer", because: null, tasks: 3, verified: 2, usd: 21, priced: true, minutes: 56, usdPerVerified: 10.5, minutesPerVerified: 28, movedUp: { gate: 1, review: 0, stall: 0, rereads: 1 }, wentRound: 1, interventions: 0, neededYou: 0, interventionsPerVerified: 0 });
+  expect(report.kinds[1].groups[0]).toEqual({ began: "engineer", because: null, tasks: 3, verified: 2, usd: 21, priced: true, atMost: false, minutes: 56, usdPerVerified: 10.5, minutesPerVerified: 28, movedUp: { gate: 1, review: 0, stall: 0, rereads: 1 }, wentRound: 1, interventions: 0, neededYou: 0, interventionsPerVerified: 0 });
   // A coding plan's calls are paid for already (core's moneyPrices, as the node's own money is): no money, and priced.
   const planned: string[] = [];
   await teamCommand({ async call<T>(name: string): Promise<T> { return (name === "prices" ? { prices: {}, plans: ["plan"] } : state) as T; } }, "routing", [], {}, (line) => planned.push(line));

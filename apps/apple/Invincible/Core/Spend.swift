@@ -3,7 +3,8 @@ import Foundation
 /*
  * Model calls and what they cost at your prices (core's spend.ts): a task's record counts its calls by role and model,
  * as the providers reported them; your prices turn the counted tokens into money, and a call that reported nothing, or a
- * model with no price, makes the sum a lower bound. Pure.
+ * model with no price, makes the sum a lower bound; one counted at its most (a handed task's, its provider silent in
+ * time), an upper bound. Pure.
  */
 
 /// The calls one model made in one role (core's UsageLine): `unknown` of them reported no usage, and the counts leave
@@ -17,6 +18,8 @@ struct UsageLine: Codable, Equatable, Hashable, Sendable {
     let output: Int
     let cached: Int
     let reasoning: Int
+    /// Of `calls`, those counted at their most (core's Usage.atMost): the counts include them as upper bounds. Absent: none.
+    var atMost: Int? = nil
 }
 
 /// Your price for a model, in US dollars per million tokens (cached input at the input price where it has none of its own).
@@ -36,6 +39,8 @@ enum Spend {
         let output: Int
         let cached: Int
         let reasoning: Int
+        /// Calls counted at their most: the counts are upper bounds where any are.
+        var atMost: Int = 0
         var tokens: Int { input + output }
         /// No call reported nothing: the counts are the whole of it.
         var complete: Bool { unknown == 0 }
@@ -44,7 +49,8 @@ enum Spend {
     static func total(_ lines: [UsageLine]) -> Total {
         Total(
             calls: lines.reduce(0) { $0 + $1.calls }, unknown: lines.reduce(0) { $0 + $1.unknown }, input: lines.reduce(0) { $0 + $1.input },
-            output: lines.reduce(0) { $0 + $1.output }, cached: lines.reduce(0) { $0 + $1.cached }, reasoning: lines.reduce(0) { $0 + $1.reasoning }
+            output: lines.reduce(0) { $0 + $1.output }, cached: lines.reduce(0) { $0 + $1.cached }, reasoning: lines.reduce(0) { $0 + $1.reasoning },
+            atMost: lines.reduce(0) { $0 + ($1.atMost ?? 0) }
         )
     }
 
@@ -74,6 +80,8 @@ enum Spend {
         let usd: Double
         let unpriced: [String]
         let complete: Bool
+        /// Some call was counted at its most: `usd` is an upper bound for those calls.
+        var atMost: Bool = false
     }
 
     static func cost(_ lines: [UsageLine], _ prices: Prices) -> Cost {
@@ -89,7 +97,13 @@ enum Spend {
             }
             usd += (Double(l.input - l.cached) * p.input + Double(l.cached) * (p.cached ?? p.input) + Double(l.output) * p.output) / 1e6
         }
-        return Cost(usd: usd, unpriced: unpriced.sorted(), complete: unknown == 0 && unpriced.isEmpty)
+        return Cost(usd: usd, unpriced: unpriced.sorted(), complete: unknown == 0 && unpriced.isEmpty, atMost: lines.contains { ($0.atMost ?? 0) > 0 })
+    }
+
+    /// What a figure is, in the word before it (core's boundWord): exact (""), a lower bound ("at least "), an upper bound
+    /// ("at most "), or neither ("about "): some call reported nothing or has no price; some was counted at its most.
+    static func boundWord(lower: Bool, upper: Bool) -> String {
+        upper ? (lower ? "about " : "at most ") : lower ? "at least " : ""
     }
 
     /// Money as every app and the terminal show it (core's moneyLabel, the PWA's moneyWords): always two decimals,

@@ -6,7 +6,7 @@ import { type RunEvent, type RunOptions, type RunRole, runLoop } from "../src/ru
 const sh = (command: string) => `Next.\n\`\`\`sh\n${command}\n\`\`\``;
 
 /** A run whose every model call costs `per` dollars (as its caller prices them), with a script for each role. */
-function priced(engineer: string[], options: Partial<RunOptions>, per = 0.1, complete = true, reviewer = ["PASS\nIt is."]) {
+function priced(engineer: string[], options: Partial<RunOptions>, per = 0.1, complete = true, reviewer = ["PASS\nIt is."], atMost = false) {
   const queues: Record<RunRole, string[]> = { planner: ["1. Do it.\nDone when: it is done."], engineer: [...engineer], reviewer: [...reviewer] };
   let usd = 0;
   const seen: { role: RunRole; messages: ChatMessage[] }[] = [];
@@ -23,7 +23,7 @@ function priced(engineer: string[], options: Partial<RunOptions>, per = 0.1, com
       },
       exec: async () => ({ exitCode: 0, stdout: "ok\n", stderr: "", durationMs: 5, truncated: false }),
       emit: (event) => events.push(event),
-      spentUsd: () => ({ usd, complete }),
+      spentUsd: () => ({ usd, complete, atMost }),
     },
   );
   const told = () => seen.filter((s) => s.role === "engineer").map((s) => s.messages.at(-1)!.content);
@@ -74,6 +74,12 @@ describe("a budget in dollars", () => {
     const q = priced([sh("echo 1"), "DONE\nDone."], { budgetUsd: 5 }, 0.1, false);
     await q.run;
     expect(q.told()[1]).toContain("(Spent at least $0.20 of $5.00: some calls have no price.)");
+  });
+
+  test("when some call was counted at its most (a handed task's, its provider silent in time), what is spent is said to be at most that", async () => {
+    const q = priced([sh("echo 1"), "DONE\nDone."], { budgetUsd: 5 }, 0.1, true, undefined, true);
+    await q.run;
+    expect(q.told()[1]).toContain("(Spent at most $0.20 of $5.00: some calls were counted at their most.)");
   });
 });
 

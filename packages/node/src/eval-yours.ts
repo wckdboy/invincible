@@ -1,4 +1,4 @@
-import { costOf, type ExecResult, looksAtADesktop, type Prices, type SandboxView, spendTotal, type TeamSnapshot, type TeamTaskRecord, type EvalAnswer, type EvalRecord, evalScore, tokensLabel, moneyLabel } from "@invincible/core";
+import { boundWord, costOf, type ExecResult, looksAtADesktop, type Prices, type SandboxView, spendTotal, type TeamSnapshot, type TeamTaskRecord, type EvalAnswer, type EvalRecord, evalScore, tokensLabel, moneyLabel } from "@invincible/core";
 import { RUN_DEFAULTS, testFilesOf } from "@invincible/agents";
 import { inWorkdir, type NodeClient, runId, runOnNode } from "./run-cli.ts";
 import { quote } from "@invincible/agents";
@@ -137,8 +137,9 @@ export async function readCases(node: NodeClient): Promise<YourCases> {
 function costLine(lines: TeamTaskRecord["spent"], prices: Prices): string {
   const total = spendTotal(lines);
   const cost = costOf(lines, prices);
-  const money = cost.complete ? moneyLabel(cost.usd) : cost.usd > 0 ? `at least ${moneyLabel(cost.usd)}` : "no price";
-  return `${tokensLabel(total.tokens)}${total.complete ? "" : "+"} tokens · ${money}`;
+  const money = cost.complete ? `${boundWord(false, cost.atMost)}${moneyLabel(cost.usd)}` : cost.usd > 0 ? `${boundWord(true, cost.atMost)}${moneyLabel(cost.usd)}` : "no price";
+  // (Some unreported: "48.2k+ tokens"; some counted at their most: "at most 48.2k tokens"; both: "about".)
+  return `${total.atMost ? `${boundWord(!total.complete, true)}${tokensLabel(total.tokens)}` : `${tokensLabel(total.tokens)}${total.complete ? "" : "+"}`} tokens · ${money}`;
 }
 
 /** What a case's original run took and cost, in a line. */

@@ -17,6 +17,17 @@ describe("a task's record, in words", () => {
     expect(taskRecordFacts(record, { "plan/m": prices["plan/m"] }).at(-1)).toBe("no price");
   });
 
+  test("a handed task's call counted at its most (its provider silent in time): its tokens and money are upper bounds, and say so; beside an unreported one, neither", () => {
+    // The record keeps it, as the store keeps a record: its schema takes the count (team-store.ts finish).
+    const handed = TeamTaskRecord.parse({ startedAt: 0, endedAt: 49_000, ended: "done", commands: 1, revisions: 0, spent: [{ ...spent[0]!, unknown: 0, atMost: 2 }] });
+    expect(handed.spent[0]!.atMost).toBe(2);
+    expect(taskRecordFacts(handed, prices).slice(-2)).toEqual(["at most 94.0k tokens", "at most $0.05"]);
+    const both = [{ ...spent[0]!, atMost: 2 }, { ...spent[1]!, calls: 2, unknown: 1 }];
+    expect(taskRecordFacts({ startedAt: 0, endedAt: 1000, ended: "done", commands: 1, revisions: 0, spent: both }, prices).slice(-2)).toEqual(["about 101k tokens", "about $0.05"]);
+    // A line from before it (no field) reads as it did.
+    expect(taskRecordFacts(TeamTaskRecord.parse({ startedAt: 0, endedAt: 1000, ended: "done", commands: 1, revisions: 0, spent }), prices).slice(-2)).toEqual(["101k tokens", "$0.05"]);
+  });
+
   test("an ending that isn't done comes first; a provider that reported nothing is said as that; no model call, no money", () => {
     expect(taskRecordFacts({ startedAt: 1000, endedAt: 60_000, ended: "unverified", commands: 1, revisions: 2, spent: [{ ...spent[1]!, unknown: 1, input: 0, output: 0 }] }, prices)).toEqual(["ended unverified", "59s", "1 command, sent back 2 times", "tokens unknown"]);
     // One call of ten unreported: what was counted is a lower bound, and says so.

@@ -1515,7 +1515,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         // What this task's calls have cost so far, at your prices: its own, and its coding tool's through the gateway.
         spentUsd: async () => {
           const cost = costOf(mergeSpend(spent, await deps.toolSpent?.(agent, startedAt)), deps.prices?.() ?? {});
-          return { usd: cost.usd, complete: cost.complete };
+          return { usd: cost.usd, complete: cost.complete, atMost: cost.atMost };
         },
         // (Another node's task's in its own VM, as all its commands are.)
         stopAgent: () => (own ? own.vm.stop() : deps.stopWorker(agent)),

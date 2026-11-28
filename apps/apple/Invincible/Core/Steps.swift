@@ -528,7 +528,7 @@ enum Steps {
         guard let record else { return budget.map { "budget \($0)" } ?? "" }
         let total = Spend.total(record.spent)
         let cost = Spend.cost(record.spent, prices)
-        let money: String? = total.calls == 0 ? nil : total.unknown == total.calls ? "spend unknown" : !cost.unpriced.isEmpty ? "no price" : "\(cost.complete ? "" : "at least ")\(Spend.moneyLabel(cost.usd))"
+        let money: String? = total.calls == 0 ? nil : total.unknown == total.calls ? "spend unknown" : !cost.unpriced.isEmpty ? "no price" : "\(Spend.boundWord(lower: !cost.complete, upper: cost.atMost))\(Spend.moneyLabel(cost.usd))"
         let spent: String? = money.map { money in budget.map { "\(money) of \($0)" } ?? money } ?? (budget.map { "budget \($0)" } ?? (total.calls == 0 ? "no model calls" : nil))
         // (A run of under half a second says no time: never "0s".)
         let ran = record.endedAt - record.startedAt

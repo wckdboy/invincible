@@ -419,10 +419,10 @@ enum Work {
 
     /// What an agent's tasks that ended since `since` cost at your prices, as their runner recorded them: its sum, and
     /// whether it is the whole of it. Nil: none of its tasks ended in that time with a model call counted.
-    static func spentSince(_ tasks: [TeamTask], agent: String, since: Double, prices: Spend.Prices) -> (usd: Double, complete: Bool)? {
+    static func spentSince(_ tasks: [TeamTask], agent: String, since: Double, prices: Spend.Prices) -> (usd: Double, complete: Bool, atMost: Bool)? {
         let lines = tasks.filter { $0.assignee == agent && ($0.record?.endedAt ?? -.infinity) >= since }.flatMap { $0.record!.spent }
         guard lines.contains(where: { $0.calls > $0.unknown }) else { return nil }
         let cost = Spend.cost(lines, prices)
-        return (cost.usd, cost.complete && cost.unpriced.isEmpty)
+        return (cost.usd, cost.complete && cost.unpriced.isEmpty, cost.atMost)
     }
 }

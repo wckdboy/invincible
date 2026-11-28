@@ -134,7 +134,9 @@ transport keys carries all of it:
      bills, and it is counted so. OpenCode reads a stream to its `[DONE]` and goes before the stream ends, and each of
      its calls had been counted at its most: $0.30 for about $0.02 on 28 November 2026. A call whose client goes once
      its answer is generated, before its usage comes, is read on for it for a few seconds, never in the middle of an
-     answer, whose provider would go on generating what no one reads. What its budget can't count is taken out of a
+     answer, whose provider would go on generating what no one reads. A call still counted at its most is marked so on
+     its record's line (`atMost`, how many such calls), and every surface says its tokens and money as an upper bound:
+     "at most $0.30", or "about" beside a call that reported nothing. What its budget can't count is taken out of a
      call where the call means the same without it (R5-4): the providers' own tools, billed per use or run by another
      model, a fallback to another model, and a dearer speed or tier. Codex, which declares OpenAI's web search in every
      call, goes on without it. A background response, chat's web search, a tool_choice for a tool taken out and US-only

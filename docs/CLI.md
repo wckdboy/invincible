@@ -150,8 +150,10 @@ Errors go to stderr as `inv: <what went wrong>`. With `--json` or `--stream`, st
   node, when it was added). **`inv
   seat add`, `inv seat sign-in`:** `{"card"}` (the sign-in's card), then `{"seat", "state"}` once it has ended. **`inv
   seat serve`, `inv seat share`:** `{"seat"}`. **`inv seat remove`:** `{"removed"}`.
-- **`inv cost`:** `{"since", "today": {"usd", "complete"}, "calls": {"usd", "complete"}, "tasks": [{"id", "title",
-  "agent", "project", "usd", "complete", "budgetUsd"}], "total": {"usd", "complete"}}`.
+- **`inv cost`:** `{"since", "today": {"usd", "complete", "atMost"}, "calls": {"usd", "complete", "atMost"}, "tasks":
+  [{"id", "title", "agent", "project", "usd", "complete", "atMost", "budgetUsd"}], "total": {"usd", "complete", "atMost"}}`.
+  `atMost`: some call was counted at its most (a handed task's, its provider silent in time), so `usd` is an upper
+  bound for it; `complete` false, a lower bound; both, neither.
 - **`inv "…"`:** `{"chat", "turn", "model", "text", "stopped"}`.
 - **`inv pair`:** `{"node", "fleet", "device", "name", "paired"}`.
 
@@ -204,6 +206,7 @@ with 1.
   "changes": { "files": 2, "artifact": "art_3hVZ0iW2kq6mJx0sY1aB4c" },
   "costUsd": 0.31,
   "costComplete": true,
+  "costAtMost": false,
   "budgetUsd": 2,
   "ms": 372000,
   "said": "Fixed the race in retry(); all tests pass.",
@@ -233,7 +236,8 @@ with 1.
   nothing was said. A steer changes what is wanted, never what proves it: the verdict follows the gates and the review
   as ever.
 - **`node`, `project`, `changes`, `costUsd`, `budgetUsd` and `ms`** are null when not known.
-  - `costUsd` is at your prices and is a lower bound when `costComplete` is false.
+  - `costUsd` is at your prices. It is a lower bound when `costComplete` is false, an upper bound when `costAtMost` is
+    true (a call of a handed task's counted at its most, its provider silent in time), and neither when both.
   - It is known once the task has ended: the runner records its spend then.
 - **`said`** is the first line of the agent's own report: its words, not proof.
 

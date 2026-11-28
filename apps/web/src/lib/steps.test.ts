@@ -179,6 +179,9 @@ describe("a task's proof and its cost, in one place", () => {
     expect(costWords({ record }, prices)).toBe("$0.31 · 6m 12s");
     expect(costWords({ record }, {})).toBe("no price · 6m 12s");
     expect(costWords({ record: { ...record, spent: [line("a/m", 2, 1, 1_000_000, 100_000)] } }, prices)).toBe("at least $0.31 · 6m 12s");
+    // A handed task's call counted at its most (its provider silent in time): an upper bound; beside an unreported one, neither.
+    expect(costWords({ record: { ...record, spent: [{ ...line("a/m", 3, 0, 1_000_000, 100_000), atMost: 2 }] }, budgetUsd: 2 }, prices)).toBe("at most $0.31 of $2.00 · 6m 12s");
+    expect(costWords({ record: { ...record, spent: [{ ...line("a/m", 3, 1, 1_000_000, 100_000), atMost: 1 }] } }, prices)).toBe("about $0.31 · 6m 12s");
     expect(costWords({ record: { ...record, spent: [] }, budgetUsd: 2 }, prices)).toBe("budget $2.00 · 6m 12s");
     // Nothing counted: said so, never a bare time.
     expect(costWords({ record: { ...record, spent: [] } }, prices)).toBe("no model calls · 6m 12s");

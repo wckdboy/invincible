@@ -409,12 +409,12 @@ export function atAGlance(work: Pick<Attended, "working">, needs: number, its: s
 
 /**
  * What an agent's tasks that ended since `since` cost at your prices, as their runner recorded them: its sum, and
- * whether it is the whole of it (a call that reported nothing, or a model with no price, makes it a lower bound). Null:
- * none of its tasks ended in that time with a model call counted.
+ * whether it is the whole of it (a call that reported nothing, or a model with no price, makes it a lower bound; one
+ * counted at its most, an upper bound: atMost). Null: none of its tasks ended in that time with a model call counted.
  */
-export function spentSince(tasks: readonly Pick<TeamTask, "assignee" | "record">[], agent: string, since: number, prices: Prices): { usd: number; complete: boolean } | null {
+export function spentSince(tasks: readonly Pick<TeamTask, "assignee" | "record">[], agent: string, since: number, prices: Prices): { usd: number; complete: boolean; atMost: boolean } | null {
   const lines = tasks.filter((task) => task.assignee === agent && task.record && task.record.endedAt >= since).flatMap((task) => task.record!.spent as UsageLine[]);
   if (!lines.some((line) => line.calls > line.unknown)) return null;
   const cost = costOf(lines, prices);
-  return { usd: cost.usd, complete: cost.complete && !cost.unpriced.length };
+  return { usd: cost.usd, complete: cost.complete && !cost.unpriced.length, atMost: cost.atMost };
 }

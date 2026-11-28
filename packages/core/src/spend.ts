@@ -6,6 +6,8 @@
  *
  * Nothing here is an estimate. A call whose provider said nothing is counted as a
  * call with unknown usage, and every total built on it is a lower bound that says so.
+ * A handed task's call whose provider said nothing in time is counted at its most
+ * (Usage.atMost), and every total built on it is an upper bound that says so.
  */
 
 /** One model call's tokens, as its provider reported them. */
@@ -18,6 +20,12 @@ export interface Usage {
   cached?: number;
   /** The part of the output that was reasoning, where it says. */
   reasoning?: number;
+  /**
+   * Counted at its most, not as its provider said it: a handed task's call through the gateway whose provider said
+   * nothing of its usage in time (gateway.ts heldUsage, cutUsage), every byte a token or the most it allowed itself.
+   * An upper bound, never an estimate.
+   */
+  atMost?: true;
 }
 
 /** The calls one model made in one role. */
@@ -31,11 +39,15 @@ export interface UsageLine {
   output: number;
   cached: number;
   reasoning: number;
+  /** Of `calls`, those counted at their most (Usage.atMost): the counts include them, as upper bounds. Absent: none. */
+  atMost?: number;
 }
 
 export interface SpendTotal {
   calls: number;
   unknown: number;
+  /** Calls counted at their most: the counts are upper bounds where any are. */
+  atMost: number;
   input: number;
   output: number;
   cached: number;
@@ -74,6 +86,7 @@ export function addUsage(lines: UsageLine[], role: string, model: string, usage:
   line.output += count(usage.output);
   line.cached += Math.min(count(usage.cached), count(usage.input));
   line.reasoning += Math.min(count(usage.reasoning), count(usage.output));
+  if (usage.atMost === true) line.atMost = (line.atMost ?? 0) + 1;
 }
 
 /** Lines added together, line by line (role and model). */
@@ -90,6 +103,7 @@ export function mergeSpend(...sets: readonly (readonly UsageLine[] | null | unde
         line.output += l.output;
         line.cached += l.cached;
         line.reasoning += l.reasoning;
+        if (l.atMost) line.atMost = (line.atMost ?? 0) + l.atMost;
       }
     }
   }
@@ -97,10 +111,11 @@ export function mergeSpend(...sets: readonly (readonly UsageLine[] | null | unde
 }
 
 export function spendTotal(lines: readonly UsageLine[]): SpendTotal {
-  const t = { calls: 0, unknown: 0, input: 0, output: 0, cached: 0, reasoning: 0 };
+  const t = { calls: 0, unknown: 0, atMost: 0, input: 0, output: 0, cached: 0, reasoning: 0 };
   for (const l of lines) {
     t.calls += l.calls;
     t.unknown += l.unknown;
+    t.atMost += l.atMost ?? 0;
     t.input += l.input;
     t.output += l.output;
     t.cached += l.cached;
@@ -150,6 +165,8 @@ export interface Cost {
   unpriced: string[];
   /** Every call was counted and priced: `usd` is the whole of it, not a lower bound. */
   complete: boolean;
+  /** Some call was counted at its most (Usage.atMost): `usd` is an upper bound for those calls. */
+  atMost: boolean;
 }
 
 /** What these calls cost at the owner's prices. Money only where a price is known. */
@@ -167,7 +184,7 @@ export function costOf(lines: readonly UsageLine[], prices: Prices): Cost {
     }
     usd += ((l.input - l.cached) * price.input + l.cached * (price.cached ?? price.input) + l.output * price.output) / 1e6;
   }
-  return { usd, unpriced: [...unpriced].sort(), complete: unknown === 0 && unpriced.size === 0 };
+  return { usd, unpriced: [...unpriced].sort(), complete: unknown === 0 && unpriced.size === 0, atMost: lines.some((l) => (l.atMost ?? 0) > 0) };
 }
 
 /* ---------- how it reads ---------- */
@@ -200,19 +217,29 @@ export function moneyLabel(usd: number): string {
   return usd > 0 && usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
-/** A tally in a line: tokens always, "at least" when some call reported nothing, money only where every price is known.
- * [money]: how it says money (usdLabel where the line is kept; moneyLabel where it is shown). */
+/**
+ * What a figure is, in the word before it: exact (""), a lower bound ("at least ": some call reported nothing, or has
+ * no price), an upper bound ("at most ": some call was counted at its most, Usage.atMost), or neither ("about ": both).
+ * One rule for every surface: the CLI, the PWA and the apps (their ports are held to it by the vectors).
+ */
+export function boundWord(lower: boolean, upper: boolean): "" | "at least " | "at most " | "about " {
+  return upper ? (lower ? "about " : "at most ") : lower ? "at least " : "";
+}
+
+/** A tally in a line: tokens always, "at least" when some call reported nothing, "at most" when some was counted at its
+ * most, money only where every price is known. [money]: how it says money (usdLabel where the line is kept; moneyLabel
+ * where it is shown). */
 export function spendLabel(lines: readonly UsageLine[], prices?: Prices, money: (usd: number) => string = usdLabel): string {
   const t = spendTotal(lines);
   if (!t.calls) return "no model calls";
   if (t.unknown === t.calls) return `tokens unknown (${t.calls} call${t.calls === 1 ? "" : "s"}, none reported by its provider)`;
-  const parts = [`${t.complete ? "" : "at least "}${tokensLabel(t.input)} tokens in${t.cached ? ` (${tokensLabel(t.cached)} cached)` : ""}, ${tokensLabel(t.output)} out${t.reasoning ? ` (${tokensLabel(t.reasoning)} reasoning)` : ""}`];
-  parts.push(`${t.calls} call${t.calls === 1 ? "" : "s"}${t.unknown ? `, ${t.unknown} unreported` : ""}`);
+  const parts = [`${boundWord(!t.complete, t.atMost > 0)}${tokensLabel(t.input)} tokens in${t.cached ? ` (${tokensLabel(t.cached)} cached)` : ""}, ${tokensLabel(t.output)} out${t.reasoning ? ` (${tokensLabel(t.reasoning)} reasoning)` : ""}`];
+  parts.push(`${t.calls} call${t.calls === 1 ? "" : "s"}${t.unknown ? `, ${t.unknown} unreported` : ""}${t.atMost ? `, ${t.atMost} counted at ${t.atMost === 1 ? "its" : "their"} most` : ""}`);
   if (prices) {
     const cost = costOf(lines, prices);
-    if (cost.complete) parts.push(money(cost.usd));
+    if (cost.complete) parts.push(`${boundWord(false, cost.atMost)}${money(cost.usd)}`);
     else if (cost.unpriced.length) parts.push(`${cost.usd > 0 ? `${money(cost.usd)} + ` : ""}no price for ${cost.unpriced.join(", ")}`);
-    else parts.push(`at least ${money(cost.usd)}`);
+    else parts.push(`${boundWord(true, cost.atMost)}${money(cost.usd)}`);
   }
   return parts.join(" · ");
 }

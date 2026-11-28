@@ -15,11 +15,14 @@ data class UsageLine(
     val output: Double,
     val cached: Double,
     val reasoning: Double,
+    /** Of [calls], those counted at their most (core's Usage.atMost): the counts include them as upper bounds. 0: none. */
+    val atMost: Double = 0.0,
 ) {
     companion object {
         fun of(j: Json): UsageLine = UsageLine(
             j["role"].string ?: "", j["model"].string ?: "", j["calls"].double ?: 0.0, j["unknown"].double ?: 0.0,
             j["input"].double ?: 0.0, j["output"].double ?: 0.0, j["cached"].double ?: 0.0, j["reasoning"].double ?: 0.0,
+            j["atMost"].double ?: 0.0,
         )
     }
 }
@@ -36,14 +39,18 @@ data class Price(val input: Double, val output: Double, val cached: Double? = nu
 }
 
 object Spend {
-    data class Total(val calls: Double, val unknown: Double, val input: Double, val output: Double, val cached: Double, val reasoning: Double) {
+    data class Total(val calls: Double, val unknown: Double, val input: Double, val output: Double, val cached: Double, val reasoning: Double, val atMost: Double = 0.0) {
         val tokens: Double get() = input + output
         /** No call reported nothing: the counts are the whole of it. */
         val complete: Boolean get() = unknown == 0.0
     }
 
-    /** What lines came to: their usd at the prices, the models with no price (sorted), and whether it is the whole of it. */
-    data class Cost(val usd: Double, val unpriced: List<String>, val complete: Boolean)
+    /** What lines came to: their usd at the prices, the models with no price (sorted), whether it is the whole of it, and
+     * whether some call was counted at its most (an upper bound for those). */
+    data class Cost(val usd: Double, val unpriced: List<String>, val complete: Boolean, val atMost: Boolean = false)
+
+    /** What a figure is, in the word before it (core's boundWord): exact, "at least ", "at most ", or "about " where both. */
+    fun boundWord(lower: Boolean, upper: Boolean): String = if (upper) (if (lower) "about " else "at most ") else if (lower) "at least " else ""
 
     fun total(lines: List<UsageLine>): Total {
         var calls = 0.0
@@ -52,15 +59,17 @@ object Spend {
         var output = 0.0
         var cached = 0.0
         var reasoning = 0.0
+        var atMost = 0.0
         for (l in lines) {
             calls += l.calls
+            atMost += l.atMost
             unknown += l.unknown
             input += l.input
             output += l.output
             cached += l.cached
             reasoning += l.reasoning
         }
-        return Total(calls, unknown, input, output, cached, reasoning)
+        return Total(calls, unknown, input, output, cached, reasoning, atMost)
     }
 
     /** The price that applies to a model: its own, else its provider's (the provider followed by a slash and a star), else none. */
@@ -85,7 +94,7 @@ object Spend {
             }
             usd += ((l.input - l.cached) * price.input + l.cached * (price.cached ?: price.input) + l.output * price.output) / 1e6
         }
-        return Cost(usd, unpriced.toList(), unknown == 0.0 && unpriced.isEmpty())
+        return Cost(usd, unpriced.toList(), unknown == 0.0 && unpriced.isEmpty(), lines.any { it.atMost > 0.0 })
     }
 
     /**

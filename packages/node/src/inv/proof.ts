@@ -83,6 +83,8 @@ export interface ProofJson {
   changes: { files: number; artifact: string } | null;
   costUsd: number | null;
   costComplete: boolean;
+  /** Some call of it was counted at its most (a handed task's, its provider silent in time): costUsd is an upper bound. */
+  costAtMost: boolean;
   budgetUsd: number | null;
   ms: number | null;
   said: string;
@@ -119,6 +121,7 @@ export function proofFor(task: TeamTask, entries: readonly TeamTrailEntry[], fac
     changes: task.changes ? { files: task.changes.files, artifact: task.changes.artifact } : null,
     costUsd: cost ? Math.round(cost.usd * 1e6) / 1e6 : null,
     costComplete: cost ? cost.complete && !cost.unpriced.length : false,
+    costAtMost: cost?.atMost ?? false,
     budgetUsd: task.budgetUsd ?? null,
     ms: task.record ? Math.max(0, task.record.endedAt - task.record.startedAt) : null,
     said: plainLine(firstLine(task.output)),

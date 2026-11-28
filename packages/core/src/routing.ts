@@ -159,6 +159,8 @@ export interface RoutingTally {
   /** US dollars of what was priced; `priced` false: some call had no price, and this is a lower bound. */
   usd: number;
   priced: boolean;
+  /** Some call was counted at its most (a handed task's, its provider silent in time): `usd` is an upper bound for it. */
+  atMost: boolean;
   minutes: number;
   /** Per verified task (every task's, verified or not): none when none was verified, or when money isn't all priced. */
   usdPerVerified: number | null;
@@ -201,18 +203,20 @@ const beganRank = (key: string) => {
 function tally(tasks: readonly RoutingReportTask[], prices: Prices): RoutingTally {
   let usd = 0;
   let priced = true;
+  let atMost = false;
   let ms = 0;
   for (const task of tasks) {
     const cost = costOf(task.record!.spent, prices);
     usd += cost.usd;
     priced &&= cost.complete;
+    atMost ||= cost.atMost;
     ms += Math.max(0, task.record!.endedAt - task.record!.startedAt);
   }
   const verified = tasks.filter((task) => task.verified).length;
   const minutes = ms / 60_000;
   const interventions = tasks.reduce((sum, task) => sum + interventionCount(task.interventions), 0);
   const neededYou = tasks.filter((task) => interventionCount(task.interventions) > 0).length;
-  return { tasks: tasks.length, verified, usd, priced, minutes, usdPerVerified: verified && priced ? usd / verified : null, minutesPerVerified: verified ? minutes / verified : null, interventions, neededYou, interventionsPerVerified: verified ? interventions / verified : null };
+  return { tasks: tasks.length, verified, usd, priced, atMost, minutes, usdPerVerified: verified && priced ? usd / verified : null, minutesPerVerified: verified ? minutes / verified : null, interventions, neededYou, interventionsPerVerified: verified ? interventions / verified : null };
 }
 
 /** How a node's finished tasks were routed (above): those that finished at `since` or after, where one is given (ms). */

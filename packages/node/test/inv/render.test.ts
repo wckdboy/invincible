@@ -117,6 +117,14 @@ describe("the proof's frame", () => {
     for (const proof of [verified, unproven, sentBack]) expect(proofHead(proof).text).not.toMatch(/Verified|Not verified|Finished without proof/);
   });
 
+  test("its cost says what it is: at most where a handed task's call was counted at its most, at least where one went unreported, about where both", () => {
+    const costLine = (over: object) => proofLines({ ...verified, costUsd: 0.3, ...over }, PLAIN).find((line) => line.trimStart().startsWith("cost"))!;
+    expect(costLine({ costComplete: true, costAtMost: true })).toContain("at most $0.30 of $2.00");
+    expect(costLine({ costComplete: false, costAtMost: false })).toContain("at least $0.30 of $2.00");
+    expect(costLine({ costComplete: false, costAtMost: true })).toContain("about $0.30 of $2.00");
+    expect(costLine({ costComplete: true, costAtMost: false })).toMatch(/cost +\$0\.30 of \$2\.00/);
+  });
+
   test("in a terminal, framed apart from the agent's own words, which follow it and say they are not proof", () => {
     const lines = proofLines(verified, TTY);
     // Exit 0's verdict in the apps' word (since 27 November 2026; it said "Verified · …"): one verdict, one word.

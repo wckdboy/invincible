@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   addUsage,
+  boundWord,
   compareIntervals,
   costed,
   costIndex,
@@ -36,6 +37,23 @@ import {
 const line = (over: Partial<UsageLine> = {}): UsageLine => ({ role: "engineer", model: "p/m", calls: 1, unknown: 0, input: 1000, output: 100, cached: 0, reasoning: 0, ...over });
 
 describe("a tally", () => {
+  test("a call counted at its most (a handed task's, its provider silent in time) is counted so, and every figure on it says it is an upper bound", () => {
+    const lines: UsageLine[] = [];
+    addUsage(lines, "tool", "deepseek/deepseek-v4-pro", { input: 22_000, output: 28_000, atMost: true });
+    addUsage(lines, "tool", "deepseek/deepseek-v4-pro", { input: 5_000, output: 300, cached: 4_800 });
+    expect(lines).toEqual([{ role: "tool", model: "deepseek/deepseek-v4-pro", calls: 2, unknown: 0, input: 27_000, output: 28_300, cached: 4_800, reasoning: 0, atMost: 1 }]);
+    expect([mergeSpend(lines, lines)[0]!.atMost, spendTotal(lines).atMost]).toEqual([2, 1]);
+    const prices = { "deepseek/deepseek-v4-pro": { input: 1.32, output: 3.96, cached: 0.044 } };
+    expect(costOf(lines, prices).atMost).toBe(true);
+    expect(spendLabel(lines, prices, moneyLabel)).toBe("at most 27.0k tokens in (4,800 cached), 28.3k out · 2 calls, 1 counted at its most · at most $0.14");
+    // A line with none (or one from before it) reads as it did: no field, no word.
+    const exact: UsageLine[] = [];
+    addUsage(exact, "tool", "deepseek/deepseek-v4-pro", { input: 5_000, output: 300, cached: 4_800 });
+    expect(["atMost" in exact[0]!, costOf(exact, prices).atMost, spendLabel(exact, prices, moneyLabel)]).toEqual([false, false, "5,000 tokens in (4,800 cached), 300 out · 1 call · $0.0017"]);
+    // One rule for every surface: exact, a lower bound, an upper bound, neither.
+    expect([boundWord(false, false), boundWord(true, false), boundWord(false, true), boundWord(true, true)]).toEqual(["", "at least ", "at most ", "about "]);
+  });
+
   test("counts each call on its role's and model's line; cached and reasoning never exceed what they're part of", () => {
     const lines: UsageLine[] = [];
     addUsage(lines, "engineer", "p/m", { input: 1000, output: 200, cached: 400, reasoning: 50 });
@@ -79,16 +97,16 @@ describe("money as it goes: a coding plan's calls are paid for already", () => {
     // A provider that isn't a plan, though its name begins like one, keeps its price.
     expect(priceFor(moneyPrices({ "opencode/x": { input: 1, output: 1 } }, ["opencode-go"]), "opencode/x")).toEqual({ input: 1, output: 1 });
     const line = { role: "engineer", calls: 1, unknown: 0, input: 1_000_000, output: 1_000_000, cached: 0, reasoning: 0 };
-    expect(costOf([{ ...line, model: "mimo-token/mimo-v2.6-pro" }, { ...line, model: "deepseek/deepseek-v4-pro" }], money)).toEqual({ usd: 2.5, unpriced: [], complete: true });
+    expect(costOf([{ ...line, model: "mimo-token/mimo-v2.6-pro" }, { ...line, model: "deepseek/deepseek-v4-pro" }], money)).toEqual({ usd: 2.5, unpriced: [], complete: true, atMost: false });
   });
 
   test("a coding tool's calls on its own sign-in are a plan's: no price of yours makes them cost money, and none is one for them", () => {
     const yours = { "anthropic/*": { input: 15, output: 75, cached: 1.5 } };
     const line = { role: "tool", model: `${OWN_SIGN_IN_TALLY}/claude-opus-5-5`, calls: 3, unknown: 0, input: 1_000_000, output: 100_000, cached: 0, reasoning: 0 };
     expect(priceFor(moneyPrices(yours, []), line.model)).toEqual({ input: 0, output: 0, cached: 0 });
-    expect(costOf([line], moneyPrices(yours, []))).toEqual({ usd: 0, unpriced: [], complete: true });
+    expect(costOf([line], moneyPrices(yours, []))).toEqual({ usd: 0, unpriced: [], complete: true, atMost: false });
     // At your prices as you set them it has none: what it would have cost is said by the task's plan (its usd).
-    expect(costOf([line], yours)).toEqual({ usd: 0, unpriced: [line.model], complete: false });
+    expect(costOf([line], yours)).toEqual({ usd: 0, unpriced: [line.model], complete: false, atMost: false });
     expect(OWN_SIGN_IN_TALLY).toContain(" ");
   });
 });

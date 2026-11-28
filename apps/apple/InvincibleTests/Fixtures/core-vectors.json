@@ -36391,7 +36391,8 @@
         "since": 1763185000000,
         "spent": {
           "usd": 0.0856,
-          "complete": true
+          "complete": true,
+          "atMost": false
         }
       },
       {
@@ -36399,7 +36400,8 @@
         "since": 1763194000000,
         "spent": {
           "usd": 0.016,
-          "complete": true
+          "complete": true,
+          "atMost": false
         }
       },
       {
@@ -36407,7 +36409,8 @@
         "since": 1763185000000,
         "spent": {
           "usd": 0,
-          "complete": false
+          "complete": false,
+          "atMost": false
         }
       },
       {
@@ -36415,7 +36418,8 @@
         "since": 1763194000000,
         "spent": {
           "usd": 0,
-          "complete": false
+          "complete": false,
+          "atMost": false
         }
       },
       {
@@ -36433,7 +36437,8 @@
         "since": 1763185000000,
         "spent": {
           "usd": 0.00756,
-          "complete": false
+          "complete": false,
+          "atMost": false
         }
       },
       {
@@ -36441,7 +36446,8 @@
         "since": 1763194000000,
         "spent": {
           "usd": 0.00756,
-          "complete": false
+          "complete": false,
+          "atMost": false
         }
       },
       {
@@ -36459,7 +36465,8 @@
         "since": 0,
         "spent": {
           "usd": 0.0856,
-          "complete": true
+          "complete": true,
+          "atMost": false
         }
       }
     ]
@@ -37901,6 +37908,64 @@
           ]
         },
         "words": "$14.40 of $25.00 · 6m 00s"
+      },
+      {
+        "budgetUsd": 2,
+        "record": {
+          "startedAt": 1763197600000,
+          "endedAt": 1763197960000,
+          "ended": "done",
+          "commands": 12,
+          "revisions": 1,
+          "spent": [
+            {
+              "role": "engineer",
+              "model": "deepseek/deepseek-v4-pro",
+              "calls": 3,
+              "unknown": 0,
+              "input": 47200,
+              "output": 60000,
+              "cached": 0,
+              "reasoning": 0,
+              "atMost": 2
+            }
+          ]
+        },
+        "words": "at most $0.17 of $2.00 · 6m 00s"
+      },
+      {
+        "budgetUsd": null,
+        "record": {
+          "startedAt": 1763197600000,
+          "endedAt": 1763197960000,
+          "ended": "done",
+          "commands": 12,
+          "revisions": 1,
+          "spent": [
+            {
+              "role": "engineer",
+              "model": "deepseek/deepseek-v4-pro",
+              "calls": 3,
+              "unknown": 0,
+              "input": 47200,
+              "output": 60000,
+              "cached": 0,
+              "reasoning": 0,
+              "atMost": 2
+            },
+            {
+              "role": "engineer",
+              "model": "mistral/large",
+              "calls": 2,
+              "unknown": 1,
+              "input": 1000,
+              "output": 100,
+              "cached": 0,
+              "reasoning": 0
+            }
+          ]
+        },
+        "words": "about $0.17 · 6m 00s"
       }
     ]
   },

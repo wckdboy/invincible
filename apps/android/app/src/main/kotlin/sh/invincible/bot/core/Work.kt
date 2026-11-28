@@ -506,13 +506,13 @@ object Work {
 
     /** What an agent's tasks that ended since [since] cost at your prices, as their runner recorded them: its sum, and
      * whether it is the whole of it. Null: none of its tasks ended in that time with a model call counted. */
-    data class Spent(val usd: Double, val complete: Boolean)
+    data class Spent(val usd: Double, val complete: Boolean, val atMost: Boolean = false)
 
     fun spentSince(tasks: List<TeamTask>, agent: String, since: Long, prices: Map<String, Price>): Spent? {
         val lines = tasks.filter { it.assignee == agent && it.record != null && it.record.endedAt >= since }.flatMap { it.record!!.spent }
         if (lines.none { it.calls > it.unknown }) return null
         val cost = Spend.costOf(lines, prices)
-        return Spent(cost.usd, cost.complete && cost.unpriced.isEmpty())
+        return Spent(cost.usd, cost.complete && cost.unpriced.isEmpty(), cost.atMost)
     }
 }
 

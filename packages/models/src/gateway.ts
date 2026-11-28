@@ -331,9 +331,10 @@ function heldCall(body: ArrayBuffer, kind: "openai" | "anthropic", rest: string)
 
 /**
  * A held call's usage when its answer said none: every byte it sent an input token, every byte it was answered with an
- * output token. More than any tokenizer makes of them, so its budget never counts it as less than it was.
+ * output token. More than any tokenizer makes of them, so its budget never counts it as less than it was: marked so
+ * (atMost), as every word on it says.
  */
-const heldUsage = (sent: number, answered: number): Usage => ({ input: sent, output: answered });
+const heldUsage = (sent: number, answered: number): Usage => ({ input: sent, output: answered, atMost: true });
 
 /**
  * A held call cut before its answer ended (its client gone, or the answer broken: the fifth fabric review's R5-2): the
@@ -344,6 +345,7 @@ const heldUsage = (sent: number, answered: number): Usage => ({ input: sent, out
 const cutUsage = (said: Usage | null, sent: number, answered: number, allowed: number): Usage => ({
   input: Math.max(said?.input ?? 0, sent),
   output: Math.max(said?.output ?? 0, answered, allowed),
+  atMost: true,
 });
 
 /**

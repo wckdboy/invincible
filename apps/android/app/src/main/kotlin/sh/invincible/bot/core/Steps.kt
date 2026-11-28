@@ -464,7 +464,7 @@ object Steps {
             total.calls == 0.0 -> null
             total.unknown == total.calls -> "spend unknown"
             cost.unpriced.isNotEmpty() -> "no price"
-            else -> "${if (cost.complete) "" else "at least "}${Usage.money(cost.usd)}"
+            else -> "${Spend.boundWord(!cost.complete, cost.atMost)}${Usage.money(cost.usd)}"
         }
         val spent = if (money != null) (if (budget != null) "$money of $budget" else money) else if (budget != null) "budget $budget" else if (total.calls == 0.0) "no model calls" else null
         // (A run of under half a second says no time: never "0s".)

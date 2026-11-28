@@ -270,9 +270,9 @@ describe("the work by attention", () => {
     const record = (endedMinutesAgo: number, spent: ReturnType<typeof line>[]) => ({ startedAt: ago(endedMinutesAgo + 5), endedAt: ago(endedMinutesAgo), ended: "done" as const, commands: 1, revisions: 0, spent });
     const tasks = [task("ada", "done", 10, { record: record(10, [line("a/m", 2, 0)]) }), task("ada", "done", 20, { record: record(20, [line("a/m", 1, 0)]) }), task("ada", "done", 9000, { record: record(9000, [line("a/m", 5, 0)]) }), task("noa", "done", 5, { record: record(5, [line("a/m", 1, 0)]) })];
     const prices = { "a/m": { input: 0.5, output: 0 } };
-    expect(spentSince(tasks, "ada", ago(60), prices)).toEqual({ usd: 1, complete: true });
-    expect(spentSince(tasks, "ada", ago(60), {})).toEqual({ usd: 0, complete: false });
-    expect(spentSince([task("ada", "done", 1, { record: record(1, [line("a/m", 2, 1)]) })], "ada", ago(60), prices)).toEqual({ usd: 0.5, complete: false });
+    expect(spentSince(tasks, "ada", ago(60), prices)).toEqual({ usd: 1, complete: true, atMost: false });
+    expect(spentSince(tasks, "ada", ago(60), {})).toEqual({ usd: 0, complete: false, atMost: false });
+    expect(spentSince([task("ada", "done", 1, { record: record(1, [line("a/m", 2, 1)]) })], "ada", ago(60), prices)).toEqual({ usd: 0.5, complete: false, atMost: false });
     expect(spentSince(tasks, "eli", ago(60), prices)).toBeNull();
     expect(spentSince([task("ada", "done", 1, { record: record(1, [line("a/m", 1, 1)]) })], "ada", ago(60), prices)).toBeNull();
   });

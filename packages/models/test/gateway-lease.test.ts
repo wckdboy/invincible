@@ -309,7 +309,7 @@ test("a held lease's embeddings pass by either route, and are counted as their a
   // answered an output token.
   embeddingsSay = false;
   const said = await held.call("openai/embeddings");
-  expect(held.usage.at(-1)).toEqual({ input: JSON.stringify({ model: "embed-paid", input: "a sentence of the owner's" }).length, output: Buffer.byteLength(said.text) });
+  expect(held.usage.at(-1)).toEqual({ input: JSON.stringify({ model: "embed-paid", input: "a sentence of the owner's" }).length, output: Buffer.byteLength(said.text), atMost: true });
   // A lease not held to models reads an embedding's usage the same way (it was unknown before).
   embeddingsSay = true;
   const plain = embeds();
@@ -371,6 +371,8 @@ test("a held call whose client goes before its answer ends is counted at once at
   // (Every byte sent an input token: at least its prompt, and the stream_options the gateway asked for with it.)
   expect(counted.input).toBeGreaterThanOrEqual(JSON.stringify(ask).length);
   expect(counted.output).toBeGreaterThanOrEqual(4000);
+  // (And it says so: an upper bound, every word on it "at most".)
+  expect(counted.atMost).toBe(true);
   const lines: UsageLine[] = [];
   addUsage(lines, "engineer", "openai/gpt-paid", counted);
   expect(costOf(lines, { "openai/gpt-paid": { input: 10, output: 40 } }).usd).toBeGreaterThan(0);
@@ -486,6 +488,7 @@ test("one whose provider says nothing more once its answer is generated is count
   expect(usage).toHaveLength(1);
   expect(usage[0]!.input).toBeGreaterThanOrEqual(JSON.stringify(ask).length);
   expect(usage[0]!.output).toBeGreaterThanOrEqual(32_000);
+  expect(usage[0]!.atMost).toBe(true);
 });
 
 /*

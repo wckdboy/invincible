@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type ChatMessage, type ClientCall, type ClientResult, type ExecResult, type GateBy, MAX_PROPOSED_GATES, type NamedCheck, type NamedRule, redact, type ResultImage, type RuleDoes } from "@invincible/core";
+import { boundWord, type ChatMessage, type ClientCall, type ClientResult, type ExecResult, type GateBy, MAX_PROPOSED_GATES, type NamedCheck, type NamedRule, redact, type ResultImage, type RuleDoes } from "@invincible/core";
 import { COMPUTER, type ModelMessage, type ToolSpec } from "@invincible/models";
 import { type AgentDriver, type AgentModel, type AgentRunDeps, agentModelName, runAgent } from "./harnesses.ts";
 import { actsOnDesktop } from "./desktop-command.ts";
@@ -94,7 +94,7 @@ export interface RunDeps {
   /** Progress, for whoever is watching. */
   emit?(event: RunEvent): void;
   /** What this run's model calls have cost so far at your prices (`complete`: every call was counted and priced). */
-  spentUsd?(): { usd: number; complete: boolean } | Promise<{ usd: number; complete: boolean }>;
+  spentUsd?(): { usd: number; complete: boolean; atMost?: boolean } | Promise<{ usd: number; complete: boolean; atMost?: boolean }>;
   signal?: AbortSignal;
   /** How to wait before asking a model again (tests pass one that doesn't). */
   sleep?(ms: number): Promise<void>;
@@ -1758,7 +1758,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
   };
 
   /** The budget's state now (null: no budget, or no way to tell what is spent). */
-  const money = async (): Promise<{ usd: number; complete: boolean; budget: number } | null> => {
+  const money = async (): Promise<{ usd: number; complete: boolean; atMost?: boolean; budget: number } | null> => {
     if (o.budgetUsd === undefined || !deps.spentUsd) return null;
     return { ...(await deps.spentUsd()), budget: o.budgetUsd };
   };
@@ -2241,7 +2241,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     const spentNote = async (): Promise<string> => {
       const now = await money();
       if (!now) return "";
-      const spent = `${now.complete ? "" : "at least "}${usd(now.usd)} of ${usd(now.budget)}`;
+      const spent = `${boundWord(!now.complete, now.atMost === true)}${usd(now.usd)} of ${usd(now.budget)}`;
       if (now.usd >= now.budget * 0.8) {
         if (!warned) {
           warned = true;
@@ -2249,7 +2249,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         }
         return `\n\n(Spent ${spent}: wrap up. When the work is done and verified, reply DONE, or GIVE UP and say why: the work stops when the budget is spent.)`;
       }
-      return `\n\n(Spent ${spent}${now.complete ? "" : ": some calls have no price"}.)`;
+      return `\n\n(Spent ${spent}${now.complete ? (now.atMost ? ": some calls were counted at their most" : "") : ": some calls have no price"}.)`;
     };
     /** Spent: the work stops (said once, as an event). */
     let spentOut = false;

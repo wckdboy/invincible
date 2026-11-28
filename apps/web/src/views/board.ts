@@ -1,4 +1,4 @@
-import { moneyPrices, type Prices } from "@invincible/core/spend";
+import { boundWord, moneyPrices, type Prices } from "@invincible/core/spend";
 import type { Ctx } from "../context.ts";
 import { PRIMARY } from "../lib/arrange.ts";
 import { besideChip, withState } from "../lib/agent-state.ts";
@@ -45,7 +45,7 @@ export function agentsHome(ctx: Ctx, root: HTMLElement, scope: Scope): void {
   const weekWords = (seated: Seat, now: Table): string | null => {
     if (!prices || seated.id === PRIMARY || !now.snapshot) return null;
     const spent = spentSince(now.snapshot.tasks, seated.id, Date.now() - 7 * 24 * 3600_000, prices);
-    return spent ? `${spent.complete ? "" : "at least "}${moneyWords(spent.usd)} this week` : null;
+    return spent ? `${boundWord(!spent.complete, spent.atMost)}${moneyWords(spent.usd)} this week` : null;
   };
   let shown = "";
 

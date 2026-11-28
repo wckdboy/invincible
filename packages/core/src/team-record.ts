@@ -1,4 +1,4 @@
-import { costOf, type Prices, spendTotal, tokensLabel, type UsageLine, moneyLabel } from "./spend.ts";
+import { boundWord, costOf, type Prices, spendTotal, tokensLabel, type UsageLine, moneyLabel } from "./spend.ts";
 import { KIND_WORDS, type TaskKind } from "./routing.ts";
 
 /*
@@ -82,11 +82,11 @@ const took = (ms: number): string => {
   return s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s` : `${s}s`;
 };
 
-/** Money at your prices: the whole of it, a lower bound ("at least") when a call went unreported, "no price" when a model that answered has none, nothing when nothing was counted. */
+/** Money at your prices: the whole of it, a lower bound ("at least") when a call went unreported, an upper bound ("at most") when one was counted at its most, "no price" when a model that answered has none, nothing when nothing was counted. */
 function money(total: ReturnType<typeof spendTotal>, cost: ReturnType<typeof costOf>): string {
   if (!total.calls || total.unknown === total.calls) return "";
   if (cost.unpriced.length) return "no price";
-  return `${cost.complete ? "" : "at least "}${moneyLabel(cost.usd)}`;
+  return `${boundWord(!cost.complete, cost.atMost)}${moneyLabel(cost.usd)}`;
 }
 
 /** Why work moved up to the planner's models, as a fact says it (agents' run.ts EscalationWhy: team.ts TeamTaskRouting). */
@@ -127,7 +127,8 @@ export function taskRecordFacts(record: TaskRecordRead, prices: Prices): string[
     // (Under a second, nothing: never "0s".)
     record.endedAt - record.startedAt < 1000 ? "" : took(record.endedAt - record.startedAt),
     `${record.commands} command${record.commands === 1 ? "" : "s"}${record.revisions ? `, sent back ${record.revisions === 1 ? "once" : `${record.revisions} times`}` : ""}`,
-    !total.calls ? "no model calls" : total.unknown === total.calls ? "tokens unknown" : `${tokensLabel(total.tokens)}${total.complete ? "" : "+"} tokens`,
+    // (Some unreported: "48.2k+ tokens", as ever. Some counted at their most: "at most 48.2k tokens"; both, "about".)
+    !total.calls ? "no model calls" : total.unknown === total.calls ? "tokens unknown" : total.atMost ? `${boundWord(!total.complete, true)}${tokensLabel(total.tokens)} tokens` : `${tokensLabel(total.tokens)}${total.complete ? "" : "+"} tokens`,
     money(total, cost),
     ...(record.plan ? taskPlanFacts(record.plan) : []),
     ...(record.routing ? taskRoutingFacts(record.routing) : []),

@@ -76,7 +76,7 @@ function tallyWords(t: RoutingTally): string {
   const counted = `${t.tasks} task${t.tasks === 1 ? "" : "s"}, ${t.verified} verified`;
   if (t.minutesPerVerified === null) return counted;
   const minutes = `${t.minutesPerVerified.toFixed(1)} min a verified task`;
-  return t.usdPerVerified === null ? `${counted}, ${minutes} (money not all priced)` : `${counted}, $${t.usdPerVerified.toFixed(2)} and ${minutes}`;
+  return t.usdPerVerified === null ? `${counted}, ${minutes} (money not all priced)` : `${counted}, ${t.atMost ? "at most " : ""}$${t.usdPerVerified.toFixed(2)} and ${minutes}`;
 }
 
 /** How often you stepped in on a tally's tasks, on how many, and per verified task: the north star (empty: never). */

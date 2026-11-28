@@ -21,6 +21,8 @@ export const UsageLineSchema = z.strictObject({
   output: Count,
   cached: Count,
   reasoning: Count,
+  /** Of its calls, those counted at their most (spend.ts Usage.atMost). Absent: none, or a line from before it. */
+  atMost: Count.optional(),
 }) satisfies z.ZodType<UsageLine>;
 
 /** The most lines one record carries (roles × models that answered, fallbacks included). */

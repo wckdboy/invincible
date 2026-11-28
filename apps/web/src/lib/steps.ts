@@ -1,4 +1,4 @@
-import { costOf, type Prices, spendTotal, type UsageLine } from "@invincible/core/spend";
+import { boundWord, costOf, type Prices, spendTotal, type UsageLine } from "@invincible/core/spend";
 import type { TeamTask, TeamTrailEntry } from "@invincible/core/team";
 import { moneyWords } from "./usage.ts";
 
@@ -539,7 +539,7 @@ export function costWords(task: Pick<TeamTask, "record" | "budgetUsd">, prices: 
   if (!task.record) return budget ? `budget ${budget}` : "";
   const total = spendTotal(task.record.spent as readonly UsageLine[]);
   const cost = costOf(task.record.spent as readonly UsageLine[], prices);
-  const money = !total.calls ? null : total.unknown === total.calls ? "spend unknown" : cost.unpriced.length ? "no price" : `${cost.complete ? "" : "at least "}${moneyWords(cost.usd)}`;
+  const money = !total.calls ? null : total.unknown === total.calls ? "spend unknown" : cost.unpriced.length ? "no price" : `${boundWord(!cost.complete, cost.atMost)}${moneyWords(cost.usd)}`;
   const spent = money ? (budget ? `${money} of ${budget}` : money) : budget ? `budget ${budget}` : !total.calls ? "no model calls" : null;
   // (A run of under half a second says no time: never "0s", which reads as broken.)
   const ran = task.record.endedAt - task.record.startedAt;

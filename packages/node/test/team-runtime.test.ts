@@ -2125,7 +2125,7 @@ test("a run on a plan is on the meter: its tool's own calls are in what the task
   // Its tool's own calls are in what it spent, under its own sign-in's name: no price of yours makes them cost money.
   const own = done.record.spent.filter((l) => l.model.startsWith("own sign-in/"));
   expect(own).toEqual([{ role: "tool", model: "own sign-in/claude-fake-1", calls: 1, unknown: 0, input: 240, output: 24, cached: 0, reasoning: 0 }]);
-  expect(costOf(own, moneyPrices({ "anthropic/*": { input: 15, output: 75, cached: 1.5 }, "claude-fake-1/*": { input: 1, output: 1, cached: 1 } }, []))).toEqual({ usd: 0, unpriced: [], complete: true });
+  expect(costOf(own, moneyPrices({ "anthropic/*": { input: 15, output: 75, cached: 1.5 }, "claude-fake-1/*": { input: 1, output: 1, cached: 1 } }, []))).toEqual({ usd: 0, unpriced: [], complete: true, atMost: false });
   // The plan it ran on: the seat, the share of its five hours the task took, and what Claude Code counts its calls cost.
   expect(done.record.plan).toEqual({ seat: SEAT, kind: "claude-subscription", windows: [{ window: "five_hour", share: 7 }], usd: 0.00144, sessionUsd: 0.00144 });
   // Taken up again in its session: counted from the total its last run ended on, never again from nothing.
