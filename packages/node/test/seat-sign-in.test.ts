@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AGY_SIGN_IN, newNodeIdentity, seatState } from "@invincible/core";
+import { AGY_SIGN_IN, newNodeIdentity, SEAT_LIMITS, seatState } from "@invincible/core";
 import { AGENTS } from "@invincible/agents";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import type { SandboxStream } from "@invincible/sandbox";
@@ -346,6 +346,9 @@ describe("an Antigravity seat's sign-in, Google's to finish", () => {
     await n.settled(() => n.bridge().told.length > 0);
     // (agy starts on no account: it is told nothing of one.)
     expect(n.bridge().told[0]).toEqual({});
+    // Its VM is the one made for the seat's sign-in: the only VM whose mount of its sealed sign-in is writable (a status
+    // check's and a run's never ask it: seat-status.test.ts, seat-runs.test.ts).
+    expect(n.asked.find((a) => a[0] === "vm")).toEqual(["vm", { seat: { id: A, kind: "google-antigravity", runs: 1 }, signsIn: true, network: "online", cpus: 1, memoryGb: 1, ttlMinutes: SEAT_LIMITS.attemptMinutes + 10, run: `seat.${A}` }]);
     n.bridge().say({ type: "card", url: GOOGLE });
     const card = await started;
     expect(card).toMatchObject({ seat: A, kind: "paste-code", url: GOOGLE });

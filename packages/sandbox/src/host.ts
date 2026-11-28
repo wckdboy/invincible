@@ -60,7 +60,9 @@ import {
   remadeImage,
   runArgs,
   type SandboxSpec,
+  SEALS_SIGN_IN,
   SEARCH_SCOPE,
+  seatSealedName,
   seatVolumeName,
   TERMINAL_HANG_UP,
   terminalArgs,
@@ -390,6 +392,8 @@ export interface CreateInput {
 export interface CreateOptions {
   signal?: AbortSignal;
   seat?: SeatVmInput["seat"];
+  /** The VM made for a seat's sign-in (createSeatVm's `signsIn`): its mount of a Gemini seat's sealed sign-in is writable. */
+  signsIn?: true;
   shares?: NonNullable<SandboxSpec["shares"]>;
   /** A VM made for another node's task (createTaskVm's alone): the task it is for, and the agent's VM it is beside. */
   task?: string;
@@ -399,8 +403,13 @@ export interface CreateOptions {
 /** A VM for a seat (createSeatVm): which seat, how many VMs its home may be in at once, and an agent's VM whose /work it shares. */
 export interface SeatVmInput {
   seat: { id: string; kind: SeatKind; runs: number };
-  /** For a run on the seat: the agent's own VM, on this host, whose /work this one uses. None: a VM of its own (a sign-in). */
+  /** For a run on the seat: the agent's own VM, on this host, whose /work this one uses. None: a VM of its own (a sign-in, a status check). */
   shares?: string;
+  /**
+   * The VM made for the seat's sign-in: the only one whose mount of a Gemini seat's sealed sign-in is writable (spec.ts
+   * seatSealed). A status check's and a run's mount it read-only, and one that shares an agent's /work is never this.
+   */
+  signsIn?: true;
   /**
    * Whether the seat's tool calls models through the gateway (false: one that speaks neither OpenAI's API nor
    * Anthropic's, agy on Gemini's): without, its lease carries none of the agent's models (the review of 28 November
@@ -1067,7 +1076,7 @@ export class SandboxHost {
       isolation,
       ...(this.opts.resolvConf ? { resolvConf: this.opts.resolvConf } : {}),
       ...(tokenHash ? { tokenHash } : {}),
-      ...(seated.seat ? { seat: { id: seated.seat.id, kind: seated.seat.kind } } : {}),
+      ...(seated.seat ? { seat: { id: seated.seat.id, kind: seated.seat.kind, ...(seated.signsIn ? { signsIn: true as const } : {}) } } : {}),
       ...(seated.shares ? { shares: seated.shares } : {}),
       ...(seated.task ? { task: seated.task } : {}),
       ...(seated.beside ? { beside: seated.beside } : {}),
@@ -1164,7 +1173,7 @@ export class SandboxHost {
       target: containerName(id),
       verdict: "allow",
       run,
-      detail: `${isolation === "vm" ? "microVM" : "container"} · ${input.network} · ${input.cpus} cpu · ${input.memoryGb} GB · ${seated.shares ? `the /work of ${containerName(seated.shares.sandbox)}` : spec.workspace ? `${diskGb} GB disk` : "unlimited disk"} · ${image}${seated.seat ? ` · seat ${seated.seat.id}'s home` : ""}${models.length ? ` · models: ${models.join(", ")}` : ""}${providers.includes(SEARCH_SCOPE) ? " · web search" : ""}`,
+      detail: `${isolation === "vm" ? "microVM" : "container"} · ${input.network} · ${input.cpus} cpu · ${input.memoryGb} GB · ${seated.shares ? `the /work of ${containerName(seated.shares.sandbox)}` : spec.workspace ? `${diskGb} GB disk` : "unlimited disk"} · ${image}${seated.seat ? ` · seat ${seated.seat.id}'s home${SEALS_SIGN_IN.includes(seated.seat.kind) ? ` and its sealed sign-in, ${seated.signsIn ? "to write" : "read-only"}` : ""}` : ""}${models.length ? ` · models: ${models.join(", ")}` : ""}${providers.includes(SEARCH_SCOPE) ? " · web search" : ""}`,
     });
     return (await this.get(id))!;
   }
@@ -2521,13 +2530,14 @@ export class SandboxHost {
    */
   async createSeatVm(input: SeatVmInput): Promise<SandboxView> {
     if (this.apple) throw new SandboxError("a seat's VM is made on a Linux host with Docker", 424);
+    if (input.signsIn && input.shares) throw new SandboxError("a seat's sign-in is in a VM of its own: one that shares an agent's /work never writes the seat's sealed sign-in", 400);
     const before = this.seating.get(input.seat.id);
     const work = (async () => {
       await before?.catch(() => {});
       const using = await this.seatVms(input.seat.id);
       if (using === null) throw new SandboxError("docker couldn't say which VMs have this seat's home, so none was made", 503);
       if (using.length >= input.seat.runs) throw new SandboxError(`this seat's home is in use (${using.length} VM${using.length === 1 ? "" : "s"}, and it takes ${input.seat.runs} at once): it waits`, 409);
-      await this.seatHome(input.seat.id);
+      await this.seatHome(input.seat.id, input.seat.kind);
       // A run on a seat is the agent's own work: in layout 2 its notes' tree too, never its HOME. (Counted as sharing the
       // store from before its layout is asked, so no move begins under it: R5-1.)
       const seated = async () => {
@@ -2535,7 +2545,7 @@ export class SandboxHost {
         const shares = shared?.tree ? { ...shared, notes: true as const } : shared;
         return this.create(
           { network: input.network, image: HARNESS_IMAGE, cpus: input.cpus, memoryGb: input.memoryGb, ttlMinutes: input.ttlMinutes, persistent: false, run: input.run },
-          { seat: input.seat, ...(shares ? { shares } : {}) },
+          { seat: input.seat, ...(input.signsIn ? { signsIn: true as const } : {}), ...(shares ? { shares } : {}) },
         );
       };
       if (input.shares && this.moving.has(input.shares)) throw new SandboxError("that agent's store is being moved to layout 2: nothing shares it until its move is done or put back", 409);
@@ -2612,17 +2622,23 @@ export class SandboxHost {
     return listed.code === 0 ? listed.stdout.split("\n").map((line) => line.trim()).filter(Boolean) : null;
   }
 
-  /** A seat's home: made the first time, and given to the VMs' user (uid 1000), with nothing else of the host in reach. */
-  private async seatHome(seat: string): Promise<void> {
-    const name = seatVolumeName(seat);
-    if ((await this.docker(["volume", "inspect", name])).code === 0) return;
-    const made = await this.docker(["volume", "create", "--label", `${LABEL}=1`, "--label", `${LABEL}.seat=${seat}`, "--label", `${LABEL}.node=${this.opts.node}`, name]);
-    if (made.code !== 0) throw new SandboxError(`could not make this seat's home: ${redact(made.stderr.trim()).slice(0, 300)}`, 500);
-    // (A new volume is root's: a one-off container, with no network and only the capabilities to hand it over, makes it the VMs' user's alone.)
-    const given = await this.docker(["run", "--rm", "--network", "none", "--user", "0:0", "--cap-drop", "ALL", "--cap-add", "CHOWN", "--cap-add", "FOWNER", "--security-opt", "no-new-privileges:true", "--mount", `type=volume,src=${name},dst=/home-of-seat`, DEFAULT_IMAGE, "sh", "-c", "chown 1000:1000 /home-of-seat && chmod 0700 /home-of-seat"], 120_000);
-    if (given.code !== 0) {
-      await this.docker(["volume", "rm", name]);
-      throw new SandboxError(`could not give this seat's home to the VMs' user: ${redact(given.stderr.trim()).slice(0, 300)}`, 500);
+  /**
+   * A seat's home, and a Gemini seat's sealed sign-in beside it (spec.ts seatSealed): each made the first time (a Gemini
+   * seat's home made before its sealed sign-in gets one with its next VM), and given to the VMs' user (uid 1000), with
+   * nothing else of the host in reach.
+   */
+  private async seatHome(seat: string, kind: SeatKind): Promise<void> {
+    const volumes = [{ name: seatVolumeName(seat), what: "home" }, ...(SEALS_SIGN_IN.includes(kind) ? [{ name: seatSealedName(seat), what: "sealed sign-in" }] : [])];
+    for (const { name, what } of volumes) {
+      if ((await this.docker(["volume", "inspect", name])).code === 0) continue;
+      const made = await this.docker(["volume", "create", "--label", `${LABEL}=1`, "--label", `${LABEL}.seat=${seat}`, "--label", `${LABEL}.node=${this.opts.node}`, name]);
+      if (made.code !== 0) throw new SandboxError(`could not make this seat's ${what}: ${redact(made.stderr.trim()).slice(0, 300)}`, 500);
+      // (A new volume is root's: a one-off container, with no network and only the capabilities to hand it over, makes it the VMs' user's alone.)
+      const given = await this.docker(["run", "--rm", "--network", "none", "--user", "0:0", "--cap-drop", "ALL", "--cap-add", "CHOWN", "--cap-add", "FOWNER", "--security-opt", "no-new-privileges:true", "--mount", `type=volume,src=${name},dst=/home-of-seat`, DEFAULT_IMAGE, "sh", "-c", "chown 1000:1000 /home-of-seat && chmod 0700 /home-of-seat"], 120_000);
+      if (given.code !== 0) {
+        await this.docker(["volume", "rm", name]);
+        throw new SandboxError(`could not give this seat's ${what} to the VMs' user: ${redact(given.stderr.trim()).slice(0, 300)}`, 500);
+      }
     }
   }
 
@@ -2660,17 +2676,21 @@ export class SandboxHost {
     return (this.opts.spawnStream ?? spawnStream)([this.bin, ...execArgs(id, cmd, timeoutSec, { input: true })]);
   }
 
-  /** Remove a seat's home, and the sign-in its tool keeps there: never while a VM has it. */
+  /** Remove a seat's home, and the sign-in its tool keeps there (a Gemini seat's sealed sign-in too): never while a VM has it. */
   async removeSeatHome(seat: string): Promise<void> {
     if (this.apple) return;
     const using = await this.seatVms(seat);
     if (using === null) throw new SandboxError("docker couldn't say which VMs have this seat's home, so it was kept", 503);
     if (using.length) throw new SandboxError("a VM has this seat's home: its run ends first", 409);
-    const name = seatVolumeName(seat);
-    if ((await this.docker(["volume", "inspect", name])).code !== 0) return;
-    const removed = await this.docker(["volume", "rm", name]);
-    if (removed.code !== 0) throw new SandboxError(`could not remove this seat's home: ${redact(removed.stderr.trim()).slice(0, 300)}`, 500);
-    this.opts.ledger({ class: "delete", resource: "docker.volume", target: name, verdict: "allow", detail: "a seat you removed: its home, and the sign-in its tool kept there" });
+    for (const { name, what, detail } of [
+      { name: seatVolumeName(seat), what: "home", detail: "a seat you removed: its home, and the sign-in its tool kept there" },
+      { name: seatSealedName(seat), what: "sealed sign-in", detail: "a seat you removed: its sealed sign-in" },
+    ]) {
+      if ((await this.docker(["volume", "inspect", name])).code !== 0) continue;
+      const removed = await this.docker(["volume", "rm", name]);
+      if (removed.code !== 0) throw new SandboxError(`could not remove this seat's ${what}: ${redact(removed.stderr.trim()).slice(0, 300)}`, 500);
+      this.opts.ledger({ class: "delete", resource: "docker.volume", target: name, verdict: "allow", detail });
+    }
   }
 
   async destroy(id: string, opts: { approvedBy?: string; run?: string } = {}): Promise<Decision> {

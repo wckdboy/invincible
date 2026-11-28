@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { containerRunArgs, HARNESS_IMAGE, LABEL, runArgs, type SandboxSpec, seatEnv, seatHome, seatVolumeName, volumeName } from "../src/index.ts";
+import { containerRunArgs, HARNESS_IMAGE, LABEL, runArgs, type SandboxSpec, seatEnv, seatHome, seatSealed, seatSealedName, seatVolumeName, volumeName } from "../src/index.ts";
 
 /*
  * Seats' homes (core's seats.ts): a volume of its own for each seat, mounted at /seats/<id> in a VM made for a run on it
@@ -46,6 +46,32 @@ describe("a seat's home", () => {
     const agy = runArgs({ ...base, seat: { id: SEAT, kind: "google-antigravity" } });
     expect(envs(agy)).toContain(`INVINCIBLE_AGY_DIR=/seats/${SEAT}/antigravity`);
     expect(envs(agy).some((e) => e.startsWith("CLAUDE_CONFIG_DIR=") || e.startsWith("CODEX_HOME="))).toBe(false);
+  });
+
+  // A run's command could swap agy's sign-in in the seat's home for another Google account's, and every later start of agy
+  // ran on it (SECURITY.md, the Gemini seat). So a Gemini seat's sign-in is sealed in a volume of its own, which only the
+  // VM made for the seat's sign-in can write: a run's VM and a status check's mount it read-only (design (a), 28 November
+  // 2026).
+  test("a Gemini seat's sealed sign-in: a volume of its own beside its home, writable in its sign-in's VM alone, read-only in a run's and a status check's", () => {
+    expect(seatSealedName(SEAT)).toBe(`invincible-seat-${SEAT}.sealed`);
+    expect(seatSealed(SEAT)).toBe(`/seats/${SEAT}.sealed`);
+    const work = `type=volume,src=${volumeName(base.id)},dst=/work`;
+    const home = `type=volume,src=invincible-seat-${SEAT},dst=/seats/${SEAT}`;
+    const sealed = `type=volume,src=invincible-seat-${SEAT}.sealed,dst=/seats/${SEAT}.sealed`;
+    const signIn = runArgs({ ...base, seat: { id: SEAT, kind: "google-antigravity", signsIn: true } });
+    expect(mounts(signIn)).toEqual([work, home, sealed]);
+    const status = runArgs({ ...base, seat: { id: SEAT, kind: "google-antigravity" } });
+    expect(mounts(status)).toEqual([work, home, `${sealed},readonly`]);
+    const run = runArgs({ ...base, seat: { id: SEAT, kind: "google-antigravity" }, shares: { sandbox: "ada0000001", volume: volumeName("ada0000001") } });
+    expect(mounts(run)).toEqual([`type=volume,src=${volumeName("ada0000001")},dst=/work`, home, `${sealed},readonly`]);
+    // Its bridges are told where it is, beside agy's profile.
+    for (const args of [signIn, status, run]) expect(envs(args)).toEqual(expect.arrayContaining([`INVINCIBLE_AGY_DIR=/seats/${SEAT}/antigravity`, `INVINCIBLE_AGY_SEALED=/seats/${SEAT}.sealed`]));
+    // Claude's and Codex's seats have none: their tools keep their sign-ins in the home, as before.
+    for (const kind of ["claude-subscription", "chatgpt-codex"] as const) {
+      const args = runArgs({ ...base, seat: { id: SEAT, kind, signsIn: true } });
+      expect([kind, mounts(args)]).toEqual([kind, [work, home]]);
+      expect(envs(args).some((e) => e.startsWith("INVINCIBLE_AGY_SEALED="))).toBe(false);
+    }
   });
 
   test("only a seat whose sign-in a tool keeps in its home has one: Sign in with ChatGPT's is the node's, a key's is the vault's", () => {

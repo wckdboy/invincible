@@ -98,7 +98,9 @@ export class SeatSignIns {
     const run = `seat.${seat.id}`;
     let vm: string;
     try {
-      vm = (await host.createSeatVm({ seat: { id: seat.id, kind: seat.kind, runs: seatRuns(seat) }, network: "online", cpus: 1, memoryGb: 1, ttlMinutes: SEAT_LIMITS.attemptMinutes + 10, run })).id;
+      // (The VM made for the seat's sign-in: the one VM that may write a Gemini seat's sealed sign-in, which its bridge does
+      // only once agy says the sign-in took. A status check's and a run's VM mount it read-only.)
+      vm = (await host.createSeatVm({ seat: { id: seat.id, kind: seat.kind, runs: seatRuns(seat) }, signsIn: true, network: "online", cpus: 1, memoryGb: 1, ttlMinutes: SEAT_LIMITS.attemptMinutes + 10, run })).id;
     } catch (error) {
       const status = (error as { status?: number }).status;
       throw new SeatError(status === 409 ? "This seat is in use by a run: sign it in once that ends" : `Its VM couldn't be made: ${(error as Error).message}`, status === 409 ? 409 : 503);

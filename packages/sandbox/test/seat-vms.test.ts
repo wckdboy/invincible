@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { containerName, type DockerRunner, HARNESS_IMAGE, LABEL, SandboxHost, seatVolumeName, volumeName } from "../src/index.ts";
+import { containerName, type DockerRunner, HARNESS_IMAGE, LABEL, SandboxHost, seatSealedName, seatVolumeName, volumeName } from "../src/index.ts";
 
 /*
  * A seat's VM (core's seats.ts; SandboxHost.createSeatVm): from the pinned tools' image, with the seat's home mounted,
@@ -168,6 +168,54 @@ describe("a seat's VM", () => {
     const passing = await f.host.create({ network: "online", cpus: 1, memoryGb: 2, ttlMinutes: 30, persistent: false });
     await expect(f.host.createSeatVm({ seat: SEAT, shares: passing.id, ...ask })).rejects.toThrow("that one is not here");
     await expect(f.host.createSeatVm({ seat: SEAT, shares: "nosuch0000", ...ask })).rejects.toThrow("that one is not here");
+  });
+
+  // Design (a) of 28 November 2026: a Gemini seat's sign-in sealed in a volume of its own, which only its sign-in's VM
+  // can write, so what a run does to agy's copy of it reaches no later start (SECURITY.md, the Gemini seat).
+  test("a Gemini seat's sealed sign-in: made and handed over as its home is, writable in its sign-in's VM alone, read-only in a status check's and a run's", async () => {
+    const f = fake();
+    const GEMINI = { id: `st_${"g".repeat(22)}`, kind: "google-antigravity" as const, runs: 1 };
+    const sealed = `type=volume,src=${seatSealedName(GEMINI.id)},dst=/seats/${GEMINI.id}.sealed`;
+    const sealedMount = (args: string[]) => args.filter((arg, i) => args[i - 1] === "--mount" && arg.startsWith(sealed));
+    const handed = () => f.calls.filter((a) => a[0] === "run" && a.includes("--rm")).map((a) => a[a.indexOf("--mount") + 1]);
+    const signIn = await f.host.createSeatVm({ seat: GEMINI, signsIn: true, ...ask });
+    expect(sealedMount(f.runs().at(-1)!)).toEqual([sealed]);
+    expect([f.volumes.has(seatVolumeName(GEMINI.id)), f.volumes.has(seatSealedName(GEMINI.id))]).toEqual([true, true]);
+    // Each a volume of the VMs' user's alone, handed over by its own one-off (no network, two capabilities).
+    expect(handed()).toEqual([`type=volume,src=${seatVolumeName(GEMINI.id)},dst=/home-of-seat`, `type=volume,src=${seatSealedName(GEMINI.id)},dst=/home-of-seat`]);
+    expect(f.ledger.filter((e) => e.class === "create").at(-1)?.detail).toContain(`seat ${GEMINI.id}'s home and its sealed sign-in, to write`);
+    expect((await f.host.destroy(signIn.id, { run: ask.run })).verdict).toBe("allow");
+    // Its status check's VM: read-only.
+    const status = await f.host.createSeatVm({ seat: GEMINI, ...ask });
+    expect(sealedMount(f.runs().at(-1)!)).toEqual([`${sealed},readonly`]);
+    expect(f.ledger.filter((e) => e.class === "create").at(-1)?.detail).toContain(`seat ${GEMINI.id}'s home and its sealed sign-in, read-only`);
+    expect((await f.host.destroy(status.id, { run: ask.run })).verdict).toBe("allow");
+    // A run's, beside its agent's /work: read-only, and one is never made to write it, whatever it is asked.
+    const agent = await f.host.create({ network: "online", cpus: 1, memoryGb: 2, ttlMinutes: 120, persistent: true, run: "arm.team.ada" });
+    await expect(f.host.createSeatVm({ seat: GEMINI, shares: agent.id, signsIn: true, ...ask })).rejects.toThrow("a seat's sign-in is in a VM of its own");
+    const run = await f.host.createSeatVm({ seat: GEMINI, shares: agent.id, ...ask });
+    expect(sealedMount(f.runs().at(-1)!)).toEqual([`${sealed},readonly`]);
+    expect((await f.host.destroy(run.id, { run: ask.run })).verdict).toBe("allow");
+    // Made once: it outlives its VMs, as the home does.
+    expect(handed()).toHaveLength(2);
+    // A Claude seat has none, its sign-in's VM included.
+    await f.host.createSeatVm({ seat: SEAT, signsIn: true, ...ask });
+    expect(f.runs().at(-1)!.some((arg) => arg.includes(".sealed"))).toBe(false);
+    expect(f.volumes.has(seatSealedName(SEAT.id))).toBe(false);
+  });
+
+  test("a Gemini seat whose home was made before its sealed sign-in gets one as its next VM is made; both are removed with the seat, each said", async () => {
+    const f = fake();
+    const GEMINI = { id: `st_${"h".repeat(22)}`, kind: "google-antigravity" as const, runs: 1 };
+    f.volumes.add(seatVolumeName(GEMINI.id));
+    const vm = await f.host.createSeatVm({ seat: GEMINI, ...ask });
+    expect(f.calls.filter((a) => a[0] === "run" && a.includes("--rm")).map((a) => a[a.indexOf("--mount") + 1])).toEqual([`type=volume,src=${seatSealedName(GEMINI.id)},dst=/home-of-seat`]);
+    await expect(f.host.removeSeatHome(GEMINI.id)).rejects.toThrow("a VM has this seat's home");
+    expect(f.volumes.has(seatSealedName(GEMINI.id))).toBe(true);
+    expect((await f.host.destroy(vm.id, { run: ask.run })).verdict).toBe("allow");
+    await f.host.removeSeatHome(GEMINI.id);
+    expect([f.volumes.has(seatVolumeName(GEMINI.id)), f.volumes.has(seatSealedName(GEMINI.id))]).toEqual([false, false]);
+    expect(f.ledger.filter((e) => e.resource === "docker.volume").map((e) => [e.class, e.target])).toEqual([["delete", seatVolumeName(GEMINI.id)], ["delete", seatSealedName(GEMINI.id)]]);
   });
 
   test("a seat's home is removed only when no VM has it, and the ledger says so", async () => {

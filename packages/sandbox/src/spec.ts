@@ -55,8 +55,12 @@ export interface SandboxSpec {
    * VM gets this resolv.conf: the host's upstream resolvers, read-only.
    */
   resolvConf?: string;
-  /** A VM made for a seat (a run on it, or its sign-in): the seat's home mounted, and its tool told where (seatEnv). */
-  seat?: { id: string; kind: SeatKind };
+  /**
+   * A VM made for a seat (a run on it, its status check, or its sign-in): the seat's home mounted, and its tool told where
+   * (seatEnv). `signsIn`: the VM made for its sign-in, the only one whose mount of a Gemini seat's sealed sign-in is
+   * writable (seatSealed).
+   */
+  seat?: { id: string; kind: SeatKind; signsIn?: true };
   /** A VM made for another node's task (createTaskVm): its own, removed as the task ends, by the task it is for. */
   task?: string;
   /**
@@ -189,17 +193,29 @@ export const seatVolumeName = (seat: string) => `invincible-seat-${seat}`;
 export const seatHome = (seat: string) => `/seats/${seat}`;
 
 /**
+ * A Gemini seat's sealed sign-in (design (a), 28 November 2026): a volume of its own beside the seat's home, holding agy's
+ * sign-in as the seat's last sign-in that took left it, and nothing else. Mounted at /seats/<id>.sealed: writable only in
+ * the VM made for the seat's sign-in (`signsIn`), read-only in a run's and a status check's, so what a run does to the
+ * copy each start of agy is given (packages/agents/src/antigravity.ts) never reaches the seat's. (A seat's id has no dot,
+ * so no seat's home is ever named as another's sealed sign-in.)
+ */
+export const SEALS_SIGN_IN: readonly SeatKind[] = ["google-antigravity"];
+export const seatSealedName = (seat: string) => `invincible-seat-${seat}.sealed`;
+export const seatSealed = (seat: string) => `/seats/${seat}.sealed`;
+
+/**
  * Where a seat's tool keeps its sign-in, inside the seat's home, told to the tool by the variable its vendor documents
  * for keeping accounts apart (Anthropic's Authentication page, OpenAI's Codex configuration), or, for Antigravity's CLI,
  * which has none, the profile its bridge runs it in (agy's own --gemini-dir, as T3 Code gives each of its profiles one:
- * packages/agents/src/antigravity.ts). This is the one place that names them: nothing of Invincible's reads, copies or
- * moves what a tool keeps there.
+ * packages/agents/src/antigravity.ts), and the seat's sealed sign-in beside it. This is the one place that names them:
+ * nothing of Invincible's reads, copies or moves what a tool keeps there, but agy's sign-in, which a Gemini seat's sign-in
+ * seals and each start of agy copies in, whole and never opened for what it says (seatSealed).
  */
 export function seatEnv(seat: string, kind: SeatKind): Record<string, string> {
   const home = seatHome(seat);
   if (kind === "claude-subscription") return { CLAUDE_CONFIG_DIR: `${home}/claude` };
   if (kind === "chatgpt-codex") return { CODEX_HOME: `${home}/codex` };
-  if (kind === "google-antigravity") return { INVINCIBLE_AGY_DIR: `${home}/antigravity` };
+  if (kind === "google-antigravity") return { INVINCIBLE_AGY_DIR: `${home}/antigravity`, INVINCIBLE_AGY_SEALED: seatSealed(seat) };
   return {};
 }
 
@@ -270,6 +286,7 @@ export function runArgs(spec: SandboxSpec): string[] {
     "/tmp:rw,nosuid,nodev,size=2g,mode=1777",
     ...storeMounts(spec),
     ...(spec.seat ? ["--mount", `type=volume,src=${seatVolumeName(spec.seat.id)},dst=${seatHome(spec.seat.id)}`] : []),
+    ...(spec.seat && SEALS_SIGN_IN.includes(spec.seat.kind) ? ["--mount", `type=volume,src=${seatSealedName(spec.seat.id)},dst=${seatSealed(spec.seat.id)}${spec.seat.signsIn ? "" : ",readonly"}`] : []),
     "--workdir",
     "/work",
     // Its HOME: /work in layout 1; in layout 2 its own tree, and with it where it installs for itself and its PATH. One
