@@ -156,22 +156,43 @@ transport keys carries all of it:
      - Every command of it, its agent's, its coding tool's and its gates, runs in a VM made for it beside its agent's
        (`packages/node/src/task-vms.ts`, `createTaskVm`; the owner's decision of 27 November 2026, the third
        re-review's R3-1). That VM is made from the agent's VM's image, as big as it (its disk too, where the host
-       holds one to a size) and on its network. It shares nothing of the agent's store (the fifth re-review's R5-3, by
+       holds one to a size) and on its network: beside an online agent it can reach what that agent can, and send its
+       clone, all of HEAD's ancestry, anywhere (the seventh re-review's I-f). It shares nothing of the agent's store
+       (the fifth re-review's R5-3, by
        its first option): its `/work` is a volume of its own, removed with it, and its HOME is its own, in memory. Its
        lease is the task's paid models alone (never your keys, nor its repository), counted under its agent's label, so
        its budget counts what it spends. None of its commands runs in the agent's own VM.
      - **Its repository is a clone of its own** (`packages/agents/src/handed-repo.ts`). As the task starts, the agent's
        side gives the task's worktree as it stands (its changes so far, for a task taken up again) as a git bundle of
-       that one commit's history, never the repository's other branches, tasks or checkpoints, and the task's VM clones
-       it at the same place, its HEAD where the work began. After each step it keeps, and as it ends, its changes since
-       then come back as one patch, and the agent's side applies it to the task's worktree with the node's held git: the
-       worktree is set back to where the work began, with nothing an earlier run left in it, and then `git apply` takes
-       the patch, which writes no path outside the worktree, into a `.git`, or through a link. A patch is applied only
-       once all of it came (its sender done, the pipe not cut, as many bytes kept as were carried), and only up to
-       512 MiB, its binary parts counted as they inflate. One that is cut short, or bigger, is dropped, and the task
-       says its changes couldn't be brought back. Both ways go through the node, one side's output the other's input,
-       never kept on the host (`SandboxHost.pipe`). A task with no repository keeps its files in its own VM, and they go
-       with it.
+       that commit and all of HEAD's ancestry (every commit of the branch the work began on, and whatever it ever held:
+       the seventh re-review's I-e), never the repository's other branches, tasks or checkpoints, and the task's VM
+       clones it at the same place, its HEAD where the work began. After each step it keeps, before each review, and as
+       it ends, its changes since then come back as one patch. The agent's side keeps it in a file of that receive's own
+       and applies it with the node's held git: `git apply --cached` to where the work began alone, in an index of its
+       own, which reads and writes nothing of the worktree and takes no path outside it, into a `.git`, or through a
+       link; then the tree that makes, and nothing else, is made the worktree, a link in the way of one of its paths
+       replaced by a folder, never written through (R7-3, I-a). Each binary part must carry the content of the object
+       it names, checked before git reads the patch, so nothing of it comes from the agent's store, and it counts at
+       what git inflates it to (R7-1, R7-2); a copy or a rename, which carries none of its content and which its send
+       never makes, is refused. A patch is applied only once all of it came (its sender done, the pipe not
+       cut, as many bytes kept in its own file as were carried), and only up to 512 MiB, in bytes and as its binary
+       parts inflate. One that is cut short, or bigger, is dropped, and the task says its changes couldn't be brought
+       back. Every step of the agent's side on that worktree (a bring-back, a checkpoint, a review's evidence, the
+       changes' read) runs one at a time, in order (R7-3). Both ways go through the node, one side's output the
+       other's input, never kept on the host (`SandboxHost.pipe`); a pipe cut at its cap or past its deadline ends both
+       sides' commands in their VMs, not only the node's two clients, and one whose receiving side is gone ends its
+       sender's (I-c). A Kata microVM runs no other exec while an interactive one runs, and the receiving side is one
+       (its input): one that runs on past its input's end there is ended only by its own deadline. The node's own
+       receivers end with their input, which a cut ends at once. A task with no repository keeps its files in its own
+       VM, and they go with it.
+     - **What its review passes is what is shipped** (the seventh re-review's I-b). Its review's evidence is read on its
+       agent's side, on the tree its last bring-back made there, never in its VM, whose processes are the task's own.
+       When the review passes, that tree is what is kept and shipped as verified, and nothing its VM had after it; the
+       worktree there is checked to be that tree still, and short of that the task isn't verified, and says why. Its
+       gates run in its VM, on its clone, and before a submission's gates everything of the task's there is ended (a
+       task whose gates need a server starts it in the gate) and its clone's tree is read as they begin: the review's
+       tree must be that one, so nothing of the task's changes a file under its gates, or between them and the review,
+       and is shipped as verified (the lead's decision for I-b's gates).
      - The VM goes as the task ends, however it ends (done, failed, stopped, its agent paused), and with it everything
        the task started there. When its work ends (a revocation among its ends: your brake), its lease ends and the VM
        is removed at once, the command in flight there with it, never once that command returns (the fifth re-review's
@@ -204,8 +225,10 @@ transport keys carries all of it:
        what its changes put in its worktree (the repository's scripts among them, and a link, which stays a link) is
        there for the agent's later work, which runs it by its own choice, as it would any change it takes. Nothing else
        of the task's reaches its agent's store: not its clone's `.git` (its configuration, its hooks, a repository
-       nested in it), and nothing outside its worktree (its patch is kept under `/work/.agent` only until it is applied
-       or dropped). The node's own git in the agent's repository (a task's setup, its steps' checkpoints, its evidence,
+       nested in it), and nothing outside its worktree (each patch is kept under `/work/.agent`, in a file of its own,
+       only until it is applied or dropped; what a run cut off left there is swept as the task starts again, and as the
+       node starts for each task it can't be running, one that has ended or one it doesn't know: I-d). The node's own
+       git in the agent's repository (a task's setup, its steps' checkpoints, its evidence,
        what it keeps to ship, the patch's apply) holds the repository's configuration off (the fourth re-review's R4-4,
        and the fifth's R5-6): no hook, fsmonitor or signing program written there runs, nor a filter its configuration
        names when the command starts, and a fetch with the agent's lease goes to the gateway alone, nor to a
@@ -457,7 +480,10 @@ answered and a Q-AMP release with the sidecar is pinned.
 - **A handed task's clone of its own (R5-3) has run on real Docker, not yet on a node.** Its scripts give, clone,
   send, receive and apply on real repositories (`handed-repo.test.ts`). On Ultra's Docker 29.10.0, in containers and
   in Kata microVMs, `SandboxHost.pipe` carried a task's clone and its patch between two VMs made from the sandbox image,
-  the patch was applied and the step kept, a pipe past its cap was cut and a side past its deadline ended, in the VMs
-  too, and the image's git is 2.47.3, past CVE-2023-23946's fix to `git apply`'s checks of links
-  (`handed-docker.integration.test.ts`, 27 November 2026). No node has taken a handed task through it yet.
+  the patch was applied and the step kept, a pipe past its cap was cut and a side past its deadline ended, and the
+  image's git is 2.47.3, past CVE-2023-23946's fix to `git apply`'s checks of links
+  (`handed-docker.integration.test.ts`, 27 November 2026). A pipe cut at its cap left nothing of either side running
+  in either VM, the children a side started without the pipe's tag among them, in 0.7 s in containers and 4.2 s in
+  Kata, with the sides' own deadline past the test's (I-c, 28 November 2026). No node has taken a handed task through
+  it yet.
 - **Relays and NAT traversal** (Q-AMP's `feat/relays`) aren't used: nodes reach each other on the tailnet, directly.

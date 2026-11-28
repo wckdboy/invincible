@@ -475,15 +475,29 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
 - **Another node's task writes none of it** (the fifth review's R5-3, by its first option:
   `packages/agents/src/handed-repo.ts`, tested in `handed-repo.test.ts`, `team-runtime.test.ts`, `task-vms.test.ts` and
   `pipe.test.ts`). Its VM shares nothing of the agent's store and its repository is a clone of its own, given the task's
-  worktree and that commit's history alone (one ref's bundle: no other branch, task or checkpoint of the repository's).
-  So its configuration, its hooks, a repository nested in it, and anything it writes outside its worktree stay in its VM
-  and go with it. Only its changes come back, as one patch, which the agent's side applies to the task's worktree with
-  the held git. The worktree is set back to where the work began first, with nothing an earlier run left in it, a file
-  git ignores among them: git apply checks the index alone for a link a path goes through, and would write through one
-  left there. Then `git apply` takes it, refusing it whole for a path outside the worktree, into a `.git`, or through a
-  link. A patch that didn't all come (its sender ended, the pipe cut, fewer bytes kept than were carried), or that is
-  past 512 MiB in bytes or as its binary parts inflate, is dropped and never applied. What the held git doesn't hold off
-  is written only by the agent's own work, which runs as itself anyway:
+  worktree and all of HEAD's ancestry alone (one ref's bundle: every commit of the branch the work began on and
+  whatever it ever held, but no other branch, task or checkpoint of the repository's: the seventh review's I-e). So its
+  configuration, its hooks, a repository nested in it, and anything it writes outside its worktree stay in its VM and go
+  with it. Only its changes come back, as one patch, which the agent's side keeps in a file of that receive's own (by a
+  nonce only it and its apply are given) and applies with the held git:
+  - `git apply --cached` to where the work began alone, in an index of its own: it reads and writes nothing of the
+    worktree, and refuses the patch whole for a path outside the worktree, into a `.git`, or through a link;
+  - then the tree that makes, and nothing else, is made the worktree and its index (`read-tree --reset -u`, which
+    replaces a link in the way of a path it writes with a folder and writes nothing through it), and `clean -ffdx` takes
+    the rest, what git ignores and an untracked nested repository among it. `git apply --index` checks the index alone
+    for a link a path goes through: it wrote through one that another apply on the worktree left there (the seventh
+    review's R7-3), or one inside an untracked nested repository (I-a);
+  - before git reads the patch, each binary part is parsed as git parses it, its size counted as git inflates it (a
+    delta's at what it makes), and its content must be the object it names (a delta's base a blob of where the work
+    began), so nothing comes from the agent's store, and whether the store holds an object is no answer (R7-1, R7-2);
+    a copy or a rename, which carries none of its content and which the clone's send never makes, is refused whole;
+  - every step of the agent's side on that worktree (a bring-back, a checkpoint, a review's evidence, the changes'
+    read) runs one at a time (R7-3).
+  A patch that didn't all come (its sender ended, the pipe cut, fewer bytes kept than were carried), or that is past
+  512 MiB in bytes or as its binary parts inflate, is dropped and never applied. What a run cut off left on the agent's
+  side (a patch, an index, the give's ref) is swept as the task starts again, and as the node starts for each task it
+  can't be running, ended or unknown to it (I-d). What the held git doesn't hold off is written only by the agent's own
+  work, which runs as itself anyway:
   - a nested repository's own filter, which `git add -A` and `git status` run;
   - a filter written between the list of them read just before each git command and that command.
 - **Residual risk.** The workspace is shared by design with a run on a seat, which is the agent's own work: what the
@@ -873,11 +887,17 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       `packages/node/src/task-vms.ts`, `createTaskVm`, tested in `task-vms.test.ts`, `team-layout.test.ts`,
       `team-runtime.test.ts` and `fabric-handoff.e2e.test.ts`). Every command of it, its agent's, its coding tool's
       and its gates, runs in a VM made for it beside its agent's: from the agent's VM's image, as big as it (its disk
-      too, where the host holds one to a size) and on its network, sharing nothing of the agent's store (the fifth
+      too, where the host holds one to a size) and on its network (beside an online agent it can send its clone, all
+      of HEAD's ancestry, anywhere: the seventh re-review's I-f), sharing nothing of the agent's store (the fifth
       re-review's R5-3): a `/work` of its own, removed with it, a HOME of its own in memory, and a clone of its own of
       the repository, whose changes come back as a patch (the held git's section, above; `handed-repo.test.ts`,
       `pipe.test.ts`). Its lease is the task's paid models alone, never your keys nor its repository, counted under
-      its agent's label so that its budget counts what it spends. None of its commands runs in the agent's own VM. The
+      its agent's label so that its budget counts what it spends. None of its commands runs in the agent's own VM. Its
+      review's evidence is read on its agent's side, on the tree brought back for it, and that tree is what is shipped
+      as verified, nothing its VM had after it; the worktree there is checked to be that tree still, or the task isn't
+      verified (the seventh re-review's I-b, `team-runtime.test.ts`). Its gates run in its VM, on its clone: before a
+      submission's gates everything of the task's there is ended and its clone's tree read, and the review's tree must
+      be that one, or the task isn't verified, so nothing of the task's changes a file under its gates and ships. The
       VM goes as the task ends, however it ends, and with it everything the task started there. When its task's work
       ends (a revocation among its ends: your brake), its lease ends and its VM is removed at once, the command in
       flight there with it, never once that command returns (the fifth re-review's I-1, `task-vms.test.ts`). Its lease
@@ -905,7 +925,7 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     - Residual: its VM time isn't counted itself, and what its changes put in its worktree (the repository's scripts
       among them, and a link, which stays a link) is there for the agent's later work, which runs it by its own choice:
       the node's own git there runs none of it, and nothing else of the task's reaches the agent's store (R4-4, R5-3,
-      and layout 2's residual, above).
+      R7-3, and layout 2's residual, above).
   - One node's hand-offs are looked at one at a time, each counted, given and written before the next, so a burst keeps
     these bounds; at most 8 tasks from one node are open on another at once, those waiting their turn counted too (N1),
     and those you take up again by id (R3-6).
