@@ -148,6 +148,9 @@ print(size)`;
  *   git inflates as it reads them (each hunk's size, both ways) and what a delta makes, with the file this check reads
  *   to make it, is held to `limit` before any of it is inflated, read or built: the check's own memory with it. The
  *   patch, which may be as large as the limit, is read a line at a time.
+ * - A copy or a rename (`copy from`, `rename from`) takes its content from a file of `base` and carries none of it, so a
+ *   few KiB of them write that file as many times as they name it, past any limit (R7-2's kind: 64 copies wrote 2 MiB
+ *   at a 64 KiB limit). The clone's send never makes one (`--no-renames`), so a patch with one is refused.
  */
 const BINARY_CHECK = `import base64,hashlib,zlib
 def binary_refused(root, base, path, limit):
@@ -155,6 +158,7 @@ def binary_refused(root, base, path, limit):
     carried = "its changes name content their binary parts don't carry"
     given = "its changes make a binary part from content the task wasn't given"
     over = 'its changes inflate to more than %d bytes' % limit
+    copied = "its changes copy or rename a file, which its clone's send never does"
     method = re.compile(rb'(?:literal|delta)\\s').match
     sized = re.compile(rb'(literal|delta) (0|[1-9][0-9]{0,14})').fullmatch
     held = {}
@@ -262,6 +266,9 @@ def binary_refused(root, base, path, limit):
                 return spelled
             if line.startswith((b'Binary files ', b'Files ')):
                 return carried
+            # (A header line: no line of a hunk starts so, its first character being its kind.)
+            if line.startswith((b'copy from ', b'copy to ', b'rename from ', b'rename to ')):
+                return copied
             if line.startswith(b'index '):
                 index = text(line)
             if text(line) != b'GIT binary patch':

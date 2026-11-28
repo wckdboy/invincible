@@ -436,6 +436,7 @@ const SPELLED = "its changes have a binary part not written as git writes one";
 const CARRIED = "its changes name content their binary parts don't carry";
 const GIVEN = "its changes make a binary part from content the task wasn't given";
 const NO_IDS = "its changes have a binary part without full ids";
+const COPIED = "its changes copy or rename a file, which its clone's send never does";
 const over = (limit: number) => `its changes inflate to more than ${limit} bytes`;
 
 /** `SECRET` on a branch of origin's that the agent's repository holds (REPO_TASK_START fetches them all) and the task is never given; its blob's id. */
@@ -569,6 +570,22 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     const applied = s.apply(patch, 1 << 20);
     expect([applied.status, applied.stderr.trim()]).toEqual([1, CARRIED]);
     expect(existsSync(join(s.root, "copies"))).toBe(false);
+  }, 30_000);
+
+  test("R7-2 D: a copy or a rename of a file, which its clone's send never makes, is refused whole: 64 copies of one would write it 64 times", () => {
+    const LIMIT = 64 << 10;
+    // (A file of the base of half the limit: a copy of it carries none of it, and 64 copies write 32 times the limit.)
+    const s = setUp(committed("pre.txt", Buffer.from(`${"x".repeat(31)}\n`.repeat(1024))));
+    const copy = (to: string) => `diff --git a/pre.txt b/${to}\nsimilarity index 100%\ncopy from pre.txt\ncopy to ${to}\n`;
+    const copies = Array.from({ length: 64 }, (_, i) => copy(`copies/${i}.txt`)).join("");
+    expect(copies.length).toBeLessThan(8 << 10);
+    const applied = s.apply(copies, LIMIT);
+    expect([applied.status, applied.stderr.trim()]).toEqual([1, COPIED]);
+    expect(existsSync(join(s.root, "copies"))).toBe(false);
+    // A rename, which takes its content from the base too and carries none, is refused the same.
+    const renamed = s.apply(`diff --git a/pre.txt b/moved.txt\nsimilarity index 100%\nrename from pre.txt\nrename to moved.txt\n`, LIMIT);
+    expect([renamed.status, renamed.stderr.trim()]).toEqual([1, COPIED]);
+    expect([existsSync(join(s.root, "moved.txt")), existsSync(join(s.root, "pre.txt"))]).toEqual([false, true]);
   }, 30_000);
 
   test("what git diff writes still comes back: a new binary file, as a literal part", () => {
