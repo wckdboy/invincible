@@ -51,6 +51,24 @@ class KeptTableTest {
         assertEquals(1_763_700_123_000, kept.at)
     }
 
+    @Test fun yourAgentsRowCountsWhatWasKeptAsNoAgentsUntilTheNodeAnswers() {
+        // Four waited in the Inbox, one of them Ada's ask for approval, which her own row counts: your agent's row counts
+        // the other three, and its line says three.
+        val adas = listOf(Ask("arm:team.0123456789.ada", "forge", "post"))
+        val now = 1_763_700_200_000
+        val kept = KeptTable.read(Json.parse(KeptTable.of(node, team, turns, adas, waiting = 5, at = 1, inbox = 4).text()), node)!!
+        assertEquals(4, kept.inbox)
+        val restored = Table.restored(kept, Snapshot.of(kept.team), now)
+        assertEquals(3, restored.primaryNeeds)
+        assertEquals(Roster.primaryNow(turns = listOf("Release notes", null), runs = emptyList(), needs = 3, unread = listOf("The importer")), restored.primary)
+        // (One kept before the Inbox's count was says nothing of what needs you until the node answers, never the whole count.)
+        val older = KeptTable.read(Json.parse(KeptTable.of(node, team, turns, adas, waiting = 5, at = 1).text()), node)!!
+        assertNull(older.inbox)
+        val before = Table.restored(older, Snapshot.of(older.team), now)
+        assertEquals(0, before.primaryNeeds)
+        assertEquals(Roster.primaryNow(turns = listOf("Release notes", null), runs = emptyList(), needs = null, unread = listOf("The importer")), before.primary)
+    }
+
     @Test fun keepsNoMoreThanTheAgentsDraws() {
         val text = KeptTable.of(node, team, turns, asks, waiting = 3, at = 1).text()
         // An agent's standing instructions, what the team holds beyond the roster, a chat's words: none of it is kept.

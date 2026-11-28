@@ -36,10 +36,10 @@ object KeptTable {
     )
 
     /** What is kept, as it was said: the node it came from, when, and what the agents draw. */
-    data class Kept(val team: Json, val turns: List<String?>, val unread: List<Json>, val asks: List<Ask>, val waiting: Int, val at: Long)
+    data class Kept(val team: Json, val turns: List<String?>, val unread: List<Json>, val asks: List<Ask>, val waiting: Int, val at: Long, val inbox: Int? = null)
 
     /** The record kept for [node], from what the node last said. */
-    fun of(node: PairedNode, team: Json, turns: Json?, asks: List<Ask>, waiting: Int, at: Long): Json = Json.obj(
+    fun of(node: PairedNode, team: Json, turns: Json?, asks: List<Ask>, waiting: Int, at: Long, inbox: Int? = null): Json = Json.obj(
         "v" to VERSION,
         "origin" to node.origin,
         "device" to node.device,
@@ -50,6 +50,8 @@ object KeptTable {
         "unread" to (turns?.get("unread")?.list?.mapNotNull { it["title"].string }?.map { Json.obj("title" to it) } ?: emptyList<Json>()),
         "asks" to asks.map { Json.obj("by" to it.by, "connector" to it.connector, "tool" to it.tool) },
         "waiting" to waiting,
+        // (What of it is no task's, the Inbox's count: what of that is no agent's is your agent's row's to count.)
+        "inbox" to inbox,
     )
 
     /** What was kept, if it is [node]'s, made with this key, in this version; anything else is nothing. */
@@ -63,6 +65,7 @@ object KeptTable {
             asks = kept["asks"].list.map { Ask(it["by"].string ?: "", it["connector"].string, it["tool"].string) },
             waiting = kept["waiting"].int ?: 0,
             at = kept["at"].long ?: 0,
+            inbox = kept["inbox"].int,
         )
     }
 

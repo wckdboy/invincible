@@ -130,30 +130,45 @@ data class Table(
     val tasks: List<TeamTask> = emptyList(),
     /** Every agent and room for the list that is home, the latest first (Roster.homeRows): from the same answer. */
     val home: List<HomeRow> = emptyList(),
+    /** What waits on you that is no agent's (Roster.primaryNeeds): your agent's row in the list counts it. */
+    val primaryNeeds: Int = 0,
 ) {
     /**
      * The agents after a look at the node: `team` its answer for the team (null: it couldn't be read), `turns` its
-     * answer for the chats, `asks` the approvals waiting and `waiting` everything that waits for you, at `now`. Until the
-     * node has answered for the team, a kept team stays as it was kept, never redrawn with what else came back (an
-     * empty Inbox while the node is away), so it is never taken for the node's word; otherwise its last team is drawn
-     * again with what's new.
+     * answer for the chats, `asks` the approvals waiting and `inbox` what waits for you that is no task's (the Inbox's
+     * count), at `now`. Until the node has answered for the team, a kept team stays as it was kept, never redrawn with
+     * what else came back (an empty Inbox while the node is away), so it is never taken for the node's word; otherwise
+     * its last team is drawn again with what's new.
      */
-    /** After a look at the node: [needs] is what needs you, the one count (AppModel.needsYou), as the primary's line says it. */
-    fun after(team: Snapshot?, turns: Json?, asks: List<Ask>, needs: Int, now: Long, tasks: List<TeamTask>? = null): Table {
+    fun after(team: Snapshot?, turns: Json?, asks: List<Ask>, inbox: Int, now: Long, tasks: List<TeamTask>? = null): Table {
         if (team == null && asOf != null) return this
         val snapshot = team ?: this.snapshot
         val work = if (team != null) tasks ?: emptyList() else this.tasks
         val unread = turns?.let { it["unread"].list } ?: this.unread
+        // (Your agent says, and its row counts, what of it is no agent's: an agent's ask for approval is its own row's.)
+        val owed = Roster.primaryNeeds(inbox, asks, snapshot?.agents?.map { it.id } ?: emptyList())
         val primary = Roster.primaryNow(
             turns = (turns?.let { it["turns"].list } ?: emptyList()).map { it["title"].string },
             runs = emptyList(),
-            needs = needs,
+            needs = owed,
             unread = unread.map { it["title"].string },
         )
         return Table(
             snapshot, snapshot?.let { Roster.rows(it, asks, now) } ?: emptyList(), primary, unread, turns?.get("chats")?.text() ?: chats,
-            tasks = work, home = snapshot?.let { Roster.homeRows(it, asks, now) } ?: emptyList(),
+            tasks = work, home = snapshot?.let { Roster.homeRows(it, asks, now) } ?: emptyList(), primaryNeeds = owed,
         )
+    }
+
+    companion object {
+        /**
+         * The team kept on this phone (KeptTable), as it was kept: drawn the moment the app opens, until the node answers.
+         * What waited that is no agent's is counted as it was kept; one kept before that was says nothing of it.
+         */
+        fun restored(kept: KeptTable.Kept, snapshot: Snapshot, now: Long): Table {
+            val owed = kept.inbox?.let { Roster.primaryNeeds(it, kept.asks, snapshot.agents.map { agent -> agent.id }) }
+            val primary = Roster.primaryNow(turns = kept.turns, runs = emptyList(), needs = owed, unread = kept.unread.map { it["title"].string })
+            return Table(snapshot, Roster.rows(snapshot, kept.asks, now), primary, kept.unread, asOf = kept.at, tasks = TeamTask.all(kept.team), primaryNeeds = owed ?: 0)
+        }
     }
 }
 
@@ -281,20 +296,19 @@ class AppModel(context: Context) {
         val snapshot = runCatching { Snapshot.of(kept.team) }.getOrNull() ?: return
         // (What needs you is one count everywhere: as it was kept, until the node has answered.)
         _needsYou.value = kept.waiting
-        val primary = Roster.primaryNow(turns = kept.turns, runs = emptyList(), needs = kept.waiting, unread = kept.unread.map { it["title"].string })
-        _table.value = Table(snapshot, Roster.rows(snapshot, kept.asks, System.currentTimeMillis()), primary, kept.unread, asOf = kept.at, tasks = TeamTask.all(kept.team))
+        _table.value = Table.restored(kept, snapshot, System.currentTimeMillis())
     }
 
     /** What the node just said of the agents, kept for the next time the app opens (off the main thread). */
-    private fun keep(team: Json, turns: Json?, asks: List<Ask>, waiting: Int) {
+    private fun keep(team: Json, turns: Json?, asks: List<Ask>, waiting: Int, inbox: Int) {
         val node = _paired.value ?: return
         scope.launch(keeper) {
             val now = System.currentTimeMillis()
-            val words = KeptTable.of(node, team, turns, asks, waiting, at = 0).text()
+            val words = KeptTable.of(node, team, turns, asks, waiting, at = 0, inbox = inbox).text()
             if (words == keptWords && now - keptAt < 10 * 60_000L) return@launch
             runCatching {
                 val next = java.io.File(keptFile.parentFile, "agents.json.next")
-                next.writeText(KeptTable.of(node, team, turns, asks, waiting, at = now).text())
+                next.writeText(KeptTable.of(node, team, turns, asks, waiting, at = now, inbox = inbox).text())
                 if (!next.renameTo(keptFile)) error("not kept")
                 keptWords = words
                 keptAt = now
@@ -682,10 +696,13 @@ class AppModel(context: Context) {
             _needsYou.value = needs
             PerfProbe.mark("needs $needs")
         }
-        val table = _table.value.after(team, turnsJson, asks, needs, now, tasks)
+        // (What waits that is no task's, the Inbox's count as the PWA's live.ts counts it: of it, what is no agent's is your
+        // agent's to say and its row's to count.)
+        val inboxCount = Work.needsCount(inbox.actions.size, emptyList(), inbox.pairings.size, inbox.keys.size, inbox.questions.map { it["expires"].long }, inbox.screens.size, inbox.drafts.size, inbox.connectors.size, now)
+        val table = _table.value.after(team, turnsJson, asks, inboxCount, now, tasks)
         if (table != _table.value) _table.value = table
         // (What the node said of the team just now is kept for the next time the app opens: KeptTable.)
-        teamJson?.let { kept -> keep(kept, turnsJson, asks, needs) }
+        teamJson?.let { kept -> keep(kept, turnsJson, asks, needs, inboxCount) }
     }
 
     /** What the work's names, a task's cost and the machine chip read, asked beside the rest and far less often. */

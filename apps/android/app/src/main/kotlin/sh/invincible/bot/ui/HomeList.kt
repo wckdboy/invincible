@@ -119,7 +119,8 @@ fun HomeList(app: AppModel, open: (String) -> Unit, settings: () -> Unit, curren
                     name = Primary.name,
                     line = table.primary.line,
                     time = null,
-                    count = 0,
+                    // (What waits on you that is no agent's: an agent's own asks are counted on its row.)
+                    count = table.primaryNeeds,
                     needs = table.primary.tone == "warn",
                     selected = marked == "chat",
                     face = { PrimaryMark(44.dp) },
