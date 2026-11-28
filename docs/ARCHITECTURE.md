@@ -399,8 +399,10 @@ The run loop is carried and renamed (§10), the most proven part of it:
     command and you watch and take over (the owner's standard, 26 November 2026). One process in the VM holds it
     (deskd: input by XTEST, pictures by MIT-SHM, settling by DAMAGE, the browser over its loopback port), its actions
     named as Anthropic's computer toolset names them; the host speaks to it over one held session per VM, and an
-    agent's plain `desktop …` goes there too. It keeps the window manager and the browser running, says a page's
-    dialog as it opens, and closes apps as a person does before it stops them. Light by default (C1 step 10): the
+    agent's plain `desktop …` goes there too. It keeps the window manager and the browser running, gives a window that
+    appears the focus (never the browser's first, from the desktop's own start, over a window the agent opened after
+    that start), says a page's dialog as it opens, and closes apps as a person does before it stops them. Light by
+    default (C1 step 10): the
     desktop starts on its first use (a desktop task's as its work begins, beside its first model call, so its cold
     start is behind that call: core's `looksToNeedAScreen`), and stops, as `desktop stop` stops it, after 10 minutes
     with nothing asked of it, no one holding it and no one watching it; the next command starts it again, and the

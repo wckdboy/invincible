@@ -54,6 +54,7 @@ OWNER_UID = int(os.environ.get("INVINCIBLE_DESKTOP_OWNER_UID", "1001"))
 # IDLE_STOP s, that no one holds and no one watches, is stopped as `desktop stop` stops it. The next command starts it
 # again, and the agent's next command is told why its screen is fresh. 0 keeps it up.
 IDLE_STOP = float(os.environ.get("INVINCIBLE_DESKTOP_IDLE", "600"))
+BROWSER_CLASS = "Chromium"  # the browser's windows' WM_CLASS, as the desktop's start launches it (Pieces._start)
 ENCODER_COMM = "desktop-stream"  # the stream's encoder: it runs only while someone watches (desktop.c, stream.c)
 IDLE_NOTE = "idle-stopped"  # left in the run directory by a deskd that stopped an unused desktop, for the next to say
 SETTLE_CAP = 3.0  # and is never waited for longer than this
@@ -405,6 +406,11 @@ class Watch(threading.Thread):
     """A second connection to the display, its events read as they come: when the screen was last drawn on (DAMAGE),
     how often, and the windows the window manager lists as they come and go."""
 
+    # The browser's first window, from the desktop's own start, is still to come (none was up as the watcher began);
+    # and the last window of the agent's own that was brought forward (any but the browser's), until then.
+    start_window_due = True
+    agents_window = None
+
     def __init__(self, name=DISPLAY):
         super().__init__(daemon=True, name="watch")
         self.d = Display(name)
@@ -446,9 +452,24 @@ class Watch(threading.Thread):
                 self.gone.append((time.monotonic(), self.known.pop(w)))
         # A window that appears is brought to the front with the focus: the window manager may keep one started just
         # after a click elsewhere behind it (its focus-stealing guard), and an agent's next click would miss it.
-        if self.started:
-            for w in new:
-                self.d.activate(w)
+        # But the browser's first window, from the desktop's own start, comes up a second or so after it: an app the
+        # agent opened meanwhile (its first command, `desktop app editor`) lost the focus to it, and its typing went
+        # nowhere (fresh VMs on Ultra, 28 November 2026). That window never takes the focus from one of the agent's
+        # opened after the start: the agent's is given it back, as the window manager gave the new one the focus.
+        if not self.started:
+            if any((self.known.get(w) or {}).get("app") == BROWSER_CLASS for w in new):
+                self.start_window_due = False
+            return
+        for w in new:
+            browser = (self.known.get(w) or {}).get("app") == BROWSER_CLASS
+            if browser and self.start_window_due:
+                self.start_window_due = False
+                if self.agents_window in now:
+                    self.d.activate(self.agents_window)
+                    continue
+            elif not browser:
+                self.agents_window = w
+            self.d.activate(w)
 
     def run(self):
         ev = XEvent()

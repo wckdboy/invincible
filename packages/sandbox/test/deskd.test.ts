@@ -745,6 +745,36 @@ w._list(); w.started = True; w._list()
 print(json.dumps({"activated": D.activated, "appeared": [a["id"] for _, a in w.appeared]}))`)).toEqual({ activated: [2], appeared: ["0x1", "0x2"] });
   });
 
+  test("the browser's first window, from the desktop's own start, never takes the focus from a window the agent opened after that start", () => {
+    // (Fresh Kata VMs on Ultra, 28 November 2026, 3 of 3: `desktop app editor` as the first command, the browser the
+    // desktop's start launched came up a second later, full screen, and the editor lost the focus to it: the agent's
+    // next `desktop type` found nothing that takes text.)
+    const watched = (lists: { id: number; app: string }[][]) => py(`
+w = d.Watch.__new__(d.Watch)
+import threading; w.lock = threading.Lock(); w.known = {}; w.appeared = []; w.gone = []; w.started = False
+lists = ${JSON.stringify(lists)}
+apps = {x["id"]: x["app"] for l in lists for x in l}
+class D:
+    def clients(self): return [x["id"] for x in lists.pop(0)]
+    def window(self, x): return {"id": hex(x), "title": "w%d" % x, "app": apps[x], "dialog": False, "box": [0, 0, 10, 10]}
+    activated = []
+    def activate(self, x): D.activated.append(x)
+w.d = D()
+w._list(); w.started = True
+while lists: w._list()
+print(json.dumps(D.activated))`) as number[];
+    const editor = { id: 1, app: "Mousepad" };
+    const browser = { id: 2, app: "Chromium" };
+    // The editor first, then the start's browser: the editor keeps the focus (given back to it, as the window manager
+    // gives a new window the focus of its own accord); a browser window after that one is brought forward as any is.
+    expect(watched([[], [editor], [editor, browser], [editor, browser, { id: 3, app: "Chromium" }]])).toEqual([1, 1, 3]);
+    // The start's browser alone, or before any window of the agent's: brought forward, as before.
+    expect(watched([[], [browser], [browser, editor]])).toEqual([2, 1]);
+    // A browser up before the watcher began (deskd started again beside it) is no start's window to come: later apps
+    // and browser windows are brought forward as any is.
+    expect(watched([[browser], [browser, editor], [browser, editor, { id: 3, app: "Chromium" }]])).toEqual([1, 3]);
+  });
+
   test("a browser whose process lingers after it was killed, but whose port doesn't answer, is not running: it is started again", () => {
     expect(py(`
 p = d.Pieces(home="/work")
