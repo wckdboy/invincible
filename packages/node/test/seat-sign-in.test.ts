@@ -198,6 +198,39 @@ describe("a Claude seat's sign-in", () => {
     }
   });
 
+  // The second re-check of 28 November 2026, N3: an attempt that didn't take asked the tool how the seat stands, and on a
+  // status naming no account (Codex's account/read answering late, Claude's auth status with no org) took it for another
+  // account's and ran the tool's own sign-out. A sign-in that didn't take signs no seat out: only you do.
+  test("a sign-in cancelled on a ready seat whose tool then names no account never signs it out: Claude's and Codex's", async () => {
+    for (const kind of ["claude-subscription", "chatgpt-codex"] as const) {
+      const status: Record<string, unknown> = { type: "status", installed: true, signedIn: true, method: kind === "chatgpt-codex" ? "chatgpt" : "claude.ai", plan: "pro", fingerprint: ONE, renewBy: 2_000_000_000_000 };
+      const n = node({ status });
+      n.add(A, kind);
+      const card = { url: kind === "chatgpt-codex" ? DEVICE : PAGE, ...(kind === "chatgpt-codex" ? { code: "FAKE-1234" } : {}) };
+      const first = n.signIns.start(A);
+      await n.settled(() => n.bridge().told.length > 0);
+      n.bridge().say({ type: "card", ...card });
+      const shown = await first;
+      if (kind === "claude-subscription") await n.signIns.answer(A, shown.attempt, CODE);
+      n.bridge().say({ type: "done", ok: true }, true);
+      await n.settled(() => seatState(n.seat(A), Date.now()).is === "ready");
+      expect([kind, n.seat(A).account]).toEqual([kind, ONE]);
+      // A new sign-in, cancelled; the tool's status now names no account.
+      delete status.fingerprint;
+      n.next();
+      const again = n.signIns.start(A);
+      await n.settled(() => n.bridge().told.length > 0);
+      n.bridge().say({ type: "card", ...card });
+      const second = await again;
+      const before = n.asked.length;
+      await n.signIns.cancel(A, second.attempt);
+      await n.settled(() => n.asked.filter((a) => a[0] === "destroy").length === 2);
+      const ran = n.asked.slice(before).filter((a) => a[0] === "exec").map((a) => (a[2] as string[]).join(" "));
+      expect([kind, ran.filter((command) => /logout/.test(command))]).toEqual([kind, []]);
+      expect([kind, seatState(n.seat(A), Date.now()).is]).toEqual([kind, "ready"]);
+    }
+  });
+
   test("an account that isn't the seat's, or is another seat's, is refused and signed out again by its own tool", async () => {
     const n = node({ status: { type: "status", installed: true, signedIn: true, method: "claude.ai", fingerprint: TWO } });
     n.add(A);

@@ -230,7 +230,17 @@ export class SeatSignIns {
     const signIn = (tool ? AGENTS[tool] : undefined)?.signIn;
     if (!signIn) throw new Error(`no tool says how a ${seat.kind} seat's sign-in stands`);
     const asked = await host.exec(attempt.vm, ["bash", "-lc", signIn.seatCheck(seatSalt(this.deps.vault))], 60);
-    const stands = recordSeatStatus(this.deps.store, this.deps.node, seat, signIn.read(asked.stdout), took);
+    const told = signIn.read(asked.stdout);
+    if (took === undefined) {
+      // Ended before it took: nothing is signed out, whatever the tool says; only you sign a seat out (the second re-check
+      // of 28 November 2026, N3). A seat its tool still holds a sign-in on is ready again when that sign-in is its own, or
+      // one the read can't name (a status with no account in it, as a late account lookup gives); else it is as the
+      // attempt's end said.
+      if (!told.signedIn || (told.fingerprint && seat.account && told.fingerprint !== seat.account)) return;
+      recordSeatStatus(this.deps.store, this.deps.node, seat, { ...told, ...(seat.account && !told.fingerprint ? { fingerprint: seat.account } : {}) });
+      return;
+    }
+    const stands = recordSeatStatus(this.deps.store, this.deps.node, seat, told, took);
     // Another account than the seat's: refused, and signed out again by the tool's own command, so its home holds none.
     const out = SIGN_OUT[seat.kind];
     if (stands === "wrong-account" && out) await host.exec(attempt.vm, out, 60).catch(() => undefined);
