@@ -72,7 +72,9 @@ describe("the meter in a line", () => {
   test("says what the period came to, against the budget and what is left, or how to set one", () => {
     const meter = { node: "ultra", per: "month" as const, since: "2026-11-01", budgetUsd: 10, spentUsd: 3.4, complete: false, unpriced: ["local/qwen"], tokens: 3_611_000, calls: 3, leftUsd: 6.6, top: [] };
     expect(meterLine(meter)).toBe("This month: at least $3.40 of $10.00, $6.60 left · 3.61M tokens in 3 calls · no price for local/qwen");
-    expect(meterLine({ ...meter, per: "day", complete: true, unpriced: [], budgetUsd: 2, spentUsd: 2.1, leftUsd: 0, calls: 1 })).toBe("Today: $2.10 of $2.00, spent · 3.61M tokens in 1 call");
+    // Past the budget it says so, as the apps do (the lead's word, 28 November 2026); all of it, all spent.
+    expect(meterLine({ ...meter, per: "day", complete: true, unpriced: [], budgetUsd: 2, spentUsd: 2.1, leftUsd: 0, calls: 1 })).toBe("Today: $2.10 of $2.00, over budget · 3.61M tokens in 1 call");
+    expect(meterLine({ ...meter, per: "day", complete: true, unpriced: [], budgetUsd: 2, spentUsd: 2, leftUsd: 0, calls: 1 })).toBe("Today: $2.00 of $2.00, all spent · 3.61M tokens in 1 call");
     expect(meterLine({ ...meter, budgetUsd: null, leftUsd: null, complete: true, unpriced: [] })).toBe("This month: $3.40 no budget (invincible usage budget <usd> sets one) · 3.61M tokens in 3 calls");
   });
 });

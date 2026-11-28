@@ -443,11 +443,13 @@ export function spentWindowLine(window: UsageWindow, now: number): string {
   return `${window.provider}: its allowance is spent until ${clockUtc(window.until)} UTC (${spanWords(window.until - now)} from now), as its provider said`;
 }
 
-/** The meter in a line: what this period's calls came to at your prices, against your budget and what is left. */
+/** The meter in a line: what this period's calls came to at your prices, against your budget and what is left; past
+ * it, over budget, as the apps say it (lib/usage.ts budgetWords). */
 export function meterLine(m: UsageMeter): string {
   const period = m.per === "day" ? "Today" : "This month";
   const spent = `${m.complete || m.spentUsd === 0 ? "" : "at least "}${moneyLabel(m.spentUsd)}`;
-  const against = m.budgetUsd === null ? "no budget (invincible usage budget <usd> sets one)" : `of ${moneyLabel(m.budgetUsd)}, ${m.leftUsd ? `${moneyLabel(m.leftUsd)} left` : "spent"}`;
+  const left = m.budgetUsd === null ? "" : m.spentUsd > m.budgetUsd ? "over budget" : m.leftUsd ? `${moneyLabel(m.leftUsd)} left` : "all spent";
+  const against = m.budgetUsd === null ? "no budget (invincible usage budget <usd> sets one)" : `of ${moneyLabel(m.budgetUsd)}, ${left}`;
   return `${period}: ${spent} ${against} · ${tokensLabel(m.tokens)} tokens in ${m.calls} call${m.calls === 1 ? "" : "s"}${m.unpriced.length ? ` · no price for ${m.unpriced.join(", ")}` : ""}`;
 }
 
