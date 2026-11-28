@@ -51,6 +51,8 @@ export interface RunDeps {
   exec(command: string, timeoutSec: number, what?: "gate" | "evidence"): Promise<ExecResult>;
   /** Before each review's evidence is read, once: where it is read elsewhere than the work is done, the work is taken there. */
   beforeEvidence?(): Promise<void>;
+  /** Before a submission's gates run, once: where the work's own processes could change it under them, they are ended. */
+  beforeGates?(): Promise<void>;
   /** Fixed cleanup for this worker, available even after ordinary execution is cancelled. */
   stopAgent?(): Promise<void>;
   /** The stop's word to a live coding agent's run, on a way that stays open once ordinary execution is cancelled (harnesses.ts AgentRunDeps.tellStop). */
@@ -1577,6 +1579,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       }
     }
     if (gates.length) {
+      // (What runs of the work's own is ended first, where it would run on under the gates: nothing changes what they
+      // judge while they run, nor between them and the review.)
+      await deps.beforeGates?.();
       const results = await runGates();
       if (results.some((g) => g.exitCode !== 0)) return { verdict: "revise", notes: gateNotes(results), by: "gates" };
     }

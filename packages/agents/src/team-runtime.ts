@@ -966,6 +966,11 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       let reviewed: { tree: string } | { why: string } | null = null;
       /** (Read as it is now: it is set by the run's own calls, which TypeScript doesn't follow from here.) */
       const lastReviewed = (): typeof reviewed => reviewed;
+      /** The tree of another node's task's clone, in its VM, as its latest submission's gates began, or why there's none. */
+      let gated: { tree: string } | { why: string } | null = null;
+      /** Why its latest review's tree isn't the one its gates began on (I-b's gates); null when it is, or none ran. */
+      let moved: string | null = null;
+      const lastMoved = (): typeof moved => moved;
       const keepStep = (step: number) => {
         const command = steps.command;
         void serially(async () => {
@@ -1173,8 +1178,33 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         },
         exec, signal: ctx.signal,
         // Before each review's evidence is read: another node's task's changes brought back to its agent's side, where that
-        // evidence is then read, and what its review passes is the tree they made (I-b).
-        ...(own && agent.repository ? { beforeEvidence: async () => void (reviewed = await serially(bringBack)) } : {}),
+        // evidence is then read, and what its review passes is the tree they made (I-b). The tree its gates began on, if
+        // this submission's ran, must be that tree: else something changed it under its gates, or after them.
+        ...(own && agent.repository
+          ? {
+              beforeEvidence: async () => {
+                const back = await serially(bringBack);
+                reviewed = back;
+                const began = gated;
+                gated = null;
+                moved = !began || "why" in back ? null : "why" in began ? began.why : began.tree === back.tree ? null : "its workspace changed between when its gates began and its review's bring-back";
+              },
+            }
+          : {}),
+        // Before a submission's gates, for another node's task: everything of the task's in its VM ended first, so nothing
+        // of it runs under them or between them and the review's bring-back, and its clone's tree read there as they begin
+        // (the lead's decision for I-b's gates, 28 November 2026). A task whose gates need a server starts it in the gate.
+        ...(own
+          ? {
+              beforeGates: async () => {
+                await endHanded();
+                if (!agent.repository) return;
+                const read = await own.vm.exec(handedTree(root, base, task.id), 300, ctx.signal).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
+                const tree = read.stdout.trim();
+                gated = read.exitCode === 0 && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(tree) ? { tree } : { why: `its workspace's tree couldn't be read in its VM as its gates began: ${redact(read.stderr || read.stdout).trim().split("\n").at(-1)?.slice(0, 200) || "no reason given"}` };
+              },
+            }
+          : {}),
         emit: (event) => {
           // What its tool spent on its own sign-in, as it said it: in what the task spent, under its own sign-in's name (it
           // costs no money: its plan's), and its session's own count of what that would have cost at API prices.
@@ -1273,6 +1303,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       if (passed && own && agent.repository) {
         if (!shown) unbound = "no evidence of it was read for its review";
         else if ("why" in shown) unbound = `its review's evidence couldn't be read on its agent's side: ${shown.why}`;
+        else if (lastMoved()) unbound = lastMoved();
         else {
           const now = await serially(() => inRepo(handedTree(root, base, task.id), 300, ctx.signal)).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
           if (now.exitCode !== 0) unbound = `its workspace on its agent's side couldn't be read: ${redact(now.stderr || now.stdout).trim().split("\n").at(-1)?.slice(0, 200) ?? "no reason given"}`;

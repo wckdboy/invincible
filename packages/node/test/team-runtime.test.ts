@@ -685,8 +685,11 @@ test("another node's task runs each command under the handed helper: its gates' 
   const work = f.commands.filter((c) => c.includes("echo one"));
   expect(work.length).toBe(1);
   expect(work.every(as("task"))).toBe(true);
-  const end = f.commands.findIndex((c) => c.includes("end_task(sys.argv[1])"));
+  const end = f.commands.findLastIndex((c) => c.includes("end_task(sys.argv[1])"));
   expect(end).toBeGreaterThan(Math.max(...[...gates, ...work].map((c) => f.commands.lastIndexOf(c))));
+  // (And before its submission's gates, everything of the task's ended: I-b's gates.)
+  const submitted = f.commands.findIndex((c, i) => i > f.commands.indexOf(work[0]!) && c.includes("bun test required-check"));
+  expect(f.commands.slice(f.commands.indexOf(work[0]!), submitted).some((c) => c.includes("end_task(sys.argv[1])"))).toBe(true);
   // Your own task runs as before.
   const g = fixture(script());
   await g.runtime.executeTask(member, task, g.context);
@@ -835,7 +838,7 @@ test("another node's task in a repository works on a clone of its own: set up, c
       return command.includes("from_commit") ? result({ stdout: `${HANDED_BASE} fetched` }) : result({ stdout: "0" });
     },
     handedVm: async () => ({
-      exec: async (command: string) => (inTask.push(command), result()),
+      exec: async (command: string) => (inTask.push(command), result(command.includes(".tree-index") ? { stdout: TREE } : {})),
       receive: async (from: string, into: string) => (received.push([from, into]), piped),
       send: async (from: string, into: string) => (sent.push([from, into]), piped),
       stop: async () => {},
@@ -957,6 +960,7 @@ test("another node's task whose review passed ships the tree its review's eviden
     handedVm: async () => ({
       exec: async (command: string) => {
         if (plain(command).includes("echo one")) inVm = 1;
+        if (command.includes(".tree-index")) return result({ stdout: tree(inVm) });
         if (evidence(command)) return (shown = inVm), (inVm = 2), result({ stdout: ` M app.txt\n` });
         return result();
       },
@@ -990,7 +994,7 @@ test("another node's task whose agent's worktree isn't the tree its review was s
       if (command.includes(".tree-index")) return result({ stdout: "2".repeat(40) });
       return result({ stdout: command.includes(`'/work/out/tasks/${handedTask.id}'`) ? "1" : "0" });
     },
-    handedVm: async () => ({ exec: async () => result(), receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }), send: async () => ({ from: result(), to: result({ stdout: "0" }), bytes: 0, cut: false }), stop: async () => {}, release: async () => {} }),
+    handedVm: async () => ({ exec: async (command: string) => result(command.includes(".tree-index") ? { stdout: "1".repeat(40) } : {}), receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }), send: async () => ({ from: result(), to: result({ stdout: "0" }), bytes: 0, cut: false }), stop: async () => {}, release: async () => {} }),
   });
   f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
   const done = await f.runtime.executeTask(agent, handedTask, { ...f.context, emit: (line: string) => void lines.push(line) });
@@ -999,6 +1003,81 @@ test("another node's task whose agent's worktree isn't the tree its review was s
   expect(done.output).toContain("Not verified: its workspace on its agent's side isn't the tree its review was shown");
   expect(done.output).toContain("Changes: 1 file, kept as artifact-r8-ib2. Not verified: read them before you ship them.");
   expect(lines).toContain("Review · passed, but its work isn't verified: its workspace on its agent's side isn't the tree its review was shown");
+});
+
+/* I-b's gates (the lead's decision, 28 November 2026): another node's task's gates run in its VM, on its clone, so a
+ * process of its own could change a file under them, or between them and its review's bring-back, and what shipped as
+ * verified was a tree its gates never judged. Before a submission's gates everything of the task's in its VM is ended,
+ * and its clone's tree is read there as they begin; the review's bring-back must be that tree. */
+function gatedFixture(opts: { outlives: boolean; changes: "during its gates" | "after them" }) {
+  const HANDED_BASE = "89abcdef0123456789abcdef0123456789abcdef";
+  const agent = { ...member, repository: "https://github.com/you/project" };
+  const tree = (version: number) => String(version).repeat(40);
+  // Its clone by version: its command makes version 1 and leaves a process running that makes version 2, during its
+  // submission's gates or just after them. The end stops it unless it `outlives` the end (as one that double-forked out
+  // of the handed helper would).
+  const state = { inVm: 0, running: false, worked: false, carried: 0, side: 0, shipped: 0, order: [] as string[] };
+  const lines: string[] = [];
+  const f = fixture([say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("PASS\nFine.")], {
+    agent: () => agent,
+    models: () => [{ provider: "paid", model: "m" }],
+    paid: (ref: string) => ref === "paid/m",
+    keep: async () => "artifact-r8-gates",
+    exec: async (_m: Agent, command: string) => {
+      if (command.includes("from_commit")) return result({ stdout: `${HANDED_BASE} fetched` });
+      if (command.includes("--allow-empty")) return (state.side = state.carried), result({ stdout: `0 ${tree(state.side)}` });
+      if (command.includes(".tree-index")) return result({ stdout: tree(state.side) });
+      if (command.includes(`'/work/out/tasks/${handedTask.id}'`)) return (state.shipped = state.side), result({ stdout: "1" });
+      return result({ stdout: "0" });
+    },
+    handedVm: async () => ({
+      exec: async (command: string) => {
+        if (plain(command).includes("echo one")) return (state.inVm = 1), (state.running = true), (state.worked = true), result();
+        if (command.includes("sys.exit(end_task(")) {
+          state.order.push("end");
+          if (!opts.outlives) state.running = false;
+          return result();
+        }
+        if (command.includes(".tree-index")) return result({ stdout: tree(state.inVm) });
+        if (state.worked && plain(command).includes("bun test required-check")) {
+          state.order.push("gate");
+          if (state.running && opts.changes === "during its gates") state.inVm = 2;
+        }
+        return result();
+      },
+      receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }),
+      send: async () => {
+        // (The review's bring-back follows its gates: a process still running may write just before it.)
+        if (state.running && opts.changes === "after them" && state.order.includes("gate")) state.inVm = 2;
+        state.carried = state.inVm;
+        return { from: result(), to: result({ stdout: "0" }), bytes: 0, cut: false };
+      },
+      stop: async () => {},
+      release: async () => {},
+    }),
+  });
+  f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  const run = () => f.runtime.executeTask(agent, handedTask, { ...f.context, emit: (line: string) => void lines.push(line) });
+  return { run, state, lines };
+}
+
+test("another node's task's processes are ended before its submission's gates: what one would change under them, or after, never is (I-b's gates)", async () => {
+  for (const changes of ["during its gates", "after them"] as const) {
+    const g = gatedFixture({ outlives: false, changes });
+    const done = await g.run();
+    // (The first end is the submission's, before its gate; the task's own end follows its run.)
+    expect([changes, g.state.order.slice(0, 2)]).toEqual([changes, ["end", "gate"]]);
+    expect([changes, done.verified, g.state.shipped]).toEqual([changes, true, 1]);
+  }
+});
+
+test("another node's task whose clone changed under its gates, or after them, by a process its end didn't reach, is not verified, and says why (I-b's gates)", async () => {
+  for (const changes of ["during its gates", "after them"] as const) {
+    const g = gatedFixture({ outlives: true, changes });
+    const done = await g.run();
+    expect([changes, done.verified, done.error]).toEqual([changes, false, "its workspace changed between when its gates began and its review's bring-back"]);
+    expect([changes, g.lines.includes("Review · passed, but its work isn't verified: its workspace changed between when its gates began and its review's bring-back")]).toEqual([changes, true]);
+  }
 });
 
 /* The seventh fabric review's I-d: what a run of another node's task cut off leaves on its agent's side (a receive's
