@@ -231,6 +231,18 @@ The run loop is carried and renamed (§10), the most proven part of it:
       keeps it. `invincible agents routing <id>` says where its next task of each kind begins, and why, by the same rule.
       In the app it is one quiet line per kind in the agent's details beside its timeline, the why on hover. That panel
       is never on a phone.
+  - How a node's routing went, from its own finished tasks' records alone, read-only (core's `routingReport`):
+    `invincible agents routing`, with no agent, gives this by kind, then by where each task's work began (the
+    engineer's, a try of them, the planner's by the memory or by its plan):
+    - how many tasks, and how many were verified;
+    - how many moved up, and why;
+    - how many went round on both tiers (its record keeps `round`, as its notice goes when it ends);
+    - money at your prices (a coding plan's calls are paid for already) and minutes, every task's per verified
+      task, never guessed where a call has no price;
+    - the tries of the engineer's that held.
+    `--json` is the report itself (`v` 1), a contract held by fixtures. The agents' page shows a quiet line per kind
+    at a desk's width, never on a phone. It reads the latest finished tasks the node lists, up to 512 less those in
+    hand.
 - **Harnesses:**
   - the native tools loop (the default, measured level with OpenCode);
   - Claude Code, Codex and OpenCode through the key gateway (a run uses your keys without seeing them);
