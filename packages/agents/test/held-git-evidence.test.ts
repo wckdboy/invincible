@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,6 +12,12 @@ import { repositoryEvidence } from "../src/team-runtime.ts";
  * external diff or textconv another node's task wrote in the shared repository runs as the agent. The reviewer is shown
  * them by the words they were shown by before.
  */
+
+// Its test makes a repository and runs git and the held git's Python on it, a dozen processes of their own, so its time is
+// the machine's to give: 0.8 s on the MacBook at a load of 20, past bun's 5 s at 5,018 ms in 2 of 3 runs there at a load of
+// 170 to 200 (the lead, 28 November 2026), 5,029 ms with a tenth of a core, and 22 to 39 s with a fiftieth (its process
+// group paused 0.9 s in each 1 s, then 0.98). The limit is how long a busy machine may take, never what the test checks.
+setDefaultTimeout(120_000);
 
 const dirs: string[] = [];
 afterEach(() => {
