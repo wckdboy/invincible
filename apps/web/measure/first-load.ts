@@ -67,6 +67,9 @@
  *
  * Timings move with the machine's load: compare two checkouts measured one after the other, and
  * trust a difference only when the ranges don't overlap. Bytes, requests and nodes don't move.
+ *
+ * A known cause of stalled frames on the MacBook: an iOS simulator booting beside a run, on the GPU Chrome draws with,
+ * came with a page never usable in 45 s and a screenshot that never came (28 November 2026; a wait then says so).
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { loadavg, tmpdir } from "node:os";
