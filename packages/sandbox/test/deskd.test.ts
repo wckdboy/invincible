@@ -281,6 +281,12 @@ describe("the desktop command: deskd's thin client", () => {
   // checkout's are. Neither is what it checks.
   const HELD_WITHIN = 30_000;
   const HELD_LIMIT = 35_000;
+  /** Until the owner's own view says they no longer have the desktop, `ms` at most: whether it did. (Their `hold` asks
+   * only that, and is no input of theirs: it keeps no hold.) */
+  const holdEnded = async (node: { ask: (q: unknown) => Promise<any> }, ms: number) => {
+    for (const until = Date.now() + ms; Date.now() < until; await Bun.sleep(20)) if ((await node.ask({ id: 0, name: "hold" })).hold === null) return true;
+    return false;
+  };
 
   test("while the owner holds the desktop, an agent's command waits; it runs once they give it back, and is told how long it waited", async () => {
     if (!needs()) return;
@@ -326,10 +332,20 @@ describe("the desktop command: deskd's thin client", () => {
     if (!needs()) return;
     const r = await deskd({ INVINCIBLE_DESKTOP_OWNER_UID: me, INVINCIBLE_DESKTOP_HOLD_WAIT: "0.3" });
     const node = await opened(r, true);
-    await node.ask({ id: 1, name: "take", input: { idle: 1 } });
+    // Theirs run while they hold it, and an agent's click comes and waits on the hold until its own time is up (75). It
+    // is seen waiting there (the trace), on a hold that outlasts it however long a busy machine takes it to come. (With
+    // a hold of 1 s, at 10 % of a core, 28 November 2026, the hold ran out before the click came, which then ran.)
+    await node.ask({ id: 1, name: "take", input: { idle: 30 } });
     expect(await node.ask({ id: 2, name: "left_click", input: { coordinate: [5, 5] } })).toMatchObject({ ok: true });
-    expect((await agentAsync(r, ["click", "10", "20"])).code).toBe(75);
-    await Bun.sleep(1300);
+    const held = agentAsync(r, ["click", "10", "20"]);
+    expect(await traced(r, "owner-wait", HELD_WITHIN)).toBe(true);
+    expect((await held).code).toBe(75);
+    // With no input from them for its idle time, it ends by itself: a fresh take of 1 s, then nothing of theirs but
+    // asking whether they have it, until they don't (never before its second is up); then the agent's click runs.
+    const took = Date.now();
+    expect(await node.ask({ id: 3, name: "take", input: { idle: 1 } })).toMatchObject({ ok: true, took: true, hold: { idle: 1 } });
+    expect(await holdEnded(node, HELD_WITHIN)).toBe(true);
+    expect(Date.now() - took).toBeGreaterThanOrEqual(1000);
     const after = await agentAsync(r, ["click", "10", "20"]);
     expect(after).toMatchObject({ code: 0, err: "" });
     await node.close();
