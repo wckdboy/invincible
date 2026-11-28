@@ -586,8 +586,9 @@ sys.stdout.flush()`;
  * user can read and never write. In a repository (`tree` given), its pack, each object hashed as it is taken
  * (`index-pack`), and every object of `tree` checked to be there: the store holds that tree, whatever the task's VM did.
  * With none (`tree` ""), its folder's tar, each entry a file, a folder or a link inside it and nothing else (no name out of
- * it, nothing written through a link, no device or set-id bit), each link then checked to resolve inside it, and its tree
- * as git hashes it. It prints that tree. (Python 3.9's, as the Macs that test it have: no tar filter of its own.)
+ * it, nothing written through a link, no device or set-id bit, and no .git at any level: the twelfth fabric re-review's
+ * I-12a), each link then checked to resolve inside it, and its tree as git hashes it. It prints that tree. (Python 3.9's,
+ * as the Macs that test it have: no tar filter of its own.)
  */
 const ROUND_STORE_SCRIPT = `import stat, tarfile
 store, tree = sys.argv[1], sys.argv[2]
@@ -626,6 +627,9 @@ else:
                 path = os.path.join(folder, *parts)
                 if m.name.startswith('/') or any(p in ('', '.', '..') for p in parts) or os.path.lexists(path) or not os.path.isdir(os.path.dirname(path)) or not within(os.path.dirname(path)):
                     sys.exit('its folder could not be taken: ' + m.name[:200] + ' is no new name inside it')
+                # (A .git, a folder or a file: git would hash the folder without it, and a gate's git would obey its config.)
+                if any(p.lower() == '.git' for p in parts):
+                    sys.exit('its folder could not be taken: ' + m.name[:200] + " is a .git, which a folder's gates never take")
                 if m.isdir():
                     os.mkdir(path, 0o755)
                 elif m.isreg():

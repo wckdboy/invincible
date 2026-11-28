@@ -1052,6 +1052,38 @@ describe("the round of another node's task's gates: its tree, its store, and eac
     expect(given(folder, "").kept.stdout.trim()).toBe(hashed);
   });
 
+  /*
+   * The twelfth review's I-12a (zz-r12-folder-git): with no repository, a folder that held a .git of its own was hashed to
+   * the same tree as one without (git never adds a .git), and each gate's copy held it, so a gate's `git status` there
+   * ran its core.fsmonitor. Now a .git at any level, a folder or a file, is refused as the folder is taken.
+   */
+  test("I-12a: with no repository, a .git at any level of its folder is refused as it is taken, and no gate's copy holds one", () => {
+    for (const at of [".git", "sub/.git", "sub/deeper/.GIT", "file/.git"]) {
+      const folder = temp("handed-folder-");
+      writeFileSync(join(folder, "app.txt"), "one\n");
+      const ran = join(temp("handed-ran-"), "FSMONITOR-RAN");
+      const git = join(folder, ...at.split("/"));
+      if (at.startsWith("file/")) {
+        mkdirSync(join(folder, "file"));
+        writeFileSync(git, `gitdir: ${join(folder, "file", "elsewhere")}\n`);
+      } else {
+        mkdirSync(join(git, "objects"), { recursive: true });
+        mkdirSync(join(git, "refs"));
+        writeFileSync(join(git, "HEAD"), "ref: refs/heads/main\n");
+        writeFileSync(join(git, "config"), `[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tfsmonitor = touch ${ran}; false\n`);
+      }
+      const r = given(folder, "");
+      expect([at, r.take.status]).toEqual([at, 0]);
+      // (Before: taken, the same tree as without it, and a gate's git in its copy ran what its config names.)
+      if (r.kept.status === 0) {
+        const { on } = r.copy(r.kept.stdout.trim(), "folder");
+        sh(`cd ${q(join(on, "tree", ...at.split("/").slice(0, -1)))} && git status --porcelain`);
+      }
+      expect([at, r.kept.status, r.kept.stderr.trim()]).toEqual([at, 1, `its folder could not be taken: ${at} is a .git, which a folder's gates never take`]);
+      expect([at, existsSync(ran)]).toEqual([at, false]);
+    }
+  });
+
   test("with no repository, a file its VM's user can't read is no part left out: the round's tree, and so its gates, fail and say which (the ninth review's I-2)", () => {
     const folder = temp("handed-folder-");
     writeFileSync(join(folder, "report.md"), "the report\n");
