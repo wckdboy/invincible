@@ -1147,6 +1147,18 @@ describe("light by default (C1 step 10): an unused desktop stops, and the next c
     expect(existsSync(join(r.run, "idle-stopped"))).toBe(false);
   }, LIMIT);
 
+  test("started and never used after (the node's start, as a desktop task's work begins), it stops as any unused desktop does, and the agent's first command is told", async () => {
+    if (!built) return;
+    const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: IDLE });
+    expect(desktop(r, ["start"]).code).toBe(0);
+    expect(await stopped(r, STOPS_WITHIN)).toBe(true);
+    const order = r.trace().filter((t) => t.call === "close" || t.call === "stop").map((t) => (t.call === "close" ? "close" : "stop"));
+    expect(order.at(-1)).toBe("stop");
+    const next = desktop(r, ["click", "10", "20"], { INVINCIBLE_DESKTOP_IDLE: "60" });
+    expect(next.code).toBe(0);
+    expect(next.err).toContain("this desktop was stopped after 3.0 s with nothing done on it and no one watching");
+  }, LIMIT);
+
   test("a deskd the client started on its own, after an idle stop, ends with its test as the one the test started does", async () => {
     if (!built) return;
     const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: IDLE });

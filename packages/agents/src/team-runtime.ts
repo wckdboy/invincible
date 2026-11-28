@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { desktopArgv, desktopBriefing, hardwareBriefing, LOOKING } from "./desktop-command.ts";
-import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
+import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, looksToNeedAScreen, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
@@ -1229,6 +1229,16 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       let routing: TeamTaskRouting = { began: "engineer" };
       // On a seat its tool's commands run in the seat's VM: told so, and not told of a desktop out of their reach.
       const where = onSeat ? ` Your commands run in a VM made for your plan, beside your own VM and sharing its /work${desktop ? ": your own VM's desktop is out of their reach" : ""}.` : screen;
+      // A desktop task's desktop starts as its work begins, beside its first model call (C1, 28 November 2026: its cold
+      // start, from deskd's start to the first page, took 2.3 s on Kata and 1.2 s on runc; a model call, 2.6 s at the
+      // median). It is its VM's own `desktop start`, as the agent's would be: use, so one never used after it stops as
+      // any unused desktop does. Not on a seat, whose tool's commands can't reach its agent's desktop, nor for another
+      // node's task, whose commands all run under the handed helper. Never waited for: the agent's first desktop command
+      // finds it up, or starting.
+      if (desktop && !onSeat && !handed && looksToNeedAScreen(task)) {
+        ctx.emit("Desktop · starting as the work begins, beside its first model call: this task looks to need a screen");
+        void exec("desktop start", 60).catch(() => {});
+      }
       const outcome = await runLoop({ goal: task.goal, environment: `Your persistent Linux VM; isolated task workspace ${root}. Other tasks' files must not be modified. Files in /tmp can't be run here: $TMPDIR is a directory of this task's where they can. ${home}/${LEASE_FILE} is your model access, written by your agent for this task: never move, change or delete it.${where}${keysLine(agent.keys, deps.keyAddress)}`, instructions, gates: task.gates, evidence: agent.repository ? repositoryEvidence(base) : [...TASK_FILES_EVIDENCE], maxSteps: Infinity, audit: true, maxRevisions: 2, commandTimeoutSec: TEAM_COMMAND_SECONDS, gatesFirst: true, ...(task.givenBy?.startsWith("node:") ? { gateSeconds: HANDED_GATE_SECONDS } : {}), submitAtLimit: true, escalate, ...(begin ? { begin } : {}), keepReads: true, ...(tools ? { tools: true, plan: "", ...(desktop && !onSeat ? { computer: true } : {}) } : {}), ...(task.budgetUsd !== undefined ? { budgetUsd: task.budgetUsd } : {}), ...(coding ? { agent: coding } : {}), ...(engram ? { engram } : {}), home }, {
         // (keepReads: an agent sees whole what it reads, and it stays in view while it is current. The first real outcome's
         // agents, shown 8,000 characters of each, read one file in 26 then 34 commands, and three tasks ended with nothing

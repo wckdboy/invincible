@@ -398,8 +398,9 @@ The run loop is carried and renamed (§10), the most proven part of it:
     named as Anthropic's computer toolset names them; the host speaks to it over one held session per VM, and an
     agent's plain `desktop …` goes there too. It keeps the window manager and the browser running, says a page's
     dialog as it opens, and closes apps as a person does before it stops them. Light by default (C1 step 10): the
-    desktop starts on its first use, and stops, as `desktop stop` stops it, after 10 minutes with nothing asked of it, no
-    one holding it and no one watching it; the next command starts it again, and the agent's next command says why its
+    desktop starts on its first use (a desktop task's as its work begins, beside its first model call, so its cold
+    start is behind that call: core's `looksToNeedAScreen`), and stops, as `desktop stop` stops it, after 10 minutes
+    with nothing asked of it, no one holding it and no one watching it; the next command starts it again, and the agent's next command says why its
     screen is fresh. The VM is made with 2 GB, desktop or not, and grown, live, to 4 GB just before its desktop's first
     use (the sandbox host's desktopRoom), never made again for it: so an agent that never looks holds of the ceiling
     what one without a desktop does ([DESKTOP.md](DESKTOP.md)). Beside the pixels, the accessibility

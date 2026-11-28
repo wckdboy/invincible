@@ -1,4 +1,4 @@
-import { costOf, type ExecResult, type Prices, type SandboxView, spendTotal, type TeamSnapshot, type TeamTaskRecord, type EvalAnswer, type EvalRecord, evalScore, tokensLabel, usdLabel } from "@invincible/core";
+import { costOf, type ExecResult, looksAtADesktop, type Prices, type SandboxView, spendTotal, type TeamSnapshot, type TeamTaskRecord, type EvalAnswer, type EvalRecord, evalScore, tokensLabel, usdLabel } from "@invincible/core";
 import { RUN_DEFAULTS, testFilesOf } from "@invincible/agents";
 import { inWorkdir, type NodeClient, runId, runOnNode } from "./run-cli.ts";
 import { quote } from "@invincible/agents";
@@ -59,9 +59,6 @@ export interface YourCase {
 
 /** Why one of your agents' tasks isn't a case. */
 export type NotACase = "not verified" | "no change kept" | "no record of its run" | "no gates" | "agent removed" | "no repository";
-
-/** A gate that runs the desktop's own command (an agent's VM with a screen has it, and so does an eval's of the desktop image). */
-const looksAtADesktop = (gate: string): boolean => /(^|[;&|(]\s*|\$\(\s*)desktop\s/.test(gate);
 
 export interface YourCases {
   /** Hardest first. */

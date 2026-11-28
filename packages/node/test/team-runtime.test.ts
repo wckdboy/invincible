@@ -2347,6 +2347,73 @@ test("a task asks its VM its HOME and what it has of a desktop in one command, b
   expect(vmProbed("")).toEqual({ home: "", paths: [] });
 });
 
+/* The desktop's cold start, hidden behind the work's first model call (C1, 28 November 2026: from deskd's start to the
+ * first page, 2.3 s on Kata and 1.2 s on runc; a model call's median, 2.6 s): a desktop task's VM starts its desktop as
+ * its work begins. Light by default holds for every other task. */
+const DESKTOP_GOAL = "Open http://127.0.0.1:8000/form.html in the browser, fill in the form and send it.";
+
+test("a desktop task's desktop starts as its work begins, beside its first model call: its VM's own `desktop start`, through its held session, never waited for", async () => {
+  const asked: { argv: string[]; calls: number }[] = [];
+  /** Whether the start was answered with the work's first model call already asked, once it was answered. */
+  let beside: Promise<boolean> = Promise.resolve(false);
+  const lines: string[] = [];
+  const f: ReturnType<typeof fixture> = fixture([say("1. Open the form and send it."), say("```sh\ndesktop open http://127.0.0.1:8000/form.html\n```"), say("DONE\nSent."), say("PASS\nFine.")], {
+    exec: async (_m, command) => result(command === PROBE ? { stdout: "/usr/local/bin/desktop\n" } : {}),
+    execArgv: async (_m, argv) => {
+      asked.push({ argv, calls: f.bodies.length });
+      // (Answered only once the work's first model call has been asked, 5 s at the most: a start the work waited for
+      // would be answered with none.)
+      if (argv[1] === "start") {
+        beside = (async () => {
+          for (let i = 0; i < 500 && !f.bodies.length; i++) await Bun.sleep(10);
+          return f.bodies.length > 0;
+        })();
+        await beside;
+      }
+      return result();
+    },
+  });
+  expect((await f.runtime.executeTask(member, { ...task, goal: DESKTOP_GOAL }, { ...f.context, emit: (line) => void lines.push(String(line)) })).verified).toBe(true);
+  expect(asked[0]).toEqual({ argv: ["desktop", "start"], calls: 0 });
+  expect(await beside).toBe(true);
+  // Once: the agent's own desktop commands come after it, as ever.
+  expect(asked.filter((a) => a.argv[1] === "start")).toHaveLength(1);
+  expect(asked.some((a) => a.argv.join(" ") === "desktop open http://127.0.0.1:8000/form.html")).toBe(true);
+  expect(lines).toContain("Desktop · starting as the work begins, beside its first model call: this task looks to need a screen");
+});
+
+test("light by default holds for every other task: no desktop starts for one that doesn't look to need a screen, nor in a VM without one, nor for another node's task", async () => {
+  /** How many times the task's VM was asked to start its desktop, by any path. */
+  const starts = async (desk: boolean, given: TeamTask, priced = false) => {
+    const asked: string[] = [];
+    const f = fixture([say("1. Make the change."), say("DONE\nBuilt."), say("PASS\nFine.")], {
+      exec: async (_m, command) => { asked.push(command); return command === PROBE ? (desk ? result({ stdout: "/usr/local/bin/desktop\n" }) : result({ exitCode: 1, stdout: "" })) : result(); },
+      execArgv: async (_m, argv) => (asked.push(argv.join(" ")), result()),
+    });
+    if (priced) f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+    await f.runtime.executeTask(member, given, f.context);
+    return asked.filter((command) => /desktop start/.test(command)).length;
+  };
+  expect(await starts(true, { ...task, goal: DESKTOP_GOAL })).toBe(1);
+  // A gate that runs the desktop's command makes it a desktop task too, whatever its goal says.
+  expect(await starts(true, { ...task, gates: ["desktop text | grep -q Sent"] })).toBe(1);
+  expect(await starts(true, task)).toBe(0);
+  expect(await starts(false, { ...task, goal: DESKTOP_GOAL })).toBe(0);
+  // (Another node's task's commands all run under the handed helper, bounded with it: nothing of it starts outside them.)
+  expect(await starts(true, { ...handedTask, goal: DESKTOP_GOAL }, true)).toBe(0);
+});
+
+test("on a seat of yours a desktop task starts no desktop: its tool's commands run in the seat's VM, out of reach of its agent's", async () => {
+  const goal = { goal: DESKTOP_GOAL };
+  const seated = seatTask("claude", { own: { stdout: signedIn() }, roster: [opus], agent: { name: "Desk" }, task: goal });
+  expect((await seated.go()).verified).toBe(true);
+  expect([...seated.inAgent, ...seated.inSeat].filter((command) => command.includes("desktop start"))).toEqual([]);
+  // In its own VM it does.
+  const own = seatTask("claude", { own: { stdout: signedIn() }, roster: [opus], agent: { name: "Desk" }, task: goal, answers: [{ none: true }] });
+  expect((await own.go()).verified).toBe(true);
+  expect(own.inAgent.filter((command) => command.includes("desktop start"))).toHaveLength(1);
+});
+
 test("an agent with a desktop and a model that can see is given its eyes: each command knows which model looks, and the agent is told how to ask it", async () => {
   const run = async (eyes: string | { ref: string; space: string } | null) => {
     const commands: string[] = [];

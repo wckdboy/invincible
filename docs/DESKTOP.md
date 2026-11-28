@@ -102,6 +102,16 @@ C1 step 10. An agent whose desktop isn't used costs what an agent without one do
   shell's words (`desktopVerbIn`) and grows the VM before the command runs. One a file runs out of the node's sight (a
   script that calls `desktop`) starts the desktop without the growing: the VM grows at the next command where the node
   sees a desktop verb.
+- **A desktop task's starts as its work begins.** A task whose goal speaks of a browser or a screen (core's
+  `looksToNeedAScreen`, the words that give it to an agent with a desktop), or one of whose gates runs `desktop`, has
+  its VM run its own `desktop start` as the work begins, beside its first model call, never waited for. Its cold start
+  (deskd, its memory, the display, the browser's start) is then behind that call. From the work's start to its first
+  page shown, with a first call of 2.6 s (a model call's median), it went from 4.8 to 2.9 s on Kata and from 3.7 to
+  2.8 s on runc; with a first call that answers at once, 2.6 to 2.1 s and 1.1 to 1.2 s, within the spread (Ultra, 28
+  November 2026, five fresh VMs a case). The start is use like any other, so a desktop never used after it stops when
+  unused, as above. No other task's desktop starts early: not one that doesn't look to need a screen, not one on a
+  seat (its tool's commands run in the seat's VM, out of the desktop's reach), not another node's (its commands all
+  run under the handed helper).
 - **Held to** (the desktop suite's `desktop.light.*`, [BENCHMARKS.md](BENCHMARKS.md), to be run on a sandbox host): a
   desktop never started at most +50 MB, with 2 GB given; growing to 4 GB within 1 s, its work as it was; after an idle
   stop, nothing of it left running and the guest's memory back, within 50 MB; started again to its first page within

@@ -62,6 +62,16 @@ export const repositoryKey = (url: string): string =>
 /** A task that speaks of a browser or a screen: a desktop is likely to help, though it is not required. */
 const SCREEN = /https?:\/\/|\b(browser|website|web ?page|web site|screen|screenshot|click|desktop|sign in|log ?in|captcha)\b/i;
 
+/** A gate that runs the desktop's own command (an agent's VM with a screen has it, and so does an eval's of the desktop image). */
+export const looksAtADesktop = (gate: string): boolean => /(^|[;&|(]\s*|\$\(\s*)desktop\s/.test(gate);
+
+/**
+ * A desktop task: its goal speaks of a browser or a screen (SCREEN, the words that give it to an agent with a desktop),
+ * or one of its gates runs the desktop's command. Its agent's desktop starts as its work begins (team-runtime), so the
+ * desktop's cold start is behind the work's first model call; every other task's starts on its first use.
+ */
+export const looksToNeedAScreen = (task: { goal: string; gates: readonly string[] }): boolean => SCREEN.test(task.goal) || task.gates.some(looksAtADesktop);
+
 /** Words that say nothing of what a task is about. */
 const STOP = new Set(
   "about after again also always another before being both cannot could does doing done each either every from have having into itself just keep keeps make makes made many more most much must never only other ought over same should since some such than that their them then there these they this those through under until upon very what when where which while whom whose will with within without would your yours".split(" "),
