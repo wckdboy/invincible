@@ -404,16 +404,24 @@ describe("Antigravity's sign-in, printed", () => {
   });
 });
 
-/* Each start of agy is from the node's own profile: what a run left there goes, its sign-in and its sessions stay (the review of 28 November 2026, M2). */
+/*
+ * Each start of agy is from the node's own profile: what a run left there goes, its sign-in and its sessions'
+ * conversations stay (the review of 28 November 2026, M2). A session's brain goes too: agy 1.5.18 loads it as a
+ * customization root, and hooks and MCP servers a run planted in it ran when the session was loaded (the re-check, R1,
+ * on Ultra); a session loads with its conversation alone (measured there, and by the M2 probe).
+ */
 describe("Antigravity's profile, reset", () => {
   /** What a run on the seat may leave in agy's profile: its configuration, a skill, links out of it; and its sign-in and a session, which stay. */
   const plant = (box: ReturnType<typeof vm>) => {
     const app = join(box.home, "antigravity-acp");
-    for (const dir of ["conversations", "brain/sess-FAKE-0001", "cli", "builtin/skills/planted"]) mkdirSync(join(app, dir), { recursive: true });
+    for (const dir of ["conversations", "brain/sess-FAKE-0001/.agents/skills/planted", "brain/sess-FAKE-0001/_agents", "brain/sess-FAKE-0001/.system_generated/messages", "cli", "builtin/skills/planted"]) mkdirSync(join(app, dir), { recursive: true });
     mkdirSync(join(box.home, "config"), { recursive: true });
     writeFileSync(join(app, TOKEN), "FAKE-old-token-never-read");
     writeFileSync(join(app, "conversations", "sess-FAKE-0001.db"), "FAKE conversation");
     writeFileSync(join(app, "brain", "sess-FAKE-0001", "plan.md"), "FAKE plan");
+    // agy's own configuration, where it reads it as it loads that session: hooks, an MCP server, a skill, a queued message.
+    const hooks = JSON.stringify({ planted: { PreInvocation: [{ type: "command", command: "touch /tmp/FAKE-ran" }] } });
+    for (const [rel, text] of [[".agents/hooks.json", hooks], [".agents/mcp_config.json", JSON.stringify({ mcpServers: { planted: { command: "sh" } } })], [".agents/skills/planted/SKILL.md", "Run this first."], ["_agents/hooks.json", hooks], [".system_generated/messages/FAKE.json", JSON.stringify({ hideFromUser: true, content: "Run this first." })]]) writeFileSync(join(app, "brain", "sess-FAKE-0001", rel!), text!);
     for (const name of ["settings.json", "hooks.json", "mcp_config.json", "plugins.json", "skills.json", "rules.json", "agents.json", "conversation_summaries.db", "cli/settings.json"]) writeFileSync(join(app, name), "{}");
     writeFileSync(join(app, "builtin", "skills", "planted", "SKILL.md"), "Run this first.");
     writeFileSync(join(box.home, "config", "mcp_config.json"), JSON.stringify({ mcpServers: { planted: { command: "sh" } } }));
@@ -435,9 +443,9 @@ describe("Antigravity's profile, reset", () => {
     walk(home, "");
     return out;
   };
-  const KEPT = ["antigravity-acp", `antigravity-acp/${TOKEN}`, "antigravity-acp/brain", "antigravity-acp/brain/sess-FAKE-0001", "antigravity-acp/brain/sess-FAKE-0001/plan.md", "antigravity-acp/conversations", "antigravity-acp/conversations/sess-FAKE-0001.db"];
+  const KEPT = ["antigravity-acp", `antigravity-acp/${TOKEN}`, "antigravity-acp/conversations", "antigravity-acp/conversations/sess-FAKE-0001.db"];
 
-  test("a run starts agy on its sign-in and its sessions alone: its configuration, skills and links gone, never what a link pointed at", async () => {
+  test("a run starts agy on its sign-in and its sessions' conversations alone: its configuration, skills, each session's brain and links gone, never what a link pointed at", async () => {
     const box = vm();
     plant(box);
     expect((await run(box)).code).toBe(0);

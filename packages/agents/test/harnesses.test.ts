@@ -136,13 +136,14 @@ describe("a driver and the notes store", () => {
   // as it came, which giving it the store as every ACP agent is given it (acp.ts's withNotes) left as it was. And again on
   // 28 November 2026, when its bridge came to reset its profile at each start to its sign-in and its sessions (the
   // review's M2): its text with that reset taken out (31 lines, every one added) hashes to its pin from before
-  // (a18a4ade…).
+  // (a18a4ade…). And again that day, when a session's brain came to go with the rest of the profile (the re-check's
+  // R1): its text differs from its pin from before (23a8a76f…) in the reset's KEPT line and the comment above it alone.
   const BEFORE: Record<string, string> = {
     opencode: "cc015190084eb3e39e46df1c15f67e01bb085d0b6649cd5cb39fe5410b20ab22",
     hermes: "a2dcda40c48da625d32e5aa97c122a81bd1945095b369b605e8edf01b7bb4461",
     claude: "da3d8d2b3a1e26f89f545b40d60d28ffbe78d5d0f23a8f2ca53c5927f9ddb96b",
     codex: "e757f19dea735c3929bdbbecaf88ef9924455ec17d754ecab957cdf223e9c00f",
-    antigravity: "23a8a76f6947fb994cf3a4026d2f875d629107d0d203f705470dd4c295d092e7",
+    antigravity: "5c6b8033b811d961a14e41641f98347c2d364009b7cdfa5a03a7121f71825881",
   };
 
   test("without a notes project, every driver writes and runs byte for byte what it did before there was a store", () => {

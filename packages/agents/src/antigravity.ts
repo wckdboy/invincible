@@ -25,12 +25,14 @@ def version_of(text):
     except ValueError:
         return None
 
-# What agy keeps of its own from one start to the next: its sign-in, and its sessions (each one's conversation, which
-# session/load reads, and its brain: agy 1.5.18 on Ultra, 28 November 2026). The rest of its profile is configuration
-# (hooks, MCP servers, plugins, skills, rules, agents, settings), its built-in skills and its state, which agy makes anew
-# as it starts; a run may have left any of it there, to run commands or steer it. So each start is from the node's own,
+# What agy keeps of its own from one start to the next: its sign-in, and its sessions' conversations, which session/load
+# reads (agy 1.5.18 on Ultra, 28 November 2026). The rest of its profile is configuration (hooks, MCP servers, plugins,
+# skills, rules, agents, settings), its built-in skills and its state, which agy makes anew as it starts; a run may have
+# left any of it there, to run commands or steer it. So is each session's brain: agy loads brain/<session>/ as a
+# customization root, its .agents/ and _agents/ hooks and MCP servers run as that session loads, and a session loads with
+# its conversation alone (the re-check of 28 November 2026, R1, measured on Ultra). So each start is from the node's own,
 # which is none of it, and no link stays anywhere in it (the review of 28 November 2026, M2).
-KEPT = {"antigravity-oauth-token": "file", "conversations": "dir", "brain": "dir"}
+KEPT = {"antigravity-oauth-token": "file", "conversations": "dir"}
 
 def gone(path):
     if path.is_symlink() or not path.is_dir():
