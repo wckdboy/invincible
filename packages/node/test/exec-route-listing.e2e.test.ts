@@ -13,8 +13,9 @@ import { freePort } from "./ports.ts";
 
 /*
  * A command through the node's exec route, as every command an agent runs goes (speed, 28 November 2026): its sandbox is
- * looked up once, on the look the command itself takes, and held to whose it is there. The route's own look before it
- * was a second listing of every sandbox in every command (41–46 ms on Ultra, more with the workspace helper's sizes).
+ * looked up once, by its container's name, on the look the command itself takes, and held to whose it is there. The
+ * route's own look before it was a second listing of every sandbox in every command (41–46 ms on Ultra, more with the
+ * workspace helper's sizes).
  */
 
 const caps: Capabilities = {
@@ -95,11 +96,11 @@ async function asking(f: () => Promise<unknown>): Promise<string[]> {
 }
 
 describe("a command through the exec route", () => {
-  test("looks its sandbox up once (docker ps, docker inspect), and runs", async () => {
+  test("looks its sandbox up once (one docker inspect, by its name), and runs", async () => {
     const { token } = await call<{ token: string }>("mintArm", { label: "ada" });
     const { sandbox } = await call<{ sandbox: { id: string } }>("createSandbox", { network: "isolated" }, token);
     const said = await asking(() => call("execSandbox", { id: sandbox.id, cmd: ["true"] }, token));
-    expect(said).toEqual(["ps", "inspect", "exec"]);
+    expect(said).toEqual(["inspect", "exec"]);
   });
 
   test("another run's is refused there, and nothing runs in it", async () => {

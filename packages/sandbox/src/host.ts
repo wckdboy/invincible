@@ -1262,9 +1262,28 @@ export class SandboxHost {
     return (await this.list()).find((s) => s.id === id) ?? null;
   }
 
-  /** One of this node's sandboxes, as `get` says it, but for a command in it: without its workspace's use. */
+  /**
+   * One of this node's sandboxes, as `get` says it, but for a command in it: without its workspace's use, and looked up by
+   * its container's name alone (one `docker inspect`, however many sandboxes this node has), held to being this node's as
+   * the listing is. Anything else (no container by that name, as while a VM is made again, or Docker not answering) is
+   * answered as the whole listing answers it.
+   */
   private async forCommand(id: string): Promise<SandboxView | null> {
-    return (await this.inspected({ usage: false }))?.find((c) => c.view.id === id)?.view ?? null;
+    const listed = async () => (await this.inspected({ usage: false }))?.find((c) => c.view.id === id)?.view ?? null;
+    if (this.apple || (!this.opts.runner && !Bun.which(this.bin))) return listed();
+    const inspected = await this.docker(["inspect", containerName(id)]);
+    if (inspected.code !== 0) return listed();
+    let found: { Config?: { Labels?: Record<string, string>; Image?: string }; State?: { Status?: string }; HostConfig?: { NanoCpus?: number; Memory?: number } }[];
+    try {
+      found = JSON.parse(inspected.stdout);
+    } catch {
+      return listed();
+    }
+    const [c] = found;
+    const labels = c?.Config?.Labels;
+    if (found.length !== 1 || !labels || labels[`${LABEL}.node`] !== this.opts.node || !c.Config?.Image || !c.State?.Status) return listed();
+    const view = toView(labels, c.Config.Image, c.State.Status, null, c.HostConfig);
+    return view?.id === id ? view : listed();
   }
 
   /** Owner/controller only. Resume the exact existing VM and give this run bounded model access. */
