@@ -63,9 +63,9 @@ test("a task done on a coding plan, or on your own sign-in, costs no money in th
   const api = { async call<T>(name: RouteName): Promise<T> { return (name === "prices" ? { prices: { "zplan/glm": { input: 3, output: 12 }, "byok/m": { input: 1, output: 4 } }, plans: ["zplan"] } : state) as T; } };
   await teamCommand(api, undefined, [], {}, (line) => lines.push(line));
   expect(lines.slice(1)).toEqual([
-    "task-listed · done (verified) · ada · Task task-listed · 12m04s · 8 commands · 94.0k tokens · $0",
-    "task-unlisted · done (verified) · ada · Task task-unlisted · 12m04s · 8 commands · 94.0k tokens · $0",
-    "task-seat · done (verified) · ada · Task task-seat · 12m04s · 8 commands · 94.0k tokens · $0",
+    "task-listed · done (verified) · ada · Task task-listed · 12m04s · 8 commands · 94.0k tokens · $0.00",
+    "task-unlisted · done (verified) · ada · Task task-unlisted · 12m04s · 8 commands · 94.0k tokens · $0.00",
+    "task-seat · done (verified) · ada · Task task-seat · 12m04s · 8 commands · 94.0k tokens · $0.00",
     // Your own keys: money at your prices, as ever.
     "task-keys · done (verified) · ada · Task task-keys · 12m04s · 8 commands · 94.0k tokens · $0.11",
   ]);
