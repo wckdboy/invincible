@@ -2,6 +2,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { b64u, utf8 } from "./bytes.ts";
 import { isTimeZone, zonedParts } from "./schedule.ts";
 import { findSecrets } from "./secret-scan.ts";
+import { ROUND_SOURCE } from "./routing.ts";
 import { isConversationId, isNotifyTag, NOTIFY_BODY_MAX, NOTIFY_KINDS, NOTIFY_TITLE_MAX, notifyClean, type NotifyKind, type NotifyOpen, type NotifyPayload } from "./notify-payload.ts";
 
 export * from "./notify-payload.ts";
@@ -165,8 +166,11 @@ export type NotifyOrigin =
   | { from: "action" | "screen" | "question" | "secret" | "connector" | "run" }
   | { from: "turn"; look: boolean; question: boolean; waiting: boolean };
 
-/** Sources whose findings are the node's own, about what only you can fix (its heartbeat and doctor, the archive, compute, CI that's yours). */
-const NODE_SOURCES = new Set(["heartbeat", "archive", "compute", "ci"]);
+/**
+ * Sources whose findings are the node's own, about what only you can fix (its heartbeat and doctor, the archive, compute,
+ * CI that's yours, and its routing: work going round on both tiers, counted by the node, never a model's word).
+ */
+const NODE_SOURCES = new Set(["heartbeat", "archive", "compute", "ci", ROUND_SOURCE]);
 const RULE_SOURCE = /^rule:([a-z0-9][a-z0-9._-]{0,39})$/;
 const TELL_SOURCE = /^tell:([a-z0-9][a-z0-9._-]{0,39})$/;
 const OUTCOME_SOURCE = /^outcome:out-[a-z0-9_-]{12}$/;

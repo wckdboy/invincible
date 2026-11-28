@@ -234,6 +234,7 @@ describe("how loudly: three tiers, by rules", () => {
     ["the archive's warning", { from: "notice", key: "a", severity: "warn", source: "archive" }, { tier: "now", model: false, topic: "note" }],
     ["compute's warning", { from: "notice", key: "c", severity: "warn", source: "compute" }, { tier: "now", model: false, topic: "note" }],
     ["CI that's yours now", { from: "notice", key: "ci:x", severity: "warn", source: "ci" }, { tier: "now", model: false, topic: "ci" }],
+    ["work going round on both tiers", { from: "notice", key: "went-round:task-aaaaaaaaaaaa", severity: "warn", source: "routing" }, { tier: "now", model: false, topic: "note" }],
     ["CI an agent is fixing", { from: "notice", key: "ci:x", severity: "info", source: "ci" }, { tier: "digest", model: false, topic: "ci" }],
     ["a loop that failed", { from: "notice", key: "loop:ci", severity: "warn", source: "loop:ci" }, { tier: "soon", model: false, topic: "tell" }],
     ["an outcome's question", { from: "notice", key: "outcome:out-aaaaaaaaaaaa:ask:1", severity: "warn", source: "outcome:out-aaaaaaaaaaaa" }, { tier: "soon", model: true, topic: "asked" }],

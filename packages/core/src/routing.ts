@@ -87,3 +87,39 @@ export function beginFor(tasks: readonly RoutedTaskRead[], kind: TaskKind, curre
 export function beginsByKind(tasks: readonly RoutedTaskRead[]): { kind: TaskKind; begin: Begin }[] {
   return TASK_KINDS.filter((kind) => tasks.some((t) => t.record?.routing?.kind === kind)).map((kind) => ({ kind, begin: beginFor(tasks, kind) }));
 }
+
+/*
+ * Work going round on both tiers (agents' run.ts `round`): it went round on the engineer's models, moved up, and now goes
+ * round on the planner's too. Nothing stops it (your word, 19 November 2026: no audit ends work, no limits on length);
+ * the node tells you at once with a notice (events.ts notice.raised), one a task, cleared when the task ends. Said once,
+ * and again only once the work has changed something and goes round anew: a raise brings back one you dismissed.
+ */
+
+/** The notices' source: the node's own words about its routing, told at once (notify.ts NODE_SOURCES). */
+export const ROUND_SOURCE = "routing";
+
+const ROUND_PREFIX = "went-round:";
+
+/** A task's notice: one a task. */
+export const roundKey = (task: string): string => `${ROUND_PREFIX}${task}`;
+
+/** The task a notice is about, when it is one of these; else null. */
+export function roundTask(key: string): string | null {
+  if (!key.startsWith(ROUND_PREFIX)) return null;
+  const task = key.slice(ROUND_PREFIX.length);
+  return /^task-[a-z0-9_-]{12}$/.test(task) ? task : null;
+}
+
+/** At most this many of the files it read are named. */
+const ROUND_FILES = 5;
+
+/** What the notice says: whose task, that it went round on both tiers, that it goes on, and how to stop it. */
+export function roundNotice(input: { agent: string; task: string; id: string; rereads: number; files: readonly string[] }): { title: string; body: string } {
+  const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+  const files = input.files.slice(0, ROUND_FILES).map((file) => cut(file, 80));
+  const more = input.files.length > ROUND_FILES ? `, and ${input.files.length - ROUND_FILES} more` : "";
+  return {
+    title: cut(`${input.agent}'s task went round on both tiers`, 200),
+    body: `“${cut(input.task, 300)}” went round on the engineer's models, moved up, and has now read the same files again ${input.rereads} times on the planner's models with nothing changed${files.length ? ` (${files.join(", ")}${more})` : ""}. It goes on until you stop it or its budget ends it. To stop it: its card's Stop, or invincible agents stop task ${input.id}`,
+  };
+}

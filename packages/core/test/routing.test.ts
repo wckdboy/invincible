@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { beginFor, PROBE_AFTER, type RoutedTaskRead, TASK_KINDS, type TaskKind, taskKindOf, TeamTaskRouting } from "../src/index.ts";
+import { beginFor, Bodies, PROBE_AFTER, ROUND_SOURCE, roundKey, roundNotice, roundTask, type RoutedTaskRead, TASK_KINDS, type TaskKind, taskKindOf, TeamTaskRouting } from "../src/index.ts";
 
 /*
  * Smart routing's memory, by kind of task (routing.ts): an agent's tasks of a kind begin on the tier that last verified
@@ -128,5 +128,26 @@ describe("the same trail, the same tier", () => {
     const mixed = [finished("fix", "engineer"), own[0]!, finished("desktop", "planner", { because: "memory" }), own[1]!, finished("task", "engineer", { moved: true })];
     expect(beginFor(mixed, "code")).toEqual(beginFor(own, "code"));
     expect(beginFor(mixed, "code")).toEqual(beginFor(mixed, "code"));
+  });
+});
+
+describe("work going round on both tiers: a notice, so you are told at once", () => {
+  test("its key is the task's, and says which task it is: one notice a task", () => {
+    expect(roundKey("task-a1b2c3d4e5f6")).toBe("went-round:task-a1b2c3d4e5f6");
+    expect(roundTask(roundKey("task-a1b2c3d4e5f6"))).toBe("task-a1b2c3d4e5f6");
+    for (const other of ["disk:n_1", "went-round:", "went-round:../x", "ci:went-round:task-a1b2c3d4e5f6"]) expect(roundTask(other)).toBeNull();
+  });
+
+  test("what it says: whose task, that it went round on both tiers, that the work goes on, and how to stop it; a notice the ledger takes", () => {
+    const n = roundNotice({ agent: "Ada", task: "Sync survives a dropped connection", id: "task-a1b2c3d4e5f6", rereads: 8, files: ["src/sync.ts", "src/net.ts"] });
+    expect(n.title).toBe("Ada's task went round on both tiers");
+    expect(n.body).toBe(
+      "“Sync survives a dropped connection” went round on the engineer's models, moved up, and has now read the same files again 8 times on the planner's models with nothing changed (src/sync.ts, src/net.ts). It goes on until you stop it or its budget ends it. To stop it: its card's Stop, or invincible agents stop task task-a1b2c3d4e5f6",
+    );
+    const raised = Bodies["notice.raised"].safeParse({ key: roundKey("task-a1b2c3d4e5f6"), severity: "warn", source: ROUND_SOURCE, at: 1, ...n });
+    expect(raised.success).toBe(true);
+    // A long title or many files stay within what a notice holds.
+    const long = roundNotice({ agent: "Ada", task: "x".repeat(5000), id: "task-a1b2c3d4e5f6", rereads: 8, files: Array.from({ length: 40 }, (_, i) => `src/${"d".repeat(60)}/f${i}.ts`) });
+    expect(Bodies["notice.raised"].safeParse({ key: roundKey("task-a1b2c3d4e5f6"), severity: "warn", source: ROUND_SOURCE, at: 1, ...long }).success).toBe(true);
   });
 });
