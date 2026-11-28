@@ -55,12 +55,25 @@ export function dayLabel(ms: number, now = Date.now()): string {
 }
 
 /**
- * When, as a chat app's list says it (the list that is home on a phone, after Grok Bot): the clock time today, "Yesterday",
- * the weekday's name within the week before, else the date in numbers with its whole year. In the device's time zone and
- * locale ([zone] and [locale] pin them, for the vectors every app checks); a day ahead (a clock running fast) is a date too.
+ * The locale the list's times are said in: the app's language, English (every word of the app is), with the device's
+ * region, its likely one where the device names none ("da": Denmark). So "Yesterday" and a weekday's name are English
+ * while the clock and the date are written as that region writes them: a phone in Danish says "Thursday", "14.05",
+ * "21/11/2026", never "torsdag" beside "Yesterday" (the lead's word, 28 November 2026: the owner is Danish).
  */
-export function listTime(ms: number, now: number, zone?: string, locale?: string): string {
+export function listLocale(device: string): string {
+  const region = new Intl.Locale(device).maximize().region;
+  return region ? `en-${region}` : "en";
+}
+
+/**
+ * When, as a chat app's list says it (the list that is home on a phone, after Grok Bot): the clock time today, "Yesterday",
+ * the weekday's name within the week before, else the date in numbers with its whole year. In the device's time zone, in
+ * English with the device's region (listLocale): [zone] and [device] pin them, for the vectors every app checks. A day
+ * ahead (a clock running fast) is a date too.
+ */
+export function listTime(ms: number, now: number, zone?: string, device?: string): string {
   const timeZone = zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const locale = listLocale(device ?? Intl.DateTimeFormat().resolvedOptions().locale);
   // (Days counted by the calendar there: its dates, not 24-hour spans.)
   const date = (t: number): number => {
     const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(t);

@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import * as core from "../../../packages/core/src/index.ts";
 import { besideChip, primaryState, type AgentState } from "../../web/src/lib/agent-state.ts";
 import { homePrimaryLine, homeRows, primaryNeeds, rosterRows } from "../../web/src/lib/roster.ts";
-import { listTime } from "../../web/src/lib/time.ts";
+import { listLocale, listTime } from "../../web/src/lib/time.ts";
 import { primaryNow, needsFirst, type NowInput } from "../../web/src/lib/now.ts";
 import { groupConversations } from "../../web/src/lib/chats.ts";
 import { highlight } from "../../web/src/lib/highlight.ts";
@@ -497,20 +497,31 @@ const seenSnapshot: core.TeamSnapshot = {
 const LIST_NOW = Date.UTC(2026, 10, 28, 13, 30);
 const LIST_ZONE = "Europe/Copenhagen";
 const LIST_LOCALE = "en-GB";
+// (Single-digit days and months, whose padding differs between CLDR's versions for some regions as no rule of ours does:
+// English in Denmark is 5/11/2026 in ICU 78 and 05/11/2026 in Android 16's. Pinned for en-GB alone, which agree.)
+const PADDED = [Date.UTC(2026, 10, 5, 7, 0), Date.UTC(2026, 0, 2, 7, 0)];
+const LIST_MOMENTS = [
+  // Today there (Copenhagen is UTC + 1): the afternoon, the morning, half past midnight (still yesterday in UTC), a
+  // minute ahead.
+  Date.UTC(2026, 10, 28, 13, 5), Date.UTC(2026, 10, 28, 7, 4), Date.UTC(2026, 10, 27, 23, 30), Date.UTC(2026, 10, 28, 13, 31),
+  // Yesterday there, at its last minute and its first.
+  Date.UTC(2026, 10, 27, 22, 59), Date.UTC(2026, 10, 26, 23, 1),
+  // Two and six days back; then a week back, single-digit days and months, last year, and a day ahead.
+  Date.UTC(2026, 10, 26, 8, 0), Date.UTC(2026, 10, 22, 8, 0), Date.UTC(2026, 10, 21, 8, 0), ...PADDED, Date.UTC(2025, 11, 31, 22, 0),
+  Date.UTC(2026, 10, 29, 8, 0),
+];
+// `locale` is the device's; the words are said in English with its region (listLocale), which for en-GB is its own.
+// `devices`: a phone in another language, its words the app's (English), its clock and dates its region's.
 const listTimes = {
   now: LIST_NOW,
   zone: LIST_ZONE,
   locale: LIST_LOCALE,
-  cases: [
-    // Today there (Copenhagen is UTC + 1): the afternoon, the morning, half past midnight (still yesterday in UTC), a
-    // minute ahead.
-    Date.UTC(2026, 10, 28, 13, 5), Date.UTC(2026, 10, 28, 7, 4), Date.UTC(2026, 10, 27, 23, 30), Date.UTC(2026, 10, 28, 13, 31),
-    // Yesterday there, at its last minute and its first.
-    Date.UTC(2026, 10, 27, 22, 59), Date.UTC(2026, 10, 26, 23, 1),
-    // Two and six days back; then a week back, single-digit days and months, last year, and a day ahead.
-    Date.UTC(2026, 10, 26, 8, 0), Date.UTC(2026, 10, 22, 8, 0), Date.UTC(2026, 10, 21, 8, 0), Date.UTC(2026, 10, 5, 7, 0),
-    Date.UTC(2026, 0, 2, 7, 0), Date.UTC(2025, 11, 31, 22, 0), Date.UTC(2026, 10, 29, 8, 0),
-  ].map((at) => ({ at, words: listTime(at, LIST_NOW, LIST_ZONE, LIST_LOCALE) })),
+  cases: LIST_MOMENTS.map((at) => ({ at, words: listTime(at, LIST_NOW, LIST_ZONE, LIST_LOCALE) })),
+  devices: ["da-DK"].map((device) => ({
+    device,
+    locale: listLocale(device),
+    cases: LIST_MOMENTS.filter((at) => !PADDED.includes(at)).map((at) => ({ at, words: listTime(at, LIST_NOW, LIST_ZONE, device) })),
+  })),
 };
 
 // ---- your agent's line in the list that is home (lib/roster.ts homePrimaryLine): never what waits on you, which its row

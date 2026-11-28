@@ -176,12 +176,13 @@ fun HomeList(app: AppModel, open: (String) -> Unit, settings: () -> Unit, curren
 }
 
 /**
- * How this phone says when, for the list (ListTime): in its time zone and its locale, its clock as it is set (24 hours or
- * 12, as Settings has it) and its numeric date, as Android's own DateFormat writes them.
+ * How this phone says when, for the list (ListTime): in its time zone, in the app's words (English) with its region
+ * (ListTime.speaking), its clock as it is set (24 hours or 12, as Settings has it) and its numeric date, as Android's own
+ * DateFormat writes them there.
  */
 @Composable
 private fun rememberListTime(): ListTime {
-    val locale = LocalConfiguration.current.locales[0]
+    val locale = ListTime.speaking(LocalConfiguration.current.locales[0])
     val hours24 = DateFormat.is24HourFormat(LocalContext.current)
     val zone = ZoneId.systemDefault()
     return remember(locale, hours24, zone) {

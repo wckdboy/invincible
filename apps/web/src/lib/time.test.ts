@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { listTime } from "./time.ts";
+import { listLocale, listTime } from "./time.ts";
 
 // Saturday 28 November 2026, 14:30 in Copenhagen (13:30 UTC); a list in British English, as the vectors pin it.
 const NOW = Date.UTC(2026, 10, 28, 13, 30);
@@ -30,4 +30,20 @@ test("two to six days back, the weekday's name; a week back and older, the date 
 
 test("a day ahead, from a clock running fast, is its date", () => {
   expect(said(cph(2026, 11, 29, 9, 0))).toBe("29/11/2026");
+});
+
+test("a phone in Danish: the app's words, English, in Denmark's clock and dates, never torsdag beside Yesterday", () => {
+  const dane = (ms: number) => listTime(ms, NOW, ZONE, "da-DK");
+  expect(dane(cph(2026, 11, 28, 14, 5))).toBe("14.05");
+  expect(dane(cph(2026, 11, 27, 23, 59))).toBe("Yesterday");
+  expect(dane(cph(2026, 11, 26, 9, 0))).toBe("Thursday");
+  expect(dane(cph(2026, 11, 21, 9, 0))).toBe("21/11/2026");
+});
+
+test("they're said in English with the device's region: its likely one where it names none", () => {
+  expect(listLocale("da-DK")).toBe("en-DK");
+  expect(listLocale("da")).toBe("en-DK");
+  expect(listLocale("en-GB")).toBe("en-GB");
+  expect(listLocale("en")).toBe("en-US");
+  expect(listLocale("de-AT")).toBe("en-AT");
 });

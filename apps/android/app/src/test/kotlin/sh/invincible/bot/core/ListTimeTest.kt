@@ -8,19 +8,30 @@ import java.util.Locale
 
 /**
  * When, as the list that is home says it (apps/web/src/lib/time.ts listTime), held to the vectors the PWA's own code
- * wrote: a fixed now, in Copenhagen and in British English, so every app checks the same strings. The patterns are the
- * ones Android's DateFormat makes for British English (its clock, "Hm", and its numeric date, "yMd"); on a phone they are
- * the phone's own.
+ * wrote: a fixed now, in Copenhagen, for a phone in British English and one in Danish (its words English, its clock and
+ * dates Denmark's), so every app checks the same strings. The patterns are the ones Android's DateFormat makes there (its
+ * clock, "Hm", and its numeric date, "yMd"); on a phone they are the phone's own.
  */
 class ListTimeTest {
     private val v: Json = Json.parse(javaClass.classLoader!!.getResource("core-vectors.json")!!.readText())["listTimes"]!!
     private val now = v["now"].long!!
-    private val british = ListTime(ZoneId.of(v["zone"].string!!), Locale.forLanguageTag(v["locale"].string!!), clock = "HH:mm", date = "dd/MM/y")
+    private val british = ListTime(ZoneId.of(v["zone"].string!!), ListTime.speaking(Locale.forLanguageTag(v["locale"].string!!)), clock = "HH:mm", date = "dd/MM/y")
 
     @Test fun eachTimeIsSaidAsThePwaSaysIt() {
         val cases = v["cases"].list
         assertTrue(cases.size >= 12)
         for (c in cases) assertEquals("at ${c["at"].long}", c["words"].string, british.of(c["at"].long!!, now))
+    }
+
+    @Test fun aPhoneInDanishSaysTheAppsWordsInEnglishAsDenmarkWritesItsClockAndDates() {
+        val danish = v["devices"].list.first { it["device"].string == "da-DK" }
+        val speaking = ListTime.speaking(Locale.forLanguageTag(danish["device"].string!!))
+        assertEquals(danish["locale"].string, speaking.toLanguageTag())
+        // (Android's patterns for English in Denmark, as its DateFormat makes them there: "Hm" and "yMd".)
+        val danes = ListTime(ZoneId.of(v["zone"].string!!), speaking, clock = "HH.mm", date = "dd/MM/y")
+        val cases = danish["cases"].list
+        assertTrue(cases.size >= 11)
+        for (c in cases) assertEquals("at ${c["at"].long}", c["words"].string, danes.of(c["at"].long!!, now))
     }
 
     @Test fun itsDigitsAreTheLocalesOwn() {

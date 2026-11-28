@@ -11,10 +11,10 @@ import java.util.Locale
 /**
  * When, as the list that is home says it, as a chat app's list does (apps/web/src/lib/time.ts listTime, held to its
  * vectors): today, its clock time, short ("14:05"); "Yesterday"; the weekday's name for two to six days back
- * ("Thursday"); else a numeric date ("21/11/2026"). Days are the calendar's in [zone], not 24-hour spans. [clock] and
- * [date] are patterns as the phone makes them (Android's DateFormat: its clock as it is set, 24 hours or 12, and its
- * numeric date, in its locale); one this java.time can't read is the locale's own short form instead. Its digits are the
- * locale's own (Egyptian Arabic's ٠-٩), as the web's and the iPhone's are.
+ * ("Thursday"); else a numeric date ("21/11/2026"). Days are the calendar's in [zone], not 24-hour spans, and [locale]
+ * is the one it speaks (speaking: English, with the phone's region). [clock] and [date] are patterns as the phone makes
+ * them there (Android's DateFormat: its clock as it is set, 24 hours or 12, and its numeric date); one this java.time
+ * can't read is the locale's own short form instead. Its digits are the locale's own, as the web's and the iPhone's are.
  */
 class ListTime(private val zone: ZoneId, private val locale: Locale, clock: String, date: String) {
     private val digits = DecimalStyle.of(locale)
@@ -35,4 +35,14 @@ class ListTime(private val zone: ZoneId, private val locale: Locale, clock: Stri
     }
 
     private fun pattern(p: String): DateTimeFormatter? = runCatching { DateTimeFormatter.ofPattern(p, locale) }.getOrNull()
+
+    companion object {
+        /**
+         * The locale the list's times are said in (lib/time.ts listLocale): the app's language, English (every word of it
+         * is), with the phone's region. So "Yesterday" and a weekday's name are English while the clock and the date are
+         * written as that region writes them: a phone in Danish says "Thursday", "14.05", "21/11/2026", never "torsdag"
+         * beside "Yesterday". (A phone's locale names its region; one that names none is said in English alone.)
+         */
+        fun speaking(device: Locale): Locale = Locale.Builder().setLanguage("en").setRegion(device.country).build()
+    }
 }
