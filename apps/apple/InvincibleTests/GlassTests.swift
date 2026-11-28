@@ -75,7 +75,6 @@ struct GlassTests {
         let paint: JSONValue
         let glow: JSONValue
         let dot: JSONValue
-        let pearlTile: JSONValue
     }
 
     static let vectors: Vectors = {
@@ -156,7 +155,6 @@ struct GlassTests {
         }
         #expect(n(dot["idleRing"]) == Double(AgentGlass.Dot.idleRing))
         #expect((dot["sizes"]?.array ?? []).map { [n($0["upTo"]), n($0["size"]), n($0["out"]), n($0["cut"])] } == AgentGlass.Dot.sizes.map { [Double($0.upTo), Double($0.size), Double($0.out), Double($0.cut)] as [Double?] })
-        #expect(v.pearlTile["light"]?.string == AgentGlass.pearlTile.light && v.pearlTile["dark"] == .null)
     }
 
     @Test func itsRampsAreCores() {
@@ -300,24 +298,30 @@ struct GlassTests {
         #expect(at(20, 20) == [255, 0, 0, 255] && at(45, 20) == [255, 0, 0, 255])
     }
 
-    @Test @MainActor func yourAgentsPearlGlowsOnADarkPageAndSitsOnItsTileOnALightOne() throws {
-        // Lit as an agent's glass is: its pool on a dark page (past its box, where its blur doesn't reach); on a light page
-        // its graphite tile, and no shadow under it.
+    @Test @MainActor func yourAgentsPearlGlowsOnADarkPageAndIsInkedOnNothingOnALightOne() throws {
+        // Lit as an agent's glass is, in core's pearl: on a dark page the pearl, its pool past its box (where its blur
+        // doesn't reach); on a light page the pearl inked (core's light stops), on nothing (the owner's word of 27 November
+        // 2026: no tile anywhere), with no shadow under it.
         let key = "invincible.guardian-mark"
         UserDefaults.standard.set("pearl", forKey: key)
         defer { UserDefaults.standard.removeObject(forKey: key) }
         for theme in [ColorScheme.dark, .light] {
             let (bytes, width) = try drawn(GuardianMark(size: 60).padding(30).environment(\.colorScheme, theme).environment(\.displayScale, 2), width: 120, height: 120)
-            func alpha(_ x: Double, _ y: Double) -> Int { Int(bytes[(Int(y * 2) * width + Int(x * 2)) * 4 + 3]) }
-            // 8 % of its size left of its box, at its middle; and under its box, where an agent's shadow lies.
-            let beside = alpha(30 - 4.8, 60), under = alpha(60, 30 + 60 * 1.08)
+            func at(_ x: Double, _ y: Double) -> [Int] { let i = (Int(y * 2) * width + Int(x * 2)) * 4; return (0..<4).map { Int(bytes[i + $0]) } }
+            // 8 % of its size left of its box, at its middle; under its box, where an agent's shadow lies; inside its box at
+            // its left edge, beside the I-beam, where a tile was; and the I-beam's web, its body.
+            let beside = at(30 - 4.8, 60)[3], under = at(60, 30 + 60 * 1.08)[3], edge = at(30 + 4, 60)[3], body = at(60, 60)
+            #expect(body[3] == 255, "its body: \(body)")
             if theme == .dark {
                 #expect(beside > 4, "its pool, beside it: \(beside)")
+                #expect(body[0..<3].allSatisfy { $0 > 128 }, "the pearl, light on a dark page: \(body)")
             } else {
                 // (Under it, at most its own blur's last trace, moved down on a light page: 1 of 255. An agent's shadow is
                 // about 21 there.)
-                #expect(beside == 0 && under <= 2, "nothing past its tile on a light page: \(beside), \(under)")
-                #expect(alpha(60, 60) == 255, "its tile")
+                #expect(beside == 0 && under <= 2, "nothing past it on a light page: \(beside), \(under)")
+                // (A tile there was solid: 255.)
+                #expect(edge < 16, "no tile behind it: \(edge)")
+                #expect(body[0..<3].allSatisfy { $0 < 128 }, "the pearl inked, dark on a light page: \(body)")
             }
         }
     }

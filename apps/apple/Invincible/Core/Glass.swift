@@ -106,9 +106,6 @@ extension AgentGlass {
             return (found.size, found.out, found.cut)
         }
     }
-
-    /// The Guardian's pearl, on a light page, sits on a graphite tile; on a dark one it glows on its own.
-    static let pearlTile = AgentMark.Forms(light: "#171717", dark: "")
 }
 
 // MARK: - Who wears what

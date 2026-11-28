@@ -43,5 +43,5 @@ extension AgentGlass {
         Ramp(id: "dusk", name: "Dusk", light: Stops(highlight: "#eae6ff", a: "#927eec", b: "#ec5b57", accent: "#67d283", deep: "#3e316d"), dark: Stops(highlight: "#f1eeff", a: "#aa98ff", b: "#ff7a73", accent: "#7ce695", deep: "#2e2357")),
         Ramp(id: "orchid", name: "Orchid", light: Stops(highlight: "#ffdbf1", a: "#f46eb4", b: "#9751d7", accent: "#fb817a", deep: "#5b2987"), dark: Stops(highlight: "#ffebf9", a: "#ff90cc", b: "#ae6dee", accent: "#ff9890", deep: "#421c62")),
     ]
-    static let pearl = Ramp(id: "pearl", name: "Pearl", light: Stops(highlight: "#f9fcff", a: "#dddcee", b: "#95afbd", accent: "#f3dba9", deep: "#343e4d"), dark: Stops(highlight: "#f9fcff", a: "#dddcee", b: "#95afbd", accent: "#f3dba9", deep: "#343e4d"))
+    static let pearl = Ramp(id: "pearl", name: "Pearl", light: Stops(highlight: "#9a9ea9", a: "#4a4954", b: "#1e282d", accent: "#6b624f", deep: "#0b0d11"), dark: Stops(highlight: "#f9fcff", a: "#dddcee", b: "#95afbd", accent: "#f3dba9", deep: "#343e4d"))
 }

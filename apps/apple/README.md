@@ -70,9 +70,9 @@ by the parity vectors. The app's words about itself (macOS's permissions, a devi
 
 **The look** is monochrome (the owner's word, 26 November 2026): black, white and greys, bold type, the system's own
 surfaces; colour is kept for the agents, so they are told apart at a glance, and red for what went wrong, nothing else.
-The primary is shown by the I-beam (`UI/Mark.swift`, a shape held to `scripts/mark.ts` by `MarkTests`) on a tile of its
-own in one ink, or in pearl glass where the device is set so (More, Appearance: `UI/GlassView.swift`' `GuardianMark`),
-never an agent's glass and never moving. Each agent is its glass (27 November 2026): one of 22 shapes in one of eight
+The primary is shown by the I-beam (`UI/Mark.swift`, a shape held to `scripts/mark.ts` by `MarkTests`), bare, in one
+ink, or in pearl glass where the device is set so (More, Appearance: `UI/GlassView.swift`' `GuardianMark`), on nothing on
+any page (on a light one the pearl inked, at core's light stops), never an agent's glass and never moving. Each agent is its glass (27 November 2026): one of 22 shapes in one of eight
 colour ramps, as its node gave it, or, from a node before the glass, its mark's colour or the one chosen for its orb,
 snapped to the eight, with its handle's shape (`Core/Glass.swift`, its numbers in `Core/GlassData.swift`, drawn by
 `UI/GlassView.swift`: each shape, ramp, size and page drawn once and kept); held to core's `glass.ts` by the vectors'

@@ -44,7 +44,7 @@ struct MoreView<Leading: View>: View {
             } header: {
                 SectionHead("Appearance")
             } footer: {
-                PageNote("The I-beam on its tile in one ink, or in pearl glass, on this device.")
+                PageNote("Its I-beam, in ink or in pearl glass, on this device.")
             }
             if session.can("chat") {
                 Section {

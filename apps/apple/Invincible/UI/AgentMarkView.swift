@@ -3,11 +3,11 @@ import SwiftUI
 /*
  * The faces: an agent is its glass (Core/Glass.swift, UI/GlassView.swift; the owner's word of 27 November 2026 that the
  * Grille goes): a shape of our own in one of eight ramps, as its node gave them, the same on every device; its state a dot
- * beside the word, where its state is known. Only working moves, its light breathing. Your agent is the app icon's I-beam
- * on a tile of its own in one ink (GuardianMark), or in pearl glass where this device is set so.
+ * beside the word, where its state is known. Only working moves, its light breathing. Your agent is the app's I-beam,
+ * bare, in one ink (GuardianMark), or in pearl glass where this device is set so, on nothing on any page.
  */
 
-/// The primary, as a face: the I-beam on its tile (GuardianMark), never moving; where it stands is said by the words
+/// The primary, as a face: the bare I-beam (GuardianMark), never moving; where it stands is said by the words
 /// beside it. `tone`, `mood` and `key` are kept for the places that pass them; the I-beam wears none of them. Decorative
 /// beside its name; named (`label`) where it stands alone.
 struct PrimaryOrb: View {

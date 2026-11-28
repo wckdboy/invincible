@@ -39,8 +39,8 @@ struct GlassMarkView: View {
 /// Your agent's mark, in the box an orb takes: the bare I-beam in the page's ink, on nothing (the owner's word of 27 November
 /// 2026: "the Logo is just the I beam, not the appicon squircle around it"; the squircle is the app's icon alone, on the
 /// home screen, in the App Store and in Settings), or, where this device is set so (Settings), in pearl glass, lit as an
-/// agent's glass is: on a graphite tile on a light page (so no shadow under it), glowing on its own on a dark one (its
-/// pool from 24 pt), its blur from 40.
+/// agent's glass is, on nothing on any page: on a light page the pearl inked (core's light stops), with no shadow under
+/// it; on a dark one the pearl, glowing on its own (its pool from 24 pt); its blur from 40.
 struct GuardianMark: View {
     let size: CGFloat
     @AppStorage("invincible.guardian-mark") private var style = "mono"
@@ -51,7 +51,6 @@ struct GuardianMark: View {
         let theme: AgentMark.Theme = scheme == .dark ? .dark : .light
         if style == "pearl" {
             ZStack {
-                if theme == .light { RoundedRectangle(cornerRadius: size * 0.28, style: .continuous).fill(Color(hex: AgentGlass.pearlTile.light)) }
                 GlassGlow(ramp: AgentGlass.pearl, size: size, theme: theme, working: false, shadow: false)
                 GlassPicture(shape: -1, ramp: -1, size: size, theme: theme, scale: displayScale)
             }
@@ -73,7 +72,7 @@ private struct GlassGlow: View {
     let size: CGFloat
     let theme: AgentMark.Theme
     let working: Bool
-    /// Its tinted shadow on a light page: not for your agent's pearl, which sits on its tile there.
+    /// Its tinted shadow on a light page: not for your agent's pearl, inked on nothing there (as core and the web have it).
     var shadow = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -189,7 +188,7 @@ extension BreathingGradient: NSViewRepresentable {
 #endif
 
 /// The shape in its ramp, with its blur from 40 pt: one picture for each shape, ramp, size, page and screen, made once and
-/// kept. `shape` and `ramp` -1: the Guardian's I-beam in pearl.
+/// kept. `shape` and `ramp` -1: the Guardian's I-beam in pearl (inked on a light page, as core's light stops are).
 private struct GlassPicture: View, Equatable {
     let shape: Int
     let ramp: Int

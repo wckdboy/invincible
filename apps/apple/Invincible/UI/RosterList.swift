@@ -123,7 +123,7 @@ struct RosterList<Foot: View>: View {
             }
     }
 
-    /// The faces' size: an agent's glass, your agent's tile, a room's mark in the same box.
+    /// The faces' size: an agent's glass, your agent's I-beam, a room's mark in the same box.
     static var face: CGFloat { 28 }
 
     /// Who has a task in hand (nil: a task not known here).
