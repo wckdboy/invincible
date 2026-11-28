@@ -11,8 +11,12 @@ import { CBOR_BUDGET, cborDecode, cborEncode } from "@invincible/core";
  * door (fabric/service.ts) decides what an authenticated caller may have.
  */
 
-/** The socket API this speaks (the sidecar says its own in `hello`). */
-export const SIDECAR_API = 1;
+/**
+ * The socket APIs this speaks (the sidecar says its own in `hello`): 1 is Q-AMP 0.2.0's sidecar, 2 is 0.3.0's. API 2 refuses
+ * a message with a field at its top it doesn't know, and takes a mint's `renew_until` and `holder_renews`: this node sends
+ * neither, and no field either API doesn't know, so it speaks both alike.
+ */
+export const SIDECAR_APIS: readonly number[] = [1, 2];
 /** The largest message either side may send: room for the largest chunk Q-AMP allows. */
 export const MAX_MESSAGE_BYTES = 65 * 1024 * 1024;
 /** What this host holds of one call's chunks or one task's input before it asks the sidecar to hold the rest. */
@@ -464,8 +468,9 @@ export class SidecarClient {
     const task = num(m.task);
     switch (m.t) {
       case "hello": {
-        if (num(m.api) !== SIDECAR_API) {
-          this.helloWaiter?.reject(new SidecarError("invalid", `the sidecar speaks API ${String(m.api)}, this node ${SIDECAR_API}`));
+        const api = num(m.api);
+        if (api === null || !SIDECAR_APIS.includes(api)) {
+          this.helloWaiter?.reject(new SidecarError("invalid", `the sidecar speaks API ${String(m.api)}, this node ${SIDECAR_APIS.join(" and ")}`));
           this.helloWaiter = null;
           return;
         }

@@ -109,8 +109,8 @@ function fake(opts: { hello?: Msg | null; onMessage?: (m: Msg, f: Fake) => void 
 
 describe("the sidecar's socket, as the node speaks it", () => {
   test("a hello of an API this node doesn't speak is refused, by its number", async () => {
-    const f = fake({ hello: { t: "hello", api: 2, did: "x", key_type: "ed25519", version: "9" } });
-    await expect(SidecarClient.connect(f.path)).rejects.toThrow(/speaks API 2, this node 1/);
+    const f = fake({ hello: { t: "hello", api: 3, did: "x", key_type: "ed25519", version: "9" } });
+    await expect(SidecarClient.connect(f.path)).rejects.toThrow(/speaks API 3, this node 1 and 2/);
   });
 
   test("Q-AMP 0.3.0's sidecar (API 2) is taken, and 0.2.0's (API 1) still is", async () => {
