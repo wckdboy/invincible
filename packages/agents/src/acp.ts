@@ -403,8 +403,11 @@ function unhidden(text: string): string {
     if (shows(plain)) text = plain;
   }
   // Wrapped: lines of encoded characters, each but the last the same width (at least 40), the last no wider. One pass:
-  // each line is looked at once, and a block is judged once (the second re-check of 28 November 2026, N1: a search that
-  // started again at each line of a block it didn't take held the node's event loop for seconds a line).
+  // each line is judged at most twice (the second re-check of 28 November 2026, N1: a search that started again at each
+  // line of a block it didn't take held the node's event loop for seconds a line). A narrower last line that shows
+  // nothing with its block may be the first of the next: a token wrapped right after a wider encoded line (a hash alone
+  // on its line, a long path) begins there (the third re-check's N1b). Taken with its block first, it stays a token's
+  // own last line when a line of its width follows.
   const lines = text.split("\n");
   const bare = lines.map((line) => line.replace(/\r$/, ""));
   const encoded = bare.map((line) => ENCODED_LINE.test(line));
@@ -412,13 +415,23 @@ function unhidden(text: string): string {
   for (let i = 0; i < lines.length; ) {
     const width = bare[i]!.length;
     let end = i + 1;
+    let narrower = false;
     if (encoded[i] && width >= 40) {
       while (end < lines.length && encoded[end] && bare[end]!.length === width) end++;
-      if (end < lines.length && encoded[end] && bare[end]!.length < width) end++;
+      if (end < lines.length && encoded[end] && bare[end]!.length < width) {
+        end++;
+        narrower = true;
+      }
     }
     if (end - i > 1) {
       const joined = bare.slice(i, end).join("");
-      out.push(...(shows(joined) || decodedAs(joined).some(shows) ? [HIDDEN] : lines.slice(i, end)));
+      if (shows(joined) || decodedAs(joined).some(shows)) {
+        out.push(HIDDEN);
+        i = end;
+        continue;
+      }
+      if (narrower) end -= 1;
+      out.push(...lines.slice(i, end));
     } else out.push(lines[i]!);
     i = end;
   }

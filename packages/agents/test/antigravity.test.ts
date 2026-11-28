@@ -419,6 +419,24 @@ describe("Antigravity's sign-in, printed", () => {
     test("wrapped: an ID token at 76 columns, and at 64", () => {
       for (const width of [76, 64]) expect([width, leaked(kept(wrap(ID_TOKEN, width)))]).toEqual([width, []]);
     });
+    // The third re-check of 28 November 2026, N1b: the one pass took a wider encoded line right before a wrapped token (a
+    // hash alone on its line, a long path) and the token's first line as one block, and the rest of the token as the next,
+    // so neither showed it. And a token's narrower last line, followed by a line of its own width, is still the token's.
+    test("wrapped beside other encoded lines, with no blank line between: an ID token or the token file's base64 after a wider line, a narrower one, or before one", () => {
+      const HASH = "0123456789abcdef".repeat(8);
+      const PATH = "packages/agents/node_modules/.cache/some-tool/v1.2.3/build/output-artifact-manifest.json.gz";
+      const SHORT = "packages/agents/src/antigravity.ts";
+      const tail = "a".repeat(ID_TOKEN.length % 76 || 76);
+      const dump = wrap(Buffer.from(FILE).toString("base64"), 76);
+      /** A kept base64 dump given back, line by line, decoded (each of base64's 76-wide lines is whole bytes). */
+      const decoded = (out: string) => out.split("\n").map((line) => (/^[A-Za-z0-9+/=]+$/.test(line) ? Buffer.from(line, "base64").toString("latin1") : line)).join("\n");
+      for (const [name, neighbour] of [["a sha512", HASH], ["a long path", PATH], ["a short path", SHORT], ["a line as wide as its last", tail]] as const) {
+        expect([name, "before it", leaked(kept(`${neighbour}\n${wrap(ID_TOKEN, 76)}`))]).toEqual([name, "before it", []]);
+        expect([name, "after it", leaked(kept(`${wrap(ID_TOKEN, 76)}\n${neighbour}`))]).toEqual([name, "after it", []]);
+        expect([name, "before its base64", leaked(decoded(kept(`${neighbour}\n${dump}`)))]).toEqual([name, "before its base64", []]);
+        expect([name, "after its base64", leaked(decoded(kept(`${dump}\n${neighbour}`)))]).toEqual([name, "after its base64", []]);
+      }
+    });
     // The second re-check of 28 November 2026, N1: that look ran in the node's own process, synchronously, and its search
     // for wrapped lines started again at each line of a block it didn't take as wrapped, so a run's command could write
     // lines that held the node's event loop about 47 s for each 2 MB batch read (every vendor tool's driver reads so).
