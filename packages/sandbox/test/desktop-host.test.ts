@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { containerName, desktopVerbIn, LABEL, SandboxHost, type DockerRunner, type LedgerEntryInput } from "../src/index.ts";
+import { containerName, desktopVerbIn, LABEL, SandboxHost, withoutInput, type DockerRunner, type LedgerEntryInput } from "../src/index.ts";
 
 /*
  * Watching an agent's desktop and taking it over, from outside its VM: the host does one thing there with the
@@ -31,8 +31,10 @@ function desk(options: { status?: string; labels?: Record<string, string>; missi
       return { code: 0, stdout: containerName(ID), stderr: "" };
     }
     if (args[0] === "exec") {
-      // After the container: timeout --signal=KILL <n>s <cmd…>
-      const cmd = args.slice(args.indexOf(containerName(ID)) + 4);
+      // After the container: timeout --signal=KILL <n>s, then <cmd…> (given nothing to read: withoutInput's first).
+      const after = args.slice(args.indexOf(containerName(ID)) + 4);
+      const none = withoutInput([]);
+      const cmd = none.every((part, i) => after[i] === part) ? after.slice(none.length) : after;
       execs.push(cmd);
       if (options.missing) return { code: 127, stdout: "", stderr: "sh: 1: desktop: not found" };
       if (options.fail && cmd.includes(options.fail)) return { code: 1, stdout: "", stderr: "desktop: the browser did not start (see /tmp/invincible-desktop/browser.log)" };

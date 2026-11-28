@@ -1,4 +1,4 @@
-import type { DockerRunner } from "@invincible/sandbox";
+import { type DockerRunner, withoutInput } from "@invincible/sandbox";
 
 /*
  * A stand-in for Docker, for tests on machines without one: it answers the commands
@@ -167,8 +167,10 @@ export function fakeDocker(opts: { engine?: string } = {}): FakeDocker {
           const at = rest.findIndex((a) => a.startsWith("invincible-sbx-"));
           const container = rest[at]!;
           if (!containers.has(container)) return no(`No such container: ${container}`);
-          // After the container: timeout --signal=KILL <n>s <cmd…>
-          const cmd = rest.slice(at + 4);
+          // After the container: timeout --signal=KILL <n>s, then <cmd…> (given nothing to read: withoutInput's first).
+          const after = rest.slice(at + 4);
+          const none = withoutInput([]);
+          const cmd = none.every((part, i) => after[i] === part) ? after.slice(none.length) : after;
           fake.execs.push({ container, cmd });
           const answer = (await fake.onExec?.(container, cmd)) ?? { code: 0, stdout: "" };
           // A lease the host wrote is kept where the VM's HOME is (its payload: the JSON, base64, its last argument).

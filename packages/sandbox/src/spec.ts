@@ -321,7 +321,6 @@ export function gatewayEnv(token: string, providers: string[], keys = false): Re
   };
 }
 
-/** Commands run under a hard deadline inside the container (killing `docker exec` alone would not stop them). */
 /**
  * A folder under /work copied out as a tar from inside the VM, by the walk (walk.ts COLLECT_SCRIPT), under a deadline: never
  * `docker cp`, which follows the links on its path and takes every entry of a folder, its HOME's among them where the
@@ -329,16 +328,26 @@ export function gatewayEnv(token: string, providers: string[], keys = false): Re
  */
 export const collectArgs = (id: string, path: string): string[] => execArgs(id, collectCommand(path), 900);
 
-export const execArgs = (id: string, cmd: string[], timeoutSec: number): string[] => [
+/**
+ * A command in a sandbox, in /work, under its deadline inside the container (killing `docker exec` alone would not stop
+ * it), and given nothing to read: no `--interactive`, and its input /dev/null inside the VM. Given `--interactive` with
+ * nothing to read (the node's own /dev/null), Kata 4.3.1's shim closes the command's input holding the lock every exec
+ * of its VM takes, and waits there for the copy of that input, which ends only with the command's output: so each command
+ * held every other of its VM until it ended (a second `true` 2 s into a 12 s command took 10,066 ms in Kata and 53 ms in
+ * runc; Ultra, 28 November 2026, Q5's audit), and a command that read its input never saw it end. `sh` execs into the
+ * command, so the deadline's process group and what it starts stay as they were (withoutInput). A command given input as
+ * it runs (`input`: a stream held open) keeps `--interactive`, and reads what it is given; a pipe's sides are pipeArgs'.
+ */
+export const execArgs = (id: string, cmd: string[], timeoutSec: number, opts: { input?: boolean } = {}): string[] => [
   "exec",
-  "--interactive",
+  ...(opts.input ? ["--interactive"] : []),
   "--workdir",
   "/work",
   containerName(id),
   "timeout",
   "--signal=KILL",
   `${timeoutSec}s`,
-  ...cmd,
+  ...(opts.input ? cmd : withoutInput(cmd)),
 ];
 
 /**

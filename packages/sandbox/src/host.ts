@@ -2607,7 +2607,7 @@ export class SandboxHost {
     if (!sandbox) throw new SandboxError("no such sandbox on this node", 404);
     if (sandbox.status !== "running") throw new SandboxError(`sandbox is ${sandbox.status}`, 409);
     this.opts.ledger({ class: "modify", resource: "sandbox.stream", target: sandbox.name, verdict: "allow", run: sandbox.run, detail: truncateLedgerDetail(redact(cmd.slice(0, 2).join(" ").slice(0, 120))) });
-    return (this.opts.spawnStream ?? spawnStream)([this.bin, ...execArgs(id, cmd, timeoutSec)]);
+    return (this.opts.spawnStream ?? spawnStream)([this.bin, ...execArgs(id, cmd, timeoutSec, { input: true })]);
   }
 
   /** Remove a seat's home, and the sign-in its tool keeps there: never while a VM has it. */

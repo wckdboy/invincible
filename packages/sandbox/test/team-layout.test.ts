@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { LEASE_FILE, NOTES_DIR } from "@invincible/core";
-import { containerName, type DockerRunner, LABEL, type LayoutEntry, memoryLayoutMoves, memoryTokenStore, SandboxHost, seatVolumeName, TEAM_LEASE_MINUTES, volumeName } from "../src/index.ts";
+import { containerName, type DockerRunner, LABEL, type LayoutEntry, memoryLayoutMoves, memoryTokenStore, SandboxHost, seatVolumeName, TEAM_LEASE_MINUTES, volumeName, withoutInput } from "../src/index.ts";
 
 /*
  * Layout 2 on an agent's VM (layout.ts; the owner's decisions of 27 November 2026): made in it new, moved to it from layout
@@ -118,9 +118,13 @@ function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: b
         return ok(JSON.stringify(found.map((c) => ({ Config: { Labels: c!.labels, Image: c!.image }, State: { Status: c!.status }, HostConfig: { NanoCpus: 2e9, Memory: 4 * 2 ** 30 } }))));
       }
       case "exec": {
-        // exec --interactive --workdir /work <container> timeout --signal=KILL <n>s <cmd…>: a lease written is kept.
-        const container = rest[3]!;
-        const cmd = rest.slice(7);
+        // exec --workdir /work <container> timeout --signal=KILL <n>s <cmd…> (given nothing to read: withoutInput's
+        // first): a lease written is kept.
+        const at = rest.findIndex((a) => a.startsWith("invincible-sbx-"));
+        const container = rest[at]!;
+        const after = rest.slice(at + 4);
+        const none = withoutInput([]);
+        const cmd = none.every((part, i) => after[i] === part) ? after.slice(none.length) : after;
         if (cmd.join(" ").includes("prefix='.invincible-gateway-'")) {
           if (opts.leaseFails?.(container)) return { code: 1, stdout: "", stderr: "no space left on device" };
           leases.set(container, JSON.parse(Buffer.from(cmd.at(-1)!, "base64").toString("utf8")));

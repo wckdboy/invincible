@@ -330,6 +330,12 @@ The run loop is carried and renamed (§10), the most proven part of it:
     (`fleet:admin`, yours alone).
 - **Sandboxes:**
   - Kata microVMs on Linux and Apple containers on macOS;
+  - a command in one is given nothing to read: no `--interactive`, and its input /dev/null inside the VM (spec.ts's
+    `execArgs`). Given `--interactive` with nothing to read, Kata 4.3.1 held each command of a VM until the one before
+    it ended: a second command 2 s into a 12 s one took 10,066 ms, and takes 53 ms now (Ultra, 28 November 2026; 51 to
+    53 ms in runc either way). One given input as it runs (a pipe's receiving side, a stream held open) keeps
+    `--interactive`, and holds nothing while it is fed (55 ms beside it in Kata). Apple's `container` (1.7.1, the Mac
+    mini) held nothing either way, and is as it was;
   - one per run;
   - a firewall that lets a run reach its node's bridge and nothing it wasn't granted;
   - **their images**, the node's own (the workshop's, the Lab's, the desktop's, the hardware's and the tools': spec.ts's

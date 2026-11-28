@@ -125,19 +125,26 @@ describe("sandbox hardening", () => {
     expect(gatewayEnv("gw_scoped", ["deepseek"], true).INVINCIBLE_KEYS).toBe(`http://${NETWORKS.gateway.gateway}:7402/key`);
   });
 
-  test("commands run under an in-container deadline", () => {
+  test("commands run under an in-container deadline, given nothing to read: no --interactive, their input /dev/null in the VM", () => {
+    // (Given --interactive with nothing to read, Kata 4.3.1 held every other exec of the VM until the command ended:
+    // exec-kata.integration.test.ts.)
     expect(execArgs("0123456789", ["bun", "test"], 30)).toEqual([
       "exec",
-      "--interactive",
       "--workdir",
       "/work",
       "invincible-sbx-0123456789",
       "timeout",
       "--signal=KILL",
       "30s",
+      "sh",
+      "-c",
+      'exec "$@" </dev/null',
+      "sh",
       "bun",
       "test",
     ]);
+    // One given input as it runs (a pipe's receiving side, a stream held open) reads what it is given.
+    expect(execArgs("0123456789", ["cat"], 30, { input: true })).toEqual(["exec", "--interactive", "--workdir", "/work", "invincible-sbx-0123456789", "timeout", "--signal=KILL", "30s", "cat"]);
   });
 
   test("requests default to the safe gateway mode, ephemeral, bounded TTL", () => {
