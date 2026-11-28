@@ -168,6 +168,12 @@ export interface DaemonOptions {
    */
   sandboxGateway?: { hostname: string; port: number };
   /**
+   * The Docker binary its sandbox host spawns itself, beside `docker` (its engine for the rest): a pipe between two VMs,
+   * a stream, a terminal, a collect. Default: `docker` on PATH. A test on a real Docker gives a wrapper of its own, so
+   * that both reach the same engine the same way (handed-real.integration.test.ts).
+   */
+  dockerBinary?: string;
+  /**
    * How this node measures itself. Default: the real benchmark, a few seconds at low priority (and never in
    * tests that pass their own capabilities, unless they give one here). false: it doesn't.
    */
@@ -591,6 +597,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       ledger,
       ...(apple ? { engine: "container" as const, ...(opts.sandboxDisk ? { disk: opts.sandboxDisk } : {}) } : {}),
       ...(opts.docker ? { runner: opts.docker } : {}),
+      ...(opts.dockerBinary ? { docker: opts.dockerBinary } : {}),
       // (Never the real launchd beside a stand-in for the engine: restarting a network's helper there would be the Mac's.)
       ...(opts.launchctl ? { launchctl: opts.launchctl } : opts.docker ? { launchctl: async () => ({ code: 0, stdout: "", stderr: "" }) } : {}),
       ...(opts.macFirewall ? { firewall: opts.macFirewall } : {}),
