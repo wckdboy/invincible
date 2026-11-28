@@ -1430,11 +1430,24 @@ describe("a subscription's sign-in never reaches your agent", () => {
         const path = join(dir, name);
         if (name === "test" && /^packages\/[^/]+$/.test(dir.slice(root.length))) continue;
         if (statSync(path).isDirectory()) walk(path);
-        else if ((/\.(ts|tsx|js|mjs|cjs|py|sh)$/.test(name) || !name.includes(".") || name.startsWith("Dockerfile")) && !/\.test\.[jt]s$/.test(name)) sources.push(path);
+        else if ((/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|py|sh|bash|zsh|json)$/.test(name) || !name.includes(".") || name.startsWith("Dockerfile")) && !/\.test\.[jt]sx?$/.test(name)) sources.push(path);
       }
     };
-    // A name split in two is the name: string literals joined by + (or side by side, as Python joins them) are read joined.
-    const joined = (text: string) => text.replace(/(["'`])\s*\+\s*\1/g, "").replace(/(["'])[ \t]+\1/g, "");
+    // A name split in two is the name: string literals joined by + (or side by side, as Python joins them), a template's
+    // literal pieces, a list of literals joined (JavaScript's [...].join, Python's "".join([...])), and a name spelled with
+    // escapes (\x2d, \u002d) are read as the name they make (the second re-check of 28 November 2026, its Info list).
+    const literals = (list: string): string[] | null => {
+      const found = [...list.matchAll(/(["'`])([^"'`\n]*)\1/g)].map((m) => m[2]!);
+      return list.replace(/(["'`])[^"'`\n]*\1/g, "").replace(/[\s,]/g, "") === "" && found.length ? found : null;
+    };
+    const joined = (text: string) =>
+      text
+        .replace(/\\x([0-9a-fA-F]{2})|\\u\{([0-9a-fA-F]{1,6})\}|\\u([0-9a-fA-F]{4})/g, (_, x, braced, u) => String.fromCodePoint(Number.parseInt(x ?? braced ?? u, 16)))
+        .replace(/\$\{\s*(["'])([^"'\n]*)\1\s*\}/g, "$2")
+        .replace(/\[([^\[\]\n]{1,400})\]\s*\.join\(\s*(["'`])([^"'`\n]*)\2\s*\)/g, (all, list: string, _q, by: string) => literals(list)?.join(by) ?? all)
+        .replace(/(["'])([^"'\n]*)\1\s*\.join\(\s*\[([^\[\]\n]{1,400})\]\s*\)/g, (all, _q, by: string, list: string) => literals(list)?.join(by) ?? all)
+        .replace(/(["'`])\s*\+\s*\1/g, "")
+        .replace(/(["'])[ \t]+\1/g, "");
     for (const dir of ["packages", "apps/web/src", "sandbox", "integrations"]) walk(join(root, dir));
     expect(sources.length).toBeGreaterThan(100);
     const found = sources.flatMap((path) => {
