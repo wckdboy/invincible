@@ -25,14 +25,14 @@ def version_of(text):
     except ValueError:
         return None
 
-# What agy keeps of its own from one start to the next: its sign-in, and its sessions' conversations, which session/load
-# reads (agy 1.5.18 on Ultra, 28 November 2026). The rest of its profile is configuration (hooks, MCP servers, plugins,
-# skills, rules, agents, settings), its built-in skills and its state, which agy makes anew as it starts; a run may have
-# left any of it there, to run commands or steer it. So is each session's brain: agy loads brain/<session>/ as a
-# customization root, its .agents/ and _agents/ hooks and MCP servers run as that session loads, and a session loads with
-# its conversation alone (the re-check of 28 November 2026, R1, measured on Ultra). So each start is from the node's own,
-# which is none of it, and no link stays anywhere in it (the review of 28 November 2026, M2).
-KEPT = {"antigravity-oauth-token": "file", "conversations": "dir"}
+# What agy keeps of its own from one start to the next: its sign-in, and nothing else. The rest of its profile is
+# configuration (hooks, MCP servers, plugins, skills, rules, agents, settings), its built-in skills and its state, which
+# agy makes anew as it starts; a run may have left any of it there, to run commands or steer it. So are its sessions: it
+# loads a session's brain/<session>/ as a customization root (the re-check of 28 November 2026, R1), and a session's
+# conversations/<session>.db keeps the MCP servers that session was made with, which agy starts again at its next prompt
+# once it is loaded (its round 4, agy 1.5.18 on Ultra). So each start is from the node's own, which is none of it, each
+# run's session is a new one, and no link stays anywhere in it (the review of 28 November 2026, M2).
+KEPT = {"antigravity-oauth-token": "file"}
 
 def gone(path):
     if path.is_symlink() or not path.is_dir():
@@ -100,19 +100,14 @@ class Bridge(Client):
         if args.check:
             print(json.dumps({"type": "status", "signedIn": True, "version": str(info.get("version"))[:40]}), flush=True)
             return
-        resumable = bool((initialized.get("agentCapabilities") or {}).get("loadSession"))
+        # Each run's session is a new one, and none is loaded or said to go on with: nothing of an earlier run's session
+        # reaches this one (a kept session brings its MCP servers back: the re-check's round 4). Work taken up again
+        # starts agy afresh, from the task's own instructions and what Invincible kept of its steps.
         params = {"cwd": os.getcwd(), "mcpServers": []}
-        if self.session and resumable:
-            state = self.request("session/load", dict(params, sessionId=self.session), 120)
-            if not isinstance(state, dict):
-                raise RuntimeError("The saved Antigravity session could not be loaded; it was not replaced")
-        else:
-            state = self.request("session/new", params, 120)
-            self.session = state.get("sessionId") if isinstance(state, dict) else None
-            if not isinstance(self.session, str) or not self.session:
-                raise RuntimeError("Antigravity did not create a session")
-        if resumable:
-            emit("session", id=self.session)
+        state = self.request("session/new", params, 120)
+        self.session = state.get("sessionId") if isinstance(state, dict) else None
+        if not isinstance(self.session, str) or not self.session:
+            raise RuntimeError("Antigravity did not create a session")
         # A model named for the work, where its account lists it; else the one its account runs by default.
         listed = (state.get("models") or {}) if isinstance(state, dict) else {}
         offered = [m.get("modelId") for m in listed.get("availableModels") or [] if isinstance(m, dict)]
@@ -158,8 +153,9 @@ export const ANTIGRAVITY: AgentDriver = {
   title: "Antigravity",
   // Gemini's API: no model of the gateway's speaks it, so it runs on its Google sign-in alone, never on a roster model.
   kind: "gemini",
-  // (Its session loads again, so a steer ends its run between calls and is said there.)
-  capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false },
+  // (No session of its goes on from one run to the next: a steer ends its run between calls, and the next run, a new
+  // session, is told the task and the steer.)
+  capabilities: { steer: "restart", streams: true, resumes: false, readsWindows: false },
   // Whether it starts here and is signed in, asked of agy itself: its initialize, and its authenticate with the sign-in
   // its profile holds, never a model call or the token. (Passed whole: it is asked before any run has written the bridge.)
   check: STATUS,
@@ -175,8 +171,8 @@ export const ANTIGRAVITY: AgentDriver = {
   // is (acp.ts's withNotes): agy starts it for itself, and none of agy's own files is written. If agy refuses a session
   // with it, the session is opened again without it, and the run says it has no notes store.
   files: (_models, engram, home) => ({ "/work/.agent/antigravity-acp.py": engram ? `${ACP_CLIENT}${BRIDGE}${withNotes([notesServer(engram, home)])}${ACP_ENTRY}` : ANTIGRAVITY_ACP_BRIDGE }),
-  command: (model, session) =>
-    `python3 -I /work/.agent/antigravity-acp.py --prompt /work/.agent/prompt.md${model.own || !model.model ? "" : ` --model ${quote(model.model)}`}${session ? ` --session ${quote(session)}` : ""}`,
+  // (No session is named to it: each run's is new.)
+  command: (model) => `python3 -I /work/.agent/antigravity-acp.py --prompt /work/.agent/prompt.md${model.own || !model.model ? "" : ` --model ${quote(model.model)}`}`,
   // Its Google sign-in is in this VM, and a model can make agy print it: its events are scrubbed of it as Claude Code's
   // and Codex's are (the review of 28 November 2026, M1), and core's redaction knows Google's own tokens.
   read: readSignedIn,

@@ -226,10 +226,10 @@ def main():
     env = {k: os.environ[k] for k in ("PATH", "LANG", "LC_ALL", "TERM", "HOME", "USER") if k in os.environ}
     env.update({"AGY_CLI_DISABLE_AUTO_UPDATE": "true", "SSH_CONNECTION": "127.0.0.1 0 127.0.0.1 0"})
     # A fresh sign-in starts from an empty profile: whatever a run left in the last one goes with it (the review of 28
-    # November 2026, M2). Each run's start resets it again, keeping its sign-in and its sessions (antigravity.ts). It is
-    # made in a profile of its own beside the seat's, which stays as it was, signed in, its sessions with it, until agy
-    # says the new one took; then the new one takes its place (the re-check of 28 November 2026, R10). Anything at either
-    # name, a link a run left among it, is taken away, never followed.
+    # November 2026, M2). Each run's start resets it again, keeping its sign-in alone (antigravity.ts). It is made in a
+    # profile of its own beside the seat's, which stays as it was, signed in, until agy says the new one took; then the
+    # new one takes its place (the re-check of 28 November 2026, R10). Anything at either name, a link a run left among
+    # it, is taken away, never followed.
     def clear(path):
         if os.path.islink(path) or (os.path.lexists(path) and not os.path.isdir(path)):
             os.unlink(path)

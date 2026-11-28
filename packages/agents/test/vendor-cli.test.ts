@@ -1417,7 +1417,7 @@ describe("a subscription's sign-in never reaches your agent", () => {
     const KEEPS = "packages/agents/src/antigravity.ts";
     const keepsAgyToken = (text: string) => {
       const lines = text.split("\n").filter((line) => line.includes("antigravity-oauth-token"));
-      return lines.length === 1 && lines[0] === 'KEPT = {"antigravity-oauth-token": "file", "conversations": "dir"}';
+      return lines.length === 1 && lines[0] === 'KEPT = {"antigravity-oauth-token": "file"}';
     };
     const root = new URL("../../../", import.meta.url).pathname;
     const sources: string[] = [];

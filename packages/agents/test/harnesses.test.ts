@@ -139,13 +139,15 @@ describe("a driver and the notes store", () => {
   // (a18a4ade…). And again that day, when a session's brain came to go with the rest of the profile (the re-check's
   // R1): its text differs from its pin from before (23a8a76f…) in the reset's KEPT line and the comment above it alone;
   // and when its bridge came to take a profile left as a link away (R2): its text with those 5 lines taken out is the
-  // text R1 left (5c6b8033…).
+  // text R1 left (5c6b8033…). And again, when it came to keep agy's sign-in alone and open a new session each run (the
+  // re-check's round 4): its text differs from R2's (e38a7671…) in the reset's KEPT line and its comment, the session's
+  // opening (session/new alone, no session/load and no session said), and its command's --session, gone.
   const BEFORE: Record<string, string> = {
     opencode: "cc015190084eb3e39e46df1c15f67e01bb085d0b6649cd5cb39fe5410b20ab22",
     hermes: "a2dcda40c48da625d32e5aa97c122a81bd1945095b369b605e8edf01b7bb4461",
     claude: "da3d8d2b3a1e26f89f545b40d60d28ffbe78d5d0f23a8f2ca53c5927f9ddb96b",
     codex: "e757f19dea735c3929bdbbecaf88ef9924455ec17d754ecab957cdf223e9c00f",
-    antigravity: "e38a76712d37f1fe9be5a032cf93a1469b728c1e2c77acff6282bbddddc7bcc1",
+    antigravity: "e28ea7749da39af38c22f9672c8400d5d98e66dde4d148ae7a9cacdd32702443",
   };
 
   test("without a notes project, every driver writes and runs byte for byte what it did before there was a store", () => {

@@ -165,9 +165,11 @@ function signIn(box: ReturnType<typeof vm>) {
   return { said, tell, until, proc, done: async () => (await proc.exited, await reading, said.at(-1)) };
 }
 
-/** What a run on the stand-in says, start to end: its session, the call it is in, that call's end, its words, its tokens. */
+/**
+ * What a run on the stand-in says, start to end: the call it is in, that call's end, its words, its tokens. No session to
+ * go on with: each run's is new, and nothing of an earlier one is loaded (the re-check's round 4, 28 November 2026).
+ */
 const WORKED = [
-  { type: "session", id: "sess-FAKE-0001" },
   { type: "call", id: "call-1" },
   { type: "tool", id: "call-1", tool: "Run bun test", input: '{"command": "bun test"}', output: '{"stdout": "1 pass"}', ok: true },
   { type: "text", text: "Fixed the sum. All tests pass." },
@@ -338,16 +340,16 @@ describe("Antigravity and the notes store", () => {
     const box = signedIn();
     expect(await run(box)).toEqual({ code: 0, events: WORKED });
     expect(await run(box, " --session sess-FAKE-0001")).toEqual({ code: 0, events: WORKED });
-    expect(opened(box, "session/new")).toEqual([[]]);
-    expect(opened(box, "session/load")).toEqual([[]]);
+    expect(opened(box, "session/new")).toEqual([[], []]);
+    expect(opened(box, "session/load")).toEqual([]);
   });
 
-  test("with it, a new session and a resumed one are opened with exactly that one server, and the run is otherwise the same", async () => {
+  test("with it, every run's session is a new one, opened with exactly that one server, and the run is otherwise the same", async () => {
     const box = signedIn();
     expect(await run(box, "", withNotes())).toEqual({ code: 0, events: WORKED });
     expect(await run(box, " --session sess-FAKE-0001", withNotes())).toEqual({ code: 0, events: WORKED });
-    expect(opened(box, "session/new")).toEqual([[server]]);
-    expect(opened(box, "session/load")).toEqual([[server]]);
+    expect(opened(box, "session/new")).toEqual([[server], [server]]);
+    expect(opened(box, "session/load")).toEqual([]);
     // Its status check opens no session, with the store or without (it is asked of the bridge without the store).
     expect(ANTIGRAVITY.check).not.toContain("engram");
   });
@@ -481,7 +483,9 @@ describe("Antigravity's profile, reset", () => {
     walk(home, "");
     return out;
   };
-  const KEPT = ["antigravity-acp", `antigravity-acp/${TOKEN}`, "antigravity-acp/conversations", "antigravity-acp/conversations/sess-FAKE-0001.db"];
+  // agy's sign-in alone: its sessions' conversations go too, since a session's kept database brings the MCP servers it
+  // was made with back as it is loaded (the re-check's round 4, on Ultra, 28 November 2026).
+  const KEPT = ["antigravity-acp", `antigravity-acp/${TOKEN}`];
 
   test("a run starts agy on its sign-in and its sessions' conversations alone: its configuration, skills, each session's brain and links gone, never what a link pointed at", async () => {
     const box = vm();
@@ -492,7 +496,7 @@ describe("Antigravity's profile, reset", () => {
     expect(readFileSync(join(box.dir, "outside.txt"), "utf8")).toBe("not agy's");
   });
 
-  test("so does its status check, and a session goes on from where it was", async () => {
+  test("so does its status check; and a run named an earlier session never loads it: it opens a new one", async () => {
     const box = vm();
     plant(box);
     const proc = Bun.spawn(["bash", "-c", ANTIGRAVITY.check], { cwd: box.dir, env: box.env, stdout: "pipe", stderr: "pipe" });
@@ -500,6 +504,7 @@ describe("Antigravity's profile, reset", () => {
     expect(stdout).toContain('"signedIn": true');
     expect(left(box.home)).toEqual([...KEPT, "tmp"]);
     expect((await run(box, " --session sess-FAKE-0001")).events).toEqual(WORKED);
+    expect(box.trace().map((item) => item.asked).filter((asked) => typeof asked === "string" && asked.startsWith("session/"))).toEqual(["session/new", "session/prompt"]);
   });
 
   // The re-check of 28 November 2026, R2: a run's command can leave the profile itself a link, to the next run's /work.
